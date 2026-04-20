@@ -1,0 +1,14 @@
+{
+  "case_id": "D03",
+  "case_description": "street food preference",
+  "query": "I want to travel from Shenzhen to Bangkok from 2026-08-10 to 2026-08-14 with a budget of 7000 CNY. I love street food.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

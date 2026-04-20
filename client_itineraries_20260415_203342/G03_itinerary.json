@@ -1,0 +1,14 @@
+{
+  "case_id": "G03",
+  "case_description": "高预算",
+  "query": "I want to travel from Singapore to Tokyo from 2026-04-19 to 2026-04-23 with a budget of 50000 CNY. I want direct flights and luxury hotels.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

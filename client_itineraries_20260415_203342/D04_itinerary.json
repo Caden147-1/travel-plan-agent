@@ -1,0 +1,14 @@
+{
+  "case_id": "D04",
+  "case_description": "local food + low budget / check fallback behavior",
+  "query": "I want to travel from Singapore to Tokyo from 2026-04-19 to 2026-04-23 with a budget of 5000 CNY. I want local food and direct flights.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

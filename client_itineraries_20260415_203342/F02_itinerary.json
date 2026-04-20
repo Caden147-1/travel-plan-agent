@@ -1,0 +1,14 @@
+{
+  "case_id": "F02",
+  "case_description": "multi-city US",
+  "query": "My friend and I want to travel from Hong Kong to New York for 4 days, Los Angeles for 4 days, and San Francisco for 3 days from 2026-10-12 to 2026-10-22 with a budget of 5000 CNY. We enjoy historical places and art galleries. We want a centrally located premium hotel.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

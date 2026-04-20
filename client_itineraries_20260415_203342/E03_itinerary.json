@@ -1,0 +1,14 @@
+{
+  "case_id": "E03",
+  "case_description": "shopping preference",
+  "query": "I want to travel from Shanghai to Singapore from 2026-05-01 to 2026-05-05 with a budget of 15000 CNY. I want shopping.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

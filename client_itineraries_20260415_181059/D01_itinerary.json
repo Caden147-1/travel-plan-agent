@@ -1,0 +1,315 @@
+{
+  "case_id": "D01",
+  "case_description": "local food only",
+  "query": "I want to travel from Guangzhou to Bangkok from 2026-07-10 to 2026-07-15 with a budget of 10000 CNY. I want local food.",
+  "trip_summary": {
+    "origin": "Guangzhou",
+    "destination": [
+      "Bangkok"
+    ],
+    "num_people": 1,
+    "duration_days": 6,
+    "travel_dates": {
+      "start": "2026-07-10",
+      "end": "2026-07-15",
+      "text": null
+    },
+    "budget": {
+      "total": 10000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": null,
+      "hotel": null,
+      "food": "local",
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [
+        "local"
+      ],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": null,
+      "hotel_level": null,
+      "food_priority": "high",
+      "attraction_intensity": null,
+      "hotel_priority": null
+    }
+  },
+  "itinerary": {
+    "success": true,
+    "stage": "agent4_itinerary_planning",
+    "itinerary_summary": {
+      "total_days": 5,
+      "time_feasible_days": 5,
+      "budget_feasible": true,
+      "must_visit_coverage": 1.0
+    },
+    "daily_plan": [
+      {
+        "date": "2026-07-10",
+        "city": "Bangkok",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 5.0,
+        "transport_cost_estimated": 846.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "flight",
+            "name": "Flight Guangzhou -> Bangkok",
+            "start": "10:30",
+            "end": "13:00",
+            "duration_h": 2.5,
+            "cost_estimated": 646.0,
+            "meta": {
+              "leg_type": "outbound",
+              "from_city": "Guangzhou",
+              "to_city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-07-11",
+        "city": "Bangkok",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-07-12",
+        "city": "Bangkok",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-07-13",
+        "city": "Bangkok",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-07-14",
+        "city": "Bangkok",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      }
+    ],
+    "cost_rollup": {
+      "transport": 1646.0,
+      "food": 0.0,
+      "attractions": 0.0,
+      "hotel_reference": 0.0,
+      "total_selected_estimated": 1646.0
+    },
+    "warnings": []
+  }
+}

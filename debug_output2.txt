@@ -1,0 +1,296 @@
+>>> NEW travel_budget_agent.py loaded <<<
+{
+  "success": false,
+  "stage": "agent3_real_selection",
+  "error": "agent3 selection failed: 'Agent3Selection' object has no attribute '_leg_is_short_distance'",
+  "parsed_request": {
+    "origin": "shanghai",
+    "destination": [
+      "guangzhou",
+      "beijing"
+    ],
+    "country": null,
+    "num_people": 2,
+    "travel_dates": {
+      "start": "2026-04-11",
+      "end": "2026-04-16",
+      "text": null
+    },
+    "duration_days": 6,
+    "budget": {
+      "total": 20000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "direct",
+      "hotel": "luxury",
+      "food": "local",
+      "attraction_style": "historical"
+    },
+    "planning_signals": {
+      "flight_priority": "high",
+      "hotel_level": "high",
+      "food_priority": "high",
+      "attraction_intensity": "high"
+    },
+    "city_plan": {
+      "mode": "user_specified",
+      "cities": [
+        {
+          "city": "guangzhou",
+          "days": 3,
+          "source": "user"
+        },
+        {
+          "city": "beijing",
+          "days": 3,
+          "source": "user"
+        }
+      ]
+    },
+    "missing_fields": {
+      "critical": [],
+      "optional": []
+    },
+    "is_ready_for_planning": true,
+    "parse_status": "success",
+    "meta": {
+      "llm_called": true,
+      "llm_call_success": true,
+      "raw_response_preview": "{\n  \"origin\": \"shanghai\",\n  \"destination\": [\n    \"guangzhou\",\n    \"beijing\"\n  ],\n  \"country\": null,\n  \"num_people\": 2,\n  \"travel_dates\": {\n    \"start\": \"2026-04-11\",\n    \"end\": \"2026-04-16\",\n    \"text\": null\n  },\n  \"duration_days\": 6,\n  \"budget\": {\n    \"total\": 20000,\n    \"currency\": \"CNY\"\n  },\n  \"preferences\": {\n    \"flight\": \"direct\",\n    \"hotel\": \"luxury\",\n    \"food\": \"local\",\n    \"attraction_style\": \"historical\"\n  },\n  \"planning_signals\": {\n    \"flight_priority\": \"high\",\n    \"hotel_level\": \"",
+      "error": null
+    },
+    "user_request": "My friend and I want to travel from shanghai to guangzhou and beijing for 6 days from 2026-04-11 to 2026-04-16 with a budget of 20000 CNY. We prefer direct flights, four star hotels, more attractions, local food.We love history, museums, and cultural heritage sites."
+  },
+  "budget_result": {
+    "origin": null,
+    "destination": [],
+    "country": null,
+    "num_people": null,
+    "travel_dates": {
+      "start": null,
+      "end": null,
+      "text": null
+    },
+    "duration_days": null,
+    "budget": {
+      "total": null,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": null,
+      "hotel": null,
+      "food": null,
+      "attraction_style": null
+    },
+    "planning_signals": {
+      "flight_priority": null,
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null
+    },
+    "allocation_basis": {
+      "model": "rule_based",
+      "destination_profile": "default",
+      "destination_profile_tier": "default",
+      "effective_cities": [
+        {
+          "city": "guangzhou",
+          "days": 3,
+          "source": "user"
+        },
+        {
+          "city": "beijing",
+          "days": 3,
+          "source": "user"
+        }
+      ],
+      "city_plan_mode": "user_specified",
+      "llm_adjustments": [
+        "Estimated trip cost was below the total budget, so the remaining budget was fully distributed into optional upgrades instead of being left unallocated.",
+        "The forced full-budget upgrade allocation was blended with the final ratio so Agent3 can consume a consistent, full-budget plan."
+      ],
+      "preference_impact": [],
+      "llm_ratio": null,
+      "baseline_ratio": {
+        "transport": 0.3153,
+        "hotel": 0.3333,
+        "food": 0.1441,
+        "attractions": 0.1171,
+        "buffer": 0.0901
+      },
+      "final_ratio": {
+        "transport": 0.3153,
+        "hotel": 0.3333,
+        "food": 0.1441,
+        "attractions": 0.1171,
+        "buffer": 0.0901
+      },
+      "season_factor": 1.0,
+      "cost_level_sources": {
+        "llm_cost_level": "medium",
+        "profile_cost_level": "medium",
+        "final_cost_level": "medium_high"
+      }
+    },
+    "estimated_cost": {
+      "transport": 5500,
+      "hotel": 5200,
+      "food": 3000,
+      "attractions": 2800,
+      "buffer": 1600
+    },
+    "optional_upgrades": {
+      "transport": 400,
+      "hotel": 700,
+      "food": 400,
+      "attractions": 400,
+      "buffer": 0
+    },
+    "budget_plan": {
+      "transport": 5900,
+      "hotel": 5900,
+      "food": 3400,
+      "attractions": 3200,
+      "buffer": 1600
+    },
+    "city_budget_plan": [
+      {
+        "city": "guangzhou",
+        "days": 3,
+        "profile_tier": "default",
+        "matched_profile": "default",
+        "cost_weights": {
+          "hotel": 1.0,
+          "food": 1.0,
+          "attractions": 1.0
+        },
+        "hotel_budget": 3000,
+        "food_budget": 1700,
+        "attractions_budget": 1600
+      },
+      {
+        "city": "beijing",
+        "days": 3,
+        "profile_tier": "default",
+        "matched_profile": "default",
+        "cost_weights": {
+          "hotel": 1.0,
+          "food": 1.0,
+          "attractions": 1.0
+        },
+        "hotel_budget": 2900,
+        "food_budget": 1700,
+        "attractions_budget": 1600
+      }
+    ],
+    "budget_strategy": "comfortable",
+    "cost_level": "medium_high",
+    "budget_status": "within_budget",
+    "remaining_budget": 0,
+    "unallocated_budget": 0,
+    "normalized_preferences": {
+      "hotel_level": "premium",
+      "food_level": "premium",
+      "attraction_intensity": "heavy",
+      "flight_type": "direct"
+    },
+    "meta": {
+      "error": null,
+      "llm_called": true,
+      "llm_call_success": true,
+      "raw_response_preview": "{\n  \"origin\": \"shanghai\",\n  \"destination\": [\n    \"guangzhou\",\n    \"beijing\"\n  ],\n  \"country\": null,\n  \"num_people\": 2,\n  \"travel_dates\": {\n    \"start\": \"2026-04-11\",\n    \"end\": \"2026-04-16\",\n    \"text\": null\n  },\n  \"duration_days\": 6,\n  \"budget\": {\n    \"total\": 20000,\n    \"currency\": \"CNY\"\n  },\n  \"preferences\": {\n    \"flight\": \"direct\",\n    \"hotel\": \"luxury\",\n    \"food\": \"local\",\n    \"attraction_style\": \"historical\"\n  },\n  \"planning_signals\": {\n    \"flight_priority\": \"high\",\n    \"hotel_level\": \""
+    },
+    "assumptions": [
+      "Primary destination profile 'default' was used as the leading reference.",
+      "Profile tier used for the primary destination: default.",
+      "Effective planning cities used by Agent2: ['guangzhou', 'beijing'].",
+      "City planning mode: user_specified.",
+      "This version uses a three-layer destination profile system: city profile first, country profile second, and global default as fallback.",
+      "Multi-city budget allocation uses category-level totals first, then distributes city budgets with day-based and city-cost-weighted allocation.",
+      "Because the estimated trip cost was below the total budget, the remaining money was fully distributed into optional upgrades for the final executable plan."
+    ]
+  },
+  "agent3_input_preview": {
+    "city_budget_plan": [
+      {
+        "city": "guangzhou",
+        "days": 3,
+        "profile_tier": "default",
+        "matched_profile": "default",
+        "cost_weights": {
+          "hotel": 1.0,
+          "food": 1.0,
+          "attractions": 1.0
+        },
+        "hotel_budget": 3000,
+        "food_budget": 1700,
+        "attractions_budget": 1600
+      },
+      {
+        "city": "beijing",
+        "days": 3,
+        "profile_tier": "default",
+        "matched_profile": "default",
+        "cost_weights": {
+          "hotel": 1.0,
+          "food": 1.0,
+          "attractions": 1.0
+        },
+        "hotel_budget": 2900,
+        "food_budget": 1700,
+        "attractions_budget": 1600
+      }
+    ],
+    "normalized_preferences": {
+      "hotel_level": "premium",
+      "food_level": "premium",
+      "attraction_intensity": "heavy",
+      "flight_type": "direct"
+    },
+    "allocation_basis": {
+      "model": "rule_based",
+      "destination_profile": "default",
+      "destination_profile_tier": "default",
+      "effective_cities": [
+        {
+          "city": "guangzhou",
+          "days": 3,
+          "source": "user"
+        },
+        {
+          "city": "beijing",
+          "days": 3,
+          "source": "user"
+        }
+      ],
+      "city_plan_mode": "user_specified",
+      "llm_adjustments": [
+        "Estimated trip cost was below the total budget, so the remaining budget was fully distributed into optional upgrades instead of being left unallocated.",
+        "The forced full-budget upgrade allocation was blended with the final ratio so Agent3 can consume a consistent, full-budget plan."
+      ],
+      "preference_impact": [],
+      "llm_ratio": null,
+      "baseline_ratio": {
+        "transport": 0.3153,
+        "hotel": 0.3333,
+        "food": 0.1441,
+        "attractions": 0.1171,
+        "buffer": 0.0901
+      },
+      "final_ratio": {
+        "transport": 0.3153,
+        "hotel": 0.3333,
+        "food": 0.1441,
+        "attractions": 0.1171,
+        "buffer": 0.0901
+      },
+      "season_factor": 1.0,
+      "cost_level_sources": {
+        "llm_cost_level": "medium",
+        "profile_cost_level": "medium",
+        "final_cost_level": "medium_high"
+      }
+    }
+  }
+}

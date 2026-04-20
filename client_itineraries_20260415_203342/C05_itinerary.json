@@ -1,0 +1,14 @@
+{
+  "case_id": "C05",
+  "case_description": "clean hotel preference",
+  "query": "I want to travel from Beijing to Osaka from 2026-05-10 to 2026-05-15 with a budget of 12000 CNY. I want clean hotels.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

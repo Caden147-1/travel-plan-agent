@@ -1,0 +1,513 @@
+{
+  "case_id": "C04",
+  "case_description": "central hotel preference",
+  "query": "My teacher and I want to travel from Hong Kong to United States from 2026-10-12 to 2026-10-22 with a budget of 5000 CNY. We want a centrally located premium hotel.",
+  "trip_summary": {
+    "origin": "Hong Kong",
+    "destination": [
+      "New York",
+      "Los Angeles",
+      "San Francisco"
+    ],
+    "num_people": 2,
+    "duration_days": 11,
+    "travel_dates": {
+      "start": "2026-10-12",
+      "end": "2026-10-22",
+      "text": null
+    },
+    "budget": {
+      "total": 5000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": null,
+      "hotel": "central",
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": "premium",
+      "hotel_features": [
+        "central"
+      ],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": null,
+      "hotel_level": "high",
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": "high"
+    }
+  },
+  "itinerary": {
+    "success": true,
+    "stage": "agent4_itinerary_planning",
+    "itinerary_summary": {
+      "total_days": 10,
+      "time_feasible_days": 10,
+      "budget_feasible": true,
+      "must_visit_coverage": 1.0
+    },
+    "daily_plan": [
+      {
+        "date": "2026-10-12",
+        "city": "New York",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 0.5,
+        "transport_cost_estimated": 8795.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in New York",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "New York"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-13",
+        "city": "New York",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in New York",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "New York"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "New York"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "New York"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-14",
+        "city": "New York",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in New York",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "New York"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "New York"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "New York"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-15",
+        "city": "New York",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in New York",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "New York"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "New York"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "New York"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-16",
+        "city": "Los Angeles",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 0.5,
+        "transport_cost_estimated": 2903.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Los Angeles",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Los Angeles"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-17",
+        "city": "Los Angeles",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Los Angeles",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Los Angeles"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Los Angeles"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Los Angeles"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-18",
+        "city": "Los Angeles",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Los Angeles",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Los Angeles"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Los Angeles"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Los Angeles"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-19",
+        "city": "San Francisco",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 4.25,
+        "transport_cost_estimated": 1679.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in San Francisco",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          },
+          {
+            "type": "flight",
+            "name": "Flight Los Angeles -> San Francisco",
+            "start": "10:30",
+            "end": "12:15",
+            "duration_h": 1.75,
+            "cost_estimated": 1479.0,
+            "meta": {
+              "leg_type": "intercity",
+              "from_city": "Los Angeles",
+              "to_city": "San Francisco"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-20",
+        "city": "San Francisco",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in San Francisco",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-10-21",
+        "city": "San Francisco",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in San Francisco",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "San Francisco"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      }
+    ],
+    "cost_rollup": {
+      "transport": 3479.0,
+      "food": 0.0,
+      "attractions": 0.0,
+      "hotel_reference": 0.0,
+      "total_selected_estimated": 3479.0
+    },
+    "warnings": []
+  }
+}

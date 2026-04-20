@@ -1,0 +1,493 @@
+{
+  "case_id": "B03",
+  "case_description": "要求便宜航班",
+  "query": "I want to travel from Guangzhou to Bangkok from 2026-08-10 to 2026-08-15 with a budget of 5000 CNY. I want cheap flights.",
+  "trip_summary": {
+    "origin": "Guangzhou",
+    "destination": [
+      "Bangkok"
+    ],
+    "num_people": 1,
+    "duration_days": 6,
+    "travel_dates": {
+      "start": "2026-08-10",
+      "end": "2026-08-15",
+      "text": null
+    },
+    "budget": {
+      "total": 5000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "cheap",
+      "hotel": null,
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": "medium",
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": null
+    }
+  },
+  "itinerary": {
+    "success": true,
+    "stage": "agent4_itinerary_planning",
+    "itinerary_summary": {
+      "total_days": 5,
+      "time_feasible_days": 5,
+      "budget_feasible": false,
+      "must_visit_coverage": 1.0
+    },
+    "daily_plan": [
+      {
+        "date": "2026-08-10",
+        "city": "Bangkok",
+        "hotel": {
+          "name": "JC Kevin Sathorn Bangkok Hotel",
+          "area": "",
+          "estimated_total_cost": 2175.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 8.38,
+        "transport_cost_estimated": 792.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Wat Suthat Thepwararam Ratchaworamahawihan",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "Wat Suthat Thepwararam Ratchaworamahawihan"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "The Temple of the Emerald Buddha",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "The Temple of the Emerald Buddha"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "ร้านขจร | Kajohn Authentic Southern Thai Cuisine",
+            "start": "11:30",
+            "end": "12:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "RONGROS",
+            "start": "12:30",
+            "end": "13:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "checkin",
+            "name": "Check-in JC Kevin Sathorn Bangkok Hotel",
+            "start": "13:30",
+            "end": "14:00",
+            "duration_h": 0.5,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "flight",
+            "name": "Flight Guangzhou -> Bangkok",
+            "start": "14:00",
+            "end": "16:23",
+            "duration_h": 2.38,
+            "cost_estimated": 592.0,
+            "meta": {
+              "leg_type": "outbound",
+              "from_city": "Guangzhou",
+              "to_city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Food daily spend warning: 160.0 exceeds daily food budget reference 116.67.",
+          "Attractions daily spend warning: 160.0 exceeds daily attractions budget reference 33.33."
+        ]
+      },
+      {
+        "date": "2026-08-11",
+        "city": "Bangkok",
+        "hotel": {
+          "name": "JC Kevin Sathorn Bangkok Hotel",
+          "area": "",
+          "estimated_total_cost": 2175.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 5.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Wat Suthat Thepwararam Ratchaworamahawihan",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "Wat Suthat Thepwararam Ratchaworamahawihan"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "The Temple of the Emerald Buddha",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "The Temple of the Emerald Buddha"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "ร้านขจร | Kajohn Authentic Southern Thai Cuisine",
+            "start": "11:30",
+            "end": "12:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "RONGROS",
+            "start": "12:30",
+            "end": "13:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Food daily spend warning: 160.0 exceeds daily food budget reference 116.67.",
+          "Attractions daily spend warning: 160.0 exceeds daily attractions budget reference 33.33."
+        ]
+      },
+      {
+        "date": "2026-08-12",
+        "city": "Bangkok",
+        "hotel": {
+          "name": "JC Kevin Sathorn Bangkok Hotel",
+          "area": "",
+          "estimated_total_cost": 2175.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 5.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Wat Suthat Thepwararam Ratchaworamahawihan",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "Wat Suthat Thepwararam Ratchaworamahawihan"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "The Temple of the Emerald Buddha",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "The Temple of the Emerald Buddha"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "ร้านขจร | Kajohn Authentic Southern Thai Cuisine",
+            "start": "11:30",
+            "end": "12:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "RONGROS",
+            "start": "12:30",
+            "end": "13:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Food daily spend warning: 160.0 exceeds daily food budget reference 116.67.",
+          "Attractions daily spend warning: 160.0 exceeds daily attractions budget reference 33.33."
+        ]
+      },
+      {
+        "date": "2026-08-13",
+        "city": "Bangkok",
+        "hotel": {
+          "name": "JC Kevin Sathorn Bangkok Hotel",
+          "area": "",
+          "estimated_total_cost": 2175.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 5.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Wat Suthat Thepwararam Ratchaworamahawihan",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "Wat Suthat Thepwararam Ratchaworamahawihan"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "The Temple of the Emerald Buddha",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "The Temple of the Emerald Buddha"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "ร้านขจร | Kajohn Authentic Southern Thai Cuisine",
+            "start": "11:30",
+            "end": "12:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "RONGROS",
+            "start": "12:30",
+            "end": "13:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Food daily spend warning: 160.0 exceeds daily food budget reference 116.67.",
+          "Attractions daily spend warning: 160.0 exceeds daily attractions budget reference 33.33."
+        ]
+      },
+      {
+        "date": "2026-08-14",
+        "city": "Bangkok",
+        "hotel": {
+          "name": "JC Kevin Sathorn Bangkok Hotel",
+          "area": "",
+          "estimated_total_cost": 2175.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 6.0,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Bangkok",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Wat Suthat Thepwararam Ratchaworamahawihan",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "Wat Suthat Thepwararam Ratchaworamahawihan"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "The Temple of the Emerald Buddha",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok",
+              "poi_name": "The Temple of the Emerald Buddha"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "ร้านขจร | Kajohn Authentic Southern Thai Cuisine",
+            "start": "11:30",
+            "end": "12:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "RONGROS",
+            "start": "12:30",
+            "end": "13:30",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          },
+          {
+            "type": "checkout",
+            "name": "Check-out JC Kevin Sathorn Bangkok Hotel",
+            "start": "13:30",
+            "end": "14:00",
+            "duration_h": 0.5,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Bangkok"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Food daily spend warning: 160.0 exceeds daily food budget reference 116.67.",
+          "Attractions daily spend warning: 160.0 exceeds daily attractions budget reference 33.33."
+        ]
+      }
+    ],
+    "cost_rollup": {
+      "transport": 1592.0,
+      "food": 800.0,
+      "attractions": 800.0,
+      "hotel_reference": 2175.0,
+      "total_selected_estimated": 5367.0
+    },
+    "warnings": [
+      "Food daily spend warning: 160.0 exceeds daily food budget reference 116.67.",
+      "Attractions daily spend warning: 160.0 exceeds daily attractions budget reference 33.33."
+    ]
+  }
+}

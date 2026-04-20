@@ -1,0 +1,476 @@
+{
+  "case_id": "B02",
+  "case_description": "要求更舒适航班",
+  "query": "My friend and I want to travel from Hong Kong to Seoul from 2026-07-01 to 2026-07-06 with a budget of 18000 CNY. We prefer comfort flights.",
+  "trip_summary": {
+    "origin": "Hong Kong",
+    "destination": [
+      "Seoul"
+    ],
+    "num_people": 2,
+    "duration_days": 6,
+    "travel_dates": {
+      "start": "2026-07-01",
+      "end": "2026-07-06",
+      "text": null
+    },
+    "budget": {
+      "total": 18000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "comfort",
+      "hotel": null,
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": "high",
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": null
+    }
+  },
+  "itinerary": {
+    "success": true,
+    "stage": "agent4_itinerary_planning",
+    "itinerary_summary": {
+      "total_days": 5,
+      "time_feasible_days": 5,
+      "budget_feasible": true,
+      "must_visit_coverage": 1.0
+    },
+    "daily_plan": [
+      {
+        "date": "2026-07-01",
+        "city": "Seoul",
+        "hotel": {
+          "name": "Solaria Nishitetsu Hotel Seoul Myeongdong",
+          "area": "",
+          "estimated_total_cost": 5453.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 1.0,
+        "transport_cost_estimated": 8790.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Seoul",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "checkin",
+            "name": "Check-in Solaria Nishitetsu Hotel Seoul Myeongdong",
+            "start": "15:00",
+            "end": "15:30",
+            "duration_h": 0.5,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 480.0 exceeds daily attractions budget reference 250.0."
+        ]
+      },
+      {
+        "date": "2026-07-02",
+        "city": "Seoul",
+        "hotel": {
+          "name": "Solaria Nishitetsu Hotel Seoul Myeongdong",
+          "area": "",
+          "estimated_total_cost": 5453.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.0,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Seoul",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Changdeokgung",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Changdeokgung"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Love Lock of Seoul Tower",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Love Lock of Seoul Tower"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "N Seoul Tower",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "N Seoul Tower"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Myeongdong Korean BBQ Mongvely",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Seouljip",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 480.0 exceeds daily attractions budget reference 250.0."
+        ]
+      },
+      {
+        "date": "2026-07-03",
+        "city": "Seoul",
+        "hotel": {
+          "name": "Solaria Nishitetsu Hotel Seoul Myeongdong",
+          "area": "",
+          "estimated_total_cost": 5453.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.0,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Seoul",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Changdeokgung",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Changdeokgung"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Love Lock of Seoul Tower",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Love Lock of Seoul Tower"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "N Seoul Tower",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "N Seoul Tower"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Myeongdong Korean BBQ Mongvely",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Seouljip",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 480.0 exceeds daily attractions budget reference 250.0."
+        ]
+      },
+      {
+        "date": "2026-07-04",
+        "city": "Seoul",
+        "hotel": {
+          "name": "Solaria Nishitetsu Hotel Seoul Myeongdong",
+          "area": "",
+          "estimated_total_cost": 5453.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.0,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Seoul",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Changdeokgung",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Changdeokgung"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Love Lock of Seoul Tower",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Love Lock of Seoul Tower"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "N Seoul Tower",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "N Seoul Tower"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Myeongdong Korean BBQ Mongvely",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Seouljip",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 480.0 exceeds daily attractions budget reference 250.0."
+        ]
+      },
+      {
+        "date": "2026-07-05",
+        "city": "Seoul",
+        "hotel": {
+          "name": "Solaria Nishitetsu Hotel Seoul Myeongdong",
+          "area": "",
+          "estimated_total_cost": 5453.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Seoul",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Changdeokgung",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Changdeokgung"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Love Lock of Seoul Tower",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "Love Lock of Seoul Tower"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "N Seoul Tower",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul",
+              "poi_name": "N Seoul Tower"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Myeongdong Korean BBQ Mongvely",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Seouljip",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 160.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          },
+          {
+            "type": "checkout",
+            "name": "Check-out Solaria Nishitetsu Hotel Seoul Myeongdong",
+            "start": "15:00",
+            "end": "15:30",
+            "duration_h": 0.5,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Seoul"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 480.0 exceeds daily attractions budget reference 250.0."
+        ]
+      }
+    ],
+    "cost_rollup": {
+      "transport": 1000.0,
+      "food": 1280.0,
+      "attractions": 1920.0,
+      "hotel_reference": 5453.0,
+      "total_selected_estimated": 9653.0
+    },
+    "warnings": [
+      "Attractions daily spend warning: 480.0 exceeds daily attractions budget reference 250.0."
+    ]
+  }
+}

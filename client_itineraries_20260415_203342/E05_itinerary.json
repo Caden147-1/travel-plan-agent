@@ -1,0 +1,14 @@
+{
+  "case_id": "E05",
+  "case_description": "many attractions / packed itinerary",
+  "query": "I want to travel from Singapore to Tokyo from 2026-04-19 to 2026-04-23 with a budget of 18000 CNY. I want a packed itinerary with many attractions.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

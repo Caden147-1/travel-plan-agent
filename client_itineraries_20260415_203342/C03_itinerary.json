@@ -1,0 +1,14 @@
+{
+  "case_id": "C03",
+  "case_description": "luxury hotel but obviously under budget",
+  "query": "I want to travel from Shanghai to Tokyo from 2026-04-19 to 2026-04-23 with a budget of 3000 CNY. I want five star hotels and direct flights.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

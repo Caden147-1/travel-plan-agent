@@ -1,0 +1,265 @@
+{
+  "case_id": "B01",
+  "case_description": "明确要求直飞",
+  "query": "I want to travel from Singapore to Tokyo from 2026-04-19 to 2026-04-23 with a budget of 12000 CNY. I want direct flights.",
+  "trip_summary": {
+    "origin": "Singapore",
+    "destination": [
+      "Tokyo"
+    ],
+    "num_people": 1,
+    "duration_days": 5,
+    "travel_dates": {
+      "start": "2026-04-19",
+      "end": "2026-04-23",
+      "text": null
+    },
+    "budget": {
+      "total": 12000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "direct",
+      "hotel": null,
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": "high",
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": null
+    }
+  },
+  "itinerary": {
+    "success": true,
+    "stage": "agent4_itinerary_planning",
+    "itinerary_summary": {
+      "total_days": 4,
+      "time_feasible_days": 4,
+      "budget_feasible": true,
+      "must_visit_coverage": 1.0
+    },
+    "daily_plan": [
+      {
+        "date": "2026-04-19",
+        "city": "Tokyo",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 6.92,
+        "transport_cost_estimated": 1862.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Tokyo",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "flight",
+            "name": "Flight Singapore -> Tokyo",
+            "start": "10:30",
+            "end": "14:55",
+            "duration_h": 4.42,
+            "cost_estimated": 1662.0,
+            "meta": {
+              "leg_type": "outbound",
+              "from_city": "Singapore",
+              "to_city": "Tokyo"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-04-20",
+        "city": "Tokyo",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Tokyo",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-04-21",
+        "city": "Tokyo",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Tokyo",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      },
+      {
+        "date": "2026-04-22",
+        "city": "Tokyo",
+        "hotel": null,
+        "time_budget_hours": 12.0,
+        "used_hours": 2.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Tokyo",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "08:30",
+            "end": "09:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Meal",
+            "start": "09:30",
+            "end": "10:30",
+            "duration_h": 1.0,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Tokyo"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": []
+      }
+    ],
+    "cost_rollup": {
+      "transport": 2462.0,
+      "food": 0.0,
+      "attractions": 0.0,
+      "hotel_reference": 0.0,
+      "total_selected_estimated": 2462.0
+    },
+    "warnings": []
+  }
+}

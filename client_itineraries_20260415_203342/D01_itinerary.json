@@ -1,0 +1,14 @@
+{
+  "case_id": "D01",
+  "case_description": "local food only",
+  "query": "I want to travel from Guangzhou to Bangkok from 2026-07-10 to 2026-07-15 with a budget of 10000 CNY. I want local food.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

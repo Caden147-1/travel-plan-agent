@@ -1,0 +1,14 @@
+{
+  "case_id": "C02",
+  "case_description": "luxury hotel with enough budget",
+  "query": "I want to travel from Singapore to Tokyo from 2026-04-19 to 2026-04-23 with a budget of 30000 CNY. I want five star hotels.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

@@ -1,0 +1,14 @@
+{
+  "case_id": "C04",
+  "case_description": "central hotel preference",
+  "query": "My teacher and I want to travel from Hong Kong to United States from 2026-10-12 to 2026-10-22 with a budget of 5000 CNY. We want a centrally located premium hotel.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

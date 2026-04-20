@@ -1,0 +1,14 @@
+{
+  "case_id": "E02",
+  "case_description": "nature attractions",
+  "query": "My friend and I want to travel from Seoul to Switzerland from 2026-04-19 to 2026-04-24 with a budget of 25000 CNY. I love mountains and natural scenery.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

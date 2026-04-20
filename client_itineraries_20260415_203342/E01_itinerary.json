@@ -1,0 +1,14 @@
+{
+  "case_id": "E01",
+  "case_description": "historical attractions",
+  "query": "I want to travel from Hong Kong to Rome from 2026-09-10 to 2026-09-17 with a budget of 28000 CNY. I enjoy historical places and museums.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

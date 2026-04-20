@@ -1,0 +1,14 @@
+{
+  "case_id": "H01",
+  "case_description": "缺日期",
+  "query": "I want to travel from Beijing to Tokyo with a budget of 12000 CNY.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

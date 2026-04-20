@@ -1,0 +1,14 @@
+{
+  "case_id": "H03",
+  "case_description": "缺出发地",
+  "query": "I want to travel to Tokyo from 2026-05-01 to 2026-05-05 with a budget of 10000 CNY.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

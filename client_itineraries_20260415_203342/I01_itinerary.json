@@ -1,0 +1,14 @@
+{
+  "case_id": "I01",
+  "case_description": "相对文本日期 / 模糊日期格式",
+  "query": "I want to travel from Singapore to Tokyo on 4.19-4.23 with a budget of 30000 CNY and direct flights.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

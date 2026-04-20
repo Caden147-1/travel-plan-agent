@@ -1,0 +1,14 @@
+{
+  "case_id": "D02",
+  "case_description": "fine dining preference",
+  "query": "I want to travel from Singapore to Paris from 2026-09-01 to 2026-09-07 with a budget of 35000 CNY. I want fine dining.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

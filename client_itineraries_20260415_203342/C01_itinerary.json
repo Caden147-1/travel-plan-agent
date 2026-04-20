@@ -1,0 +1,547 @@
+{
+  "case_id": "C01",
+  "case_description": "budget hotel",
+  "query": "I want to travel from Shenzhen to Kuala Lumpur from 2026-06-01 to 2026-06-06 with a budget of 6000 CNY. I want budget hotels.",
+  "trip_summary": {
+    "origin": "Shenzhen",
+    "destination": [
+      "Kuala Lumpur"
+    ],
+    "num_people": 1,
+    "duration_days": 6,
+    "travel_dates": {
+      "start": "2026-06-01",
+      "end": "2026-06-06",
+      "text": null
+    },
+    "budget": {
+      "total": 6000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": null,
+      "hotel": "budget",
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": "budget",
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": null,
+      "hotel_level": "low",
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": "low"
+    }
+  },
+  "itinerary": {
+    "success": true,
+    "stage": "agent4_itinerary_planning",
+    "itinerary_summary": {
+      "total_days": 5,
+      "time_feasible_days": 5,
+      "budget_feasible": true,
+      "must_visit_coverage": 1.0
+    },
+    "daily_plan": [
+      {
+        "date": "2026-06-01",
+        "city": "Kuala Lumpur",
+        "hotel": {
+          "name": "Floresta Hotel Chinatown",
+          "area": "",
+          "estimated_total_cost": 760.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 10.5,
+        "transport_cost_estimated": 1250.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Kuala Lumpur",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "KLCC Park",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "KLCC Park"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Thean Hou Temple",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Thean Hou Temple"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Golden Triangle KL",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Golden Triangle KL"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Corks Out Bukit Bintang",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Beta KL",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "checkin",
+            "name": "Check-in Floresta Hotel Chinatown",
+            "start": "15:00",
+            "end": "15:30",
+            "duration_h": 0.5,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "flight",
+            "name": "Flight Shenzhen -> Kuala Lumpur",
+            "start": "15:30",
+            "end": "18:30",
+            "duration_h": 3.0,
+            "cost_estimated": 1050.0,
+            "meta": {
+              "leg_type": "outbound",
+              "from_city": "Shenzhen",
+              "to_city": "Kuala Lumpur"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 240.0 exceeds daily attractions budget reference 116.67."
+        ]
+      },
+      {
+        "date": "2026-06-02",
+        "city": "Kuala Lumpur",
+        "hotel": {
+          "name": "Floresta Hotel Chinatown",
+          "area": "",
+          "estimated_total_cost": 760.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.0,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Kuala Lumpur",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "KLCC Park",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "KLCC Park"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Thean Hou Temple",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Thean Hou Temple"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Golden Triangle KL",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Golden Triangle KL"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Corks Out Bukit Bintang",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Beta KL",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 240.0 exceeds daily attractions budget reference 116.67."
+        ]
+      },
+      {
+        "date": "2026-06-03",
+        "city": "Kuala Lumpur",
+        "hotel": {
+          "name": "Floresta Hotel Chinatown",
+          "area": "",
+          "estimated_total_cost": 760.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.0,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Kuala Lumpur",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "KLCC Park",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "KLCC Park"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Thean Hou Temple",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Thean Hou Temple"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Golden Triangle KL",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Golden Triangle KL"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Corks Out Bukit Bintang",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Beta KL",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 240.0 exceeds daily attractions budget reference 116.67."
+        ]
+      },
+      {
+        "date": "2026-06-04",
+        "city": "Kuala Lumpur",
+        "hotel": {
+          "name": "Floresta Hotel Chinatown",
+          "area": "",
+          "estimated_total_cost": 760.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.0,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Kuala Lumpur",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "KLCC Park",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "KLCC Park"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Thean Hou Temple",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Thean Hou Temple"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Golden Triangle KL",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Golden Triangle KL"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Corks Out Bukit Bintang",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Beta KL",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 240.0 exceeds daily attractions budget reference 116.67."
+        ]
+      },
+      {
+        "date": "2026-06-05",
+        "city": "Kuala Lumpur",
+        "hotel": {
+          "name": "Floresta Hotel Chinatown",
+          "area": "",
+          "estimated_total_cost": 760.0
+        },
+        "time_budget_hours": 12.0,
+        "used_hours": 7.5,
+        "transport_cost_estimated": 200.0,
+        "events": [
+          {
+            "type": "local_transport",
+            "name": "Local transport in Kuala Lumpur",
+            "start": "08:00",
+            "end": "08:30",
+            "duration_h": 0.5,
+            "cost_estimated": 200.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "KLCC Park",
+            "start": "08:30",
+            "end": "10:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "KLCC Park"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Thean Hou Temple",
+            "start": "10:00",
+            "end": "11:30",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Thean Hou Temple"
+            }
+          },
+          {
+            "type": "poi",
+            "name": "Golden Triangle KL",
+            "start": "11:30",
+            "end": "13:00",
+            "duration_h": 1.5,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur",
+              "poi_name": "Golden Triangle KL"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Corks Out Bukit Bintang",
+            "start": "13:00",
+            "end": "14:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "meal",
+            "name": "Beta KL",
+            "start": "14:00",
+            "end": "15:00",
+            "duration_h": 1.0,
+            "cost_estimated": 80.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          },
+          {
+            "type": "checkout",
+            "name": "Check-out Floresta Hotel Chinatown",
+            "start": "15:00",
+            "end": "15:30",
+            "duration_h": 0.5,
+            "cost_estimated": 0.0,
+            "meta": {
+              "city": "Kuala Lumpur"
+            }
+          }
+        ],
+        "constraints": {
+          "within_12h": true,
+          "max_drive_leg_le_5h": true
+        },
+        "warnings": [
+          "Attractions daily spend warning: 240.0 exceeds daily attractions budget reference 116.67."
+        ]
+      }
+    ],
+    "cost_rollup": {
+      "transport": 2050.0,
+      "food": 800.0,
+      "attractions": 1200.0,
+      "hotel_reference": 760.0,
+      "total_selected_estimated": 4810.0
+    },
+    "warnings": [
+      "Attractions daily spend warning: 240.0 exceeds daily attractions budget reference 116.67."
+    ]
+  }
+}

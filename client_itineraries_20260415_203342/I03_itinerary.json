@@ -1,0 +1,14 @@
+{
+  "case_id": "I03",
+  "case_description": "teacher and I 人数测试",
+  "query": "My teacher and I want to travel from Hong Kong to Tokyo from 2026-05-01 to 2026-05-06 with a budget of 18000 CNY.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

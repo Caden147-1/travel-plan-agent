@@ -1,0 +1,14 @@
+{
+  "case_id": "H02",
+  "case_description": "缺预算",
+  "query": "I want to travel from Beijing to Tokyo from 2026-05-01 to 2026-05-05.",
+  "trip_summary": {},
+  "itinerary": {
+    "success": null,
+    "stage": null,
+    "itinerary_summary": {},
+    "daily_plan": [],
+    "cost_rollup": {},
+    "warnings": []
+  }
+}

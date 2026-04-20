@@ -1,0 +1,162 @@
+[
+  {
+    "case_id": "A01",
+    "file": "A01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "A02",
+    "file": "A02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "A03",
+    "file": "A03_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "B01",
+    "file": "B01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "B02",
+    "file": "B02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "B03",
+    "file": "B03_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "C01",
+    "file": "C01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "C02",
+    "file": "C02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "C03",
+    "file": "C03_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "C04",
+    "file": "C04_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "C05",
+    "file": "C05_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "D01",
+    "file": "D01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "D02",
+    "file": "D02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "D03",
+    "file": "D03_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "D04",
+    "file": "D04_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "E01",
+    "file": "E01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "E02",
+    "file": "E02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "E03",
+    "file": "E03_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "E04",
+    "file": "E04_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "E05",
+    "file": "E05_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "F01",
+    "file": "F01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "F02",
+    "file": "F02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "F03",
+    "file": "F03_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "G01",
+    "file": "G01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "G02",
+    "file": "G02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "G03",
+    "file": "G03_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "H01",
+    "file": "H01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "H02",
+    "file": "H02_itinerary.json",
+    "itinerary_success": null
+  },
+  {
+    "case_id": "H03",
+    "file": "H03_itinerary.json",
+    "itinerary_success": null
+  },
+  {
+    "case_id": "I01",
+    "file": "I01_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "I02",
+    "file": "I02_itinerary.json",
+    "itinerary_success": true
+  },
+  {
+    "case_id": "I03",
+    "file": "I03_itinerary.json",
+    "itinerary_success": true
+  }
+]
