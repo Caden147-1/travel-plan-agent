@@ -81,15 +81,20 @@ Rules:
 3. Summarize what you already understood from the request.
 4. Identify missing or unreasonable information in plain language.
 5. Ask focused guiding questions for the smallest set of details needed to continue.
-6. End with one rewritten complete request template tailored to the user's intent.
-7. Cover these required downstream information points when relevant:
+6. If this is the first assistant clarification, you may end with one rewritten complete request template tailored to the user's intent.
+7. If the user is continuing a previous request or only added one missing detail, do not restart with a full template. Acknowledge the new detail, state what is now locked in, and ask the next missing details as clear fill-in prompts.
+8. Make follow-up guidance feel progressive and helpful, for example:
+   - "Great, I have Guangzhou -> Paris now."
+   - "Next I just need the dates or trip length, total budget, and traveler count."
+   - "You can reply in one line, like: June 10 to June 15, 2 people, 15000 CNY."
+9. Cover these required downstream information points when relevant:
    - departure city
    - destination city or country
    - travel dates or trip length
    - number of travelers
    - total budget and currency
    - useful preferences such as hotel level/location, food, transport, attractions, pace
-8. Keep it concise, under 170 words.
+10. Keep it concise, under 140 words.
 
 User request:
 {user_request}

@@ -432,7 +432,7 @@ export function ChatInterface() {
                   </div>
                   <div className="bg-card border border-border rounded-lg px-4 py-3 text-sm flex items-center gap-2">
                     <Loader2 className="h-4 w-4 animate-spin" />
-                    Running router pipeline and generating the report...
+                    thinking
                   </div>
                 </div>
               )}
@@ -521,7 +521,7 @@ function HistoryStatusBadge({ status }: { status: "pending" | "ready" | "error" 
   }
 
   if (status === "error") {
-    return <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">Failed</span>
+    return <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">Incomplete</span>
   }
 
   return <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">Ready</span>
