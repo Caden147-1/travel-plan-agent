@@ -1,8 +1,8 @@
-"use client"
+﻿"use client"
 
 import { useEffect, useRef, useState } from "react"
 import type { FormEvent, KeyboardEvent } from "react"
-import { ExternalLink, Loader2, Menu, Plane, Plus, Send, X } from "lucide-react"
+import { ExternalLink, Loader2, Menu, Plane, Plus, Send, Trash2, X } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { cn } from "@/lib/utils"
 
@@ -26,6 +26,10 @@ interface PlanResponse {
     budget?: {
       total?: number
       currency?: string
+      source_total?: number
+      source_currency?: string
+      conversion_rate_to_cny?: number
+      conversion_note?: string
     }
   }
   itinerary_summary?: {
@@ -43,7 +47,7 @@ interface HistoryItem {
   reportUrl?: string
   createdAt: string
   updatedAt?: string
-  status?: "pending" | "ready" | "error"
+  status?: "pending" | "ready" | "error" | "cancelled"
   error?: string
 }
 
@@ -57,10 +61,24 @@ const suggestedPrompts = [
   "I want a 4 day Chengdu food trip with pandas, Jinli, and relaxed sightseeing.",
 ]
 
+const thinkingSteps = [
+  { afterSeconds: 0, text: "Understanding your route, dates, budget, and preferences" },
+  { afterSeconds: 4, text: "Checking the request for missing or conflicting details" },
+  { afterSeconds: 8, text: "Estimating the budget and feasibility" },
+  { afterSeconds: 14, text: "Searching flights, hotels, food, and attractions" },
+  { afterSeconds: 24, text: "The default plan may exceed the budget, switching to a lower-cost option" },
+  { afterSeconds: 36, text: "The default plan exceeded the budget, preparing an updated plan" },
+  { afterSeconds: 52, text: "Live search and itinerary generation are still running; report writing is usually quick" },
+  { afterSeconds: 90, text: "Still waiting for flight, hotel, places search, or the budget retry to return" },
+]
+
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
   const [isLoading, setIsLoading] = useState(false)
+  const [loadingHistoryId, setLoadingHistoryId] = useState<string | null>(null)
+  const [thinkingStepIndex, setThinkingStepIndex] = useState(0)
+  const [thinkingElapsedSeconds, setThinkingElapsedSeconds] = useState(0)
   const [history, setHistory] = useState<HistoryItem[]>([])
   const [activeHistoryId, setActiveHistoryId] = useState<string | null>(null)
   const [sidebarOpen, setSidebarOpen] = useState(true)
@@ -68,10 +86,29 @@ export function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const activeHistoryIdRef = useRef<string | null>(null)
+  const abortControllerRef = useRef<AbortController | null>(null)
+  const loadingHistoryIdRef = useRef<string | null>(null)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, isLoading])
+  }, [messages, isLoading, thinkingStepIndex])
+
+  useEffect(() => {
+    if (!isLoading) {
+      setThinkingStepIndex(0)
+      setThinkingElapsedSeconds(0)
+      return
+    }
+
+    const startedAt = Date.now()
+    const interval = window.setInterval(() => {
+      const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000)
+      setThinkingElapsedSeconds(elapsedSeconds)
+      setThinkingStepIndex(getThinkingStepIndex(elapsedSeconds))
+    }, 500)
+
+    return () => window.clearInterval(interval)
+  }, [isLoading])
 
   useEffect(() => {
     if (!textareaRef.current) return
@@ -85,7 +122,7 @@ export function ChatInterface() {
       if (!savedHistory) return
       const parsedHistory = JSON.parse(savedHistory) as HistoryItem[]
       if (Array.isArray(parsedHistory)) {
-        setHistory(parsedHistory)
+        setHistory(parsedHistory.map(normalizeHistoryItem))
       }
     } catch {
       setHistory([])
@@ -95,6 +132,11 @@ export function ChatInterface() {
   function setActiveConversation(id: string | null) {
     activeHistoryIdRef.current = id
     setActiveHistoryId(id)
+  }
+
+  function setLoadingConversation(id: string | null) {
+    loadingHistoryIdRef.current = id
+    setLoadingHistoryId(id)
   }
 
   function saveHistory(updater: (previous: HistoryItem[]) => HistoryItem[]) {
@@ -107,8 +149,13 @@ export function ChatInterface() {
 
   async function handleSubmit(e: FormEvent | KeyboardEvent) {
     e.preventDefault()
+    if (isLoading) {
+      handleStopThinking()
+      return
+    }
+
     const request = input.trim()
-    if (!request || isLoading) return
+    if (!request) return
     setInput("")
 
     const historyId = activeHistoryIdRef.current || crypto.randomUUID()
@@ -144,12 +191,18 @@ export function ChatInterface() {
       return [nextItem, ...previous.filter((item) => item.id !== historyId)]
     })
     setIsLoading(true)
+    setLoadingConversation(historyId)
+    setThinkingStepIndex(0)
+    setThinkingElapsedSeconds(0)
+    const abortController = new AbortController()
+    abortControllerRef.current = abortController
 
     try {
       const response = await fetch(`${apiBase}/api/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ message: plannerRequest }),
+        signal: abortController.signal,
       })
       const data = (await response.json()) as PlanResponse
 
@@ -211,6 +264,36 @@ export function ChatInterface() {
         setMessages(nextMessages)
       }
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") {
+        const cancelledSummary = "Stopped. You can revise the request and send it again when you are ready."
+        const nextMessages: Message[] = [
+          ...submittedMessages,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: cancelledSummary,
+          },
+        ]
+        saveHistory((previous) =>
+          previous.map((item) =>
+            item.id === historyId
+              ? {
+                  ...item,
+                  messages: nextMessages,
+                  summary: cancelledSummary,
+                  status: "cancelled",
+                  error: undefined,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
+        )
+        if (activeHistoryIdRef.current === historyId) {
+          setMessages(nextMessages)
+        }
+        return
+      }
+
       const message = error instanceof Error ? error.message : "Unknown error."
       const errorSummary = `The plan could not be generated.\n\n${message}`
       const nextMessages: Message[] = [
@@ -239,8 +322,18 @@ export function ChatInterface() {
         setMessages(nextMessages)
       }
     } finally {
-      setIsLoading(false)
+      if (loadingHistoryIdRef.current === historyId) {
+        abortControllerRef.current = null
+        setLoadingConversation(null)
+        setIsLoading(false)
+      }
     }
+  }
+
+  function handleStopThinking() {
+    const historyId = loadingHistoryIdRef.current
+    if (!historyId) return
+    abortControllerRef.current?.abort()
   }
 
   function handleHistoryClick(item: HistoryItem) {
@@ -280,6 +373,15 @@ export function ChatInterface() {
     textareaRef.current?.focus()
   }
 
+  function handleHistoryDelete(id: string) {
+    saveHistory((previous) => previous.filter((item) => item.id !== id))
+    if (activeHistoryIdRef.current === id) {
+      setMessages([])
+      setInput("")
+      setActiveConversation(null)
+    }
+  }
+
   function handlePromptClick(prompt: string) {
     setInput(prompt)
     textareaRef.current?.focus()
@@ -288,12 +390,16 @@ export function ChatInterface() {
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
+      if (isLoading) {
+        handleStopThinking()
+        return
+      }
       void handleSubmit(e)
     }
   }
 
   const activeHistoryItem = activeHistoryId ? history.find((item) => item.id === activeHistoryId) : null
-  const showActiveLoading = activeHistoryItem?.status === "pending"
+  const showActiveLoading = activeHistoryItem?.status === "pending" && activeHistoryId === loadingHistoryId
 
   return (
     <div className="flex h-screen bg-background">
@@ -319,7 +425,7 @@ export function ChatInterface() {
         </div>
 
         <div className="flex-1 overflow-y-auto px-4">
-          <HistoryList history={history} activeId={activeHistoryId} onSelect={handleHistoryClick} />
+          <HistoryList history={history} activeId={activeHistoryId} onSelect={handleHistoryClick} onDelete={handleHistoryDelete} />
         </div>
 
         <div className="p-4 border-t border-sidebar-border text-xs text-muted-foreground">
@@ -344,6 +450,7 @@ export function ChatInterface() {
                 handleHistoryClick(item)
                 setMobileSidebarOpen(false)
               }}
+              onDelete={handleHistoryDelete}
             />
           </aside>
         </div>
@@ -361,7 +468,6 @@ export function ChatInterface() {
             <Plane className="h-5 w-5 text-primary" />
             <span className="font-semibold">TravelAI Planner</span>
           </div>
-          <span className="text-xs text-muted-foreground bg-muted px-2 py-0.5 rounded">Local</span>
         </header>
 
         <main className="flex-1 overflow-y-auto">
@@ -405,7 +511,7 @@ export function ChatInterface() {
                       message.role === "user" ? "bg-primary text-primary-foreground" : "bg-card border border-border",
                     )}
                   >
-                    <div className="text-sm whitespace-pre-wrap">{message.content}</div>
+                    <div className="text-sm whitespace-pre-wrap">{renderMessageContent(message.content)}</div>
                     {message.reportUrl && (
                       <a
                         href={message.reportUrl}
@@ -430,10 +536,10 @@ export function ChatInterface() {
                   <div className="flex-shrink-0 w-8 h-8 rounded-lg bg-primary flex items-center justify-center">
                     <Plane className="h-4 w-4 text-primary-foreground" />
                   </div>
-                  <div className="bg-card border border-border rounded-lg px-4 py-3 text-sm flex items-center gap-2">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    thinking
-                  </div>
+                  <ThinkingPanel
+                    activeStepIndex={thinkingStepIndex}
+                    elapsedSeconds={thinkingElapsedSeconds}
+                  />
                 </div>
               )}
               <div ref={messagesEndRef} />
@@ -453,8 +559,15 @@ export function ChatInterface() {
                 className="flex-1 bg-transparent resize-none outline-none text-sm px-2 py-2 max-h-[180px] min-h-[40px]"
                 rows={1}
               />
-              <Button type="submit" size="icon" disabled={!input.trim() || isLoading} className="flex-shrink-0 h-10 w-10 rounded-lg">
-                {isLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+              <Button
+                type="submit"
+                size="icon"
+                disabled={!input.trim() && !isLoading}
+                className="flex-shrink-0 h-10 w-10 rounded-lg"
+                aria-label={isLoading ? "Stop thinking" : "Send message"}
+                title={isLoading ? "Stop" : "Send"}
+              >
+                {isLoading ? <X className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </Button>
             </div>
             <p className="text-xs text-center text-muted-foreground mt-2">
@@ -467,14 +580,27 @@ export function ChatInterface() {
   )
 }
 
+function normalizeHistoryItem(item: HistoryItem): HistoryItem {
+  return {
+    ...item,
+    messages: item.messages?.map((message) => ({
+      ...message,
+      content: renderMessageContent(message.content),
+    })),
+    summary: item.summary ? renderMessageContent(item.summary) : item.summary,
+  }
+}
+
 function HistoryList({
   history,
   activeId,
   onSelect,
+  onDelete,
 }: {
   history: HistoryItem[]
   activeId: string | null
   onSelect: (item: HistoryItem) => void
+  onDelete: (id: string) => void
 }) {
   return (
     <div>
@@ -488,20 +614,30 @@ function HistoryList({
           {history.map((item) => {
             const status = getHistoryStatus(item)
             return (
-              <button
+              <div
                 key={item.id}
-                onClick={() => onSelect(item)}
                 className={cn(
-                  "w-full text-left rounded-lg border px-3 py-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
+                  "group flex items-start gap-2 rounded-lg border bg-background p-2 text-sm text-sidebar-foreground hover:bg-sidebar-accent transition-colors",
                   activeId === item.id ? "border-primary bg-sidebar-accent" : "border-sidebar-border bg-background",
                 )}
               >
-                <span className="block line-clamp-3">{item.request}</span>
-                <span className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
-                  <span>{formatHistoryDate(item.createdAt)}</span>
-                  <HistoryStatusBadge status={status} />
-                </span>
-              </button>
+                <button type="button" onClick={() => onSelect(item)} className="min-w-0 flex-1 text-left">
+                  <span className="block line-clamp-3">{item.request}</span>
+                  <span className="mt-2 flex items-center justify-between gap-2 text-xs text-muted-foreground">
+                    <span>{formatHistoryDate(item.createdAt)}</span>
+                    <HistoryStatusBadge status={status} />
+                  </span>
+                </button>
+                <button
+                  type="button"
+                  aria-label="Delete history"
+                  title="Delete history"
+                  onClick={() => onDelete(item.id)}
+                  className="rounded-md p-1.5 text-muted-foreground opacity-100 transition-colors hover:bg-destructive/10 hover:text-destructive md:opacity-0 md:group-hover:opacity-100"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </div>
             )
           })}
         </div>
@@ -510,7 +646,71 @@ function HistoryList({
   )
 }
 
-function HistoryStatusBadge({ status }: { status: "pending" | "ready" | "error" }) {
+function ThinkingPanel({
+  activeStepIndex,
+  elapsedSeconds,
+}: {
+  activeStepIndex: number
+  elapsedSeconds: number
+}) {
+  const currentStep = thinkingSteps[activeStepIndex]?.text || thinkingSteps[0].text
+
+  return (
+    <div className="max-w-[82%] rounded-lg border border-border bg-card px-4 py-3 text-sm">
+      <div className="flex items-center gap-3">
+        <div className="flex min-w-0 items-center gap-3">
+          <span className="thinking-dot h-3 w-3 flex-shrink-0 rounded-full border border-primary/25 bg-primary/35" />
+          <div className="flex items-center gap-2 font-medium">
+            <span>Thinking</span>
+            <span className="text-xs font-normal text-muted-foreground">{formatElapsedTime(elapsedSeconds)}</span>
+          </div>
+        </div>
+      </div>
+      <div className="mt-3 max-w-full overflow-hidden pl-6 text-xs text-muted-foreground/55">
+        <span className="thinking-flow inline-block whitespace-nowrap">{currentStep}</span>
+      </div>
+      <style jsx>{`
+        .thinking-dot {
+          animation: thinking-breathe 2.2s ease-in-out infinite;
+        }
+
+        .thinking-flow {
+          animation: thinking-flow 2.8s ease-in-out infinite;
+          color: currentColor;
+        }
+
+        @keyframes thinking-breathe {
+          0%,
+          100% {
+            opacity: 0.35;
+            transform: scale(0.9);
+          }
+          50% {
+            opacity: 0.85;
+            transform: scale(1.08);
+          }
+        }
+
+        @keyframes thinking-flow {
+          0% {
+            opacity: 0.35;
+            transform: translateX(0);
+          }
+          50% {
+            opacity: 0.78;
+            transform: translateX(4px);
+          }
+          100% {
+            opacity: 0.35;
+            transform: translateX(0);
+          }
+        }
+      `}</style>
+    </div>
+  )
+}
+
+function HistoryStatusBadge({ status }: { status: "pending" | "ready" | "error" | "cancelled" }) {
   if (status === "pending") {
     return (
       <span className="inline-flex items-center gap-1 rounded bg-muted px-1.5 py-0.5">
@@ -524,13 +724,33 @@ function HistoryStatusBadge({ status }: { status: "pending" | "ready" | "error" 
     return <span className="rounded bg-destructive/10 px-1.5 py-0.5 text-destructive">Incomplete</span>
   }
 
+  if (status === "cancelled") {
+    return <span className="rounded bg-muted px-1.5 py-0.5">Stopped</span>
+  }
+
   return <span className="rounded bg-primary/10 px-1.5 py-0.5 text-primary">Ready</span>
 }
 
-function getHistoryStatus(item: HistoryItem): "pending" | "ready" | "error" {
+function getHistoryStatus(item: HistoryItem): "pending" | "ready" | "error" | "cancelled" {
   if (item.status) return item.status
   if (item.summary || item.reportUrl) return "ready"
   return "pending"
+}
+
+function getThinkingStepIndex(elapsedSeconds: number): number {
+  let activeIndex = 0
+  for (let index = 0; index < thinkingSteps.length; index += 1) {
+    if (elapsedSeconds >= thinkingSteps[index].afterSeconds) {
+      activeIndex = index
+    }
+  }
+  return activeIndex
+}
+
+function formatElapsedTime(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes}:${String(remainingSeconds).padStart(2, "0")}`
 }
 
 function formatHistoryDate(value: string): string {
@@ -547,23 +767,38 @@ function formatHistoryDate(value: string): string {
 function buildPlannerRequest(messages: Message[]): string {
   const userMessages = messages
     .filter((message) => message.role === "user")
-    .map((message) => message.content.trim())
+    .map((message) => renderMessageContent(message.content).trim())
     .filter(Boolean)
 
   if (userMessages.length <= 1) return userMessages[0] || ""
 
   return [
     "The user is continuing the same travel planning request. Combine these user messages into one complete request:",
+    "If the latest message only increases the budget, keeps the same plan, or accepts a small overage, treat the new budget as a cap for the previous lowest-cost plan. Do not upgrade hotels, food, flights, attractions, or trip comfort unless the user explicitly asks for upgrades.",
     "",
     ...userMessages.map((message, index) => `${index + 1}. ${message}`),
   ].join("\n")
+}
+
+function renderMessageContent(content: unknown): string {
+  if (typeof content === "string") return content
+  if (content && typeof content === "object" && "text" in content) {
+    const text = (content as { text?: unknown }).text
+    if (typeof text === "string") return text
+  }
+  if (content == null) return ""
+  try {
+    return JSON.stringify(content)
+  } catch {
+    return String(content)
+  }
 }
 
 function validateRequest(request: string): string | null {
   const dateError = validateTravelDates(request)
   if (dateError) return dateError
 
-  const budgetMatch = request.match(/\b(?:budget|预算|费用)\D{0,12}(\d+(?:\.\d+)?)/i)
+  const budgetMatch = request.match(/(?:\b(?:budget|cost)\b|预算|费用)\D{0,12}(\d+(?:\.\d+)?)/i)
   if (budgetMatch) {
     const budget = Number(budgetMatch[1])
     if (!Number.isFinite(budget) || budget <= 0) {
@@ -571,7 +806,7 @@ function validateRequest(request: string): string | null {
     }
   }
 
-  const peopleMatch = request.match(/\b(\d+)\s*(?:people|person|travelers|travellers|人)\b/i)
+  const peopleMatch = request.match(/(\d+)\s*(?:people|person|travelers|travellers|人)\b/i)
   if (peopleMatch) {
     const people = Number(peopleMatch[1])
     if (!Number.isInteger(people) || people <= 0 || people > 50) {
@@ -579,7 +814,7 @@ function validateRequest(request: string): string | null {
     }
   }
 
-  const daysMatch = request.match(/\b(\d+)\s*(?:day|days|天)\b/i)
+  const daysMatch = request.match(/(\d+)\s*(?:day|days|天)\b/i)
   if (daysMatch) {
     const days = Number(daysMatch[1])
     if (!Number.isInteger(days) || days <= 0 || days > 60) {
@@ -669,7 +904,7 @@ function formatIsoDate(date: Date): string {
 function formatSummary(data: PlanResponse): string {
   const trip = data.trip_summary || {}
   const destinations = trip.destination?.length ? trip.destination.join(", ") : "destination"
-  const budget = trip.budget?.total ? `${trip.budget.total} ${trip.budget.currency || "CNY"}` : "not specified"
+  const budget = formatBudget(trip.budget)
   const warnings = data.warnings?.length ? `\n\nWarnings:\n${data.warnings.slice(0, 3).map((item) => `- ${item}`).join("\n")}` : ""
 
   return [
@@ -681,4 +916,15 @@ function formatSummary(data: PlanResponse): string {
     data.report_url ? "The HTML report is ready." : "The pipeline finished, but no report URL was returned.",
     warnings,
   ].filter(Boolean).join("\n")
+}
+
+function formatBudget(budget?: NonNullable<PlanResponse["trip_summary"]>["budget"]): string {
+  if (!budget?.total) return "not specified"
+
+  const total = `${budget.total} ${budget.currency || "CNY"}`
+  if (budget.source_total && budget.source_currency && budget.source_currency !== budget.currency) {
+    return `${budget.source_total} ${budget.source_currency} (approx. ${total} for planning)`
+  }
+
+  return total
 }

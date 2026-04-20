@@ -60,7 +60,7 @@ def _fallback_guidance(result: dict) -> str:
             f"What I still need: {missing_text}.\n\n"
             "Please reply with the missing details, for example:\n"
             "I want to travel from Shanghai to Paris from 2026-06-10 to 2026-06-15 "
-            "for 2 people with a budget of 15000 CNY. I prefer clean central hotels and local food."
+            "for 2 people with a budget of 15000 CNY, or 2000 USD. I prefer clean central hotels and local food."
         )
     return (
         "I can help refine this request before creating the report.\n\n"
@@ -86,7 +86,7 @@ Rules:
 8. Make follow-up guidance feel progressive and helpful, for example:
    - "Great, I have Guangzhou -> Paris now."
    - "Next I just need the dates or trip length, total budget, and traveler count."
-   - "You can reply in one line, like: June 10 to June 15, 2 people, 15000 CNY."
+   - "You can reply in one line, like: June 10 to June 15, 2 people, 15000 CNY, or 2000 USD."
 9. Cover these required downstream information points when relevant:
    - departure city
    - destination city or country
@@ -95,6 +95,7 @@ Rules:
    - total budget and currency
    - useful preferences such as hotel level/location, food, transport, attractions, pace
 10. Keep it concise, under 140 words.
+11. If the failure stage is "budget_feasibility", treat the user's budget as a hard cap. Say the system already tried cheaper flights, budget hotels, lower-cost meals, and fewer paid activities when applicable. Do not suggest accepting an over-budget plan. Ask the user to either increase the budget, shorten the trip, remove paid activities, or relax destination/date constraints.
 
 User request:
 {user_request}
@@ -307,7 +308,7 @@ class TravelApiHandler(BaseHTTPRequestHandler):
                 "report": result.get("report", {}),
                 "report_url": report_url,
             }
-            failure_status = 422 if response["stage"] in {"agent1_parse", "agent1_validation"} else 500
+            failure_status = 422 if response["stage"] in {"agent1_parse", "agent1_validation", "budget_feasibility"} else 500
             _json_response(self, 200 if success else failure_status, response)
         except Exception as exc:
             _json_response(self, 500, {"success": False, "error": str(exc)})

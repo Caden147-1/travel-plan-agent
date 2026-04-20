@@ -635,6 +635,9 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
     destination = ", ".join(_text(x) for x in trip.get("destination", []) or [] if _text(x))
     total = _money(_total_cost(router_output), currency)
     budget_total = _money(budget.get("total"), currency) if budget.get("total") is not None else "Not specified"
+    if budget.get("source_total") and budget.get("source_currency") and budget.get("source_currency") != currency:
+        source_budget = _money(budget.get("source_total"), _text(budget.get("source_currency"), ""))
+        budget_total = f"{source_budget} (approx. {budget_total} for planning)"
 
     return f"""<!doctype html>
 <html lang="en">

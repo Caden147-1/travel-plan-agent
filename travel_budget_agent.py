@@ -282,6 +282,11 @@ def _get_total_budget(parsed_request: Dict[str, Any]) -> int:
     return max(0, _safe_int(parsed_request.get("budget", {}).get("total"), 0))
 
 
+def _is_budget_cap_mode(parsed_request: Dict[str, Any]) -> bool:
+    signals = parsed_request.get("planning_signals", {}) or {}
+    return bool(parsed_request.get("budget_cap_mode")) or signals.get("budget_discipline") == "cap"
+
+
 def _get_effective_cities(parsed_request: Dict[str, Any]) -> List[Dict[str, Any]]:
     """
     Agent2 must not generate or recommend cities by itself.
@@ -1796,6 +1801,9 @@ def _heuristic_cost_level(parsed_request: Dict[str, Any]) -> str:
 
 
 def _heuristic_strategy(parsed_request: Dict[str, Any], cost_level: str) -> str:
+    if _is_budget_cap_mode(parsed_request):
+        return "tight"
+
     total_budget = _get_total_budget(parsed_request)
     num_people = _get_num_people(parsed_request)
     duration_days = _get_duration_days(parsed_request)
@@ -2069,6 +2077,9 @@ def _merge_cost_level(
         delta -= 1
     elif per_person_per_day > 1800:
         delta += 1
+
+    if _is_budget_cap_mode(parsed_request):
+        delta -= 2
 
     if llm_cost_level in COST_LEVEL_ORDER:
         llm_index = _cost_level_to_index(llm_cost_level)
@@ -2378,6 +2389,90 @@ def _estimate_buffer_cost(subtotal: int, strategy: str) -> int:
     return _round_to_100(subtotal * ratio)
 
 
+def _estimated_total_with_buffer(
+    parsed_request: Dict[str, Any],
+    cost_profile: Dict[str, Any],
+    normalized_prefs: Dict[str, str],
+    season_factor: float,
+    budget_strategy: str,
+) -> int:
+    transport = _estimate_transport_cost(parsed_request, cost_profile, normalized_prefs, season_factor)
+    hotel = _estimate_hotel_cost(parsed_request, cost_profile, normalized_prefs, season_factor)
+    food = _estimate_food_cost(parsed_request, cost_profile, normalized_prefs, season_factor)
+    attractions = _estimate_attraction_cost(parsed_request, cost_profile, normalized_prefs, season_factor)
+    return transport + hotel + food + attractions + _estimate_buffer_cost(
+        transport + hotel + food + attractions,
+        budget_strategy,
+    )
+
+
+def _apply_budget_pressure_downgrades(
+    parsed_request: Dict[str, Any],
+    cost_profile: Dict[str, Any],
+    normalized_prefs: Dict[str, str],
+    season_factor: float,
+    budget_strategy: str,
+) -> Tuple[Dict[str, str], List[str]]:
+    total_budget = _get_total_budget(parsed_request)
+    if total_budget <= 0:
+        return normalized_prefs, []
+
+    guarded = dict(normalized_prefs)
+    adjustments: List[str] = []
+
+    def estimated_total() -> int:
+        return _estimated_total_with_buffer(
+            parsed_request=parsed_request,
+            cost_profile=cost_profile,
+            normalized_prefs=guarded,
+            season_factor=season_factor,
+            budget_strategy=budget_strategy,
+        )
+
+    if estimated_total() <= total_budget:
+        return guarded, adjustments
+
+    downgrade_steps = [
+        ("flight_type", {"direct": "standard", "comfort": "standard", "standard": "budget"}),
+        ("hotel_level_detail", {"luxury": "standard", "premium": "standard"}),
+        ("hotel_level", {"premium": "standard", "standard": "budget"}),
+        ("food_level", {"premium": "standard", "standard": "budget"}),
+        ("attraction_intensity", {"heavy": "medium", "medium": "light"}),
+        ("hotel_central", {"yes": "no"}),
+        ("hotel_clean", {"yes": "no"}),
+        ("flight_type", {"standard": "budget"}),
+    ]
+
+    labels = {
+        "flight_type": "Downgraded flight execution toward cheaper/later/connecting options before asking for more budget.",
+        "hotel_level_detail": "Downgraded luxury hotel execution before asking for more budget.",
+        "hotel_level": "Downgraded hotel execution toward budget hotels before asking for more budget.",
+        "food_level": "Downgraded food execution toward budget/local choices before asking for more budget.",
+        "attraction_intensity": "Reduced paid activity intensity before asking for more budget.",
+        "hotel_central": "Relaxed central-location hotel requirement before asking for more budget.",
+        "hotel_clean": "Relaxed clean/high-standard hotel preference before asking for more budget.",
+    }
+
+    for key, mapping in downgrade_steps:
+        current = guarded.get(key)
+        replacement = mapping.get(current)
+        if not replacement or replacement == current:
+            continue
+
+        guarded[key] = replacement
+        if key == "hotel_level_detail" and replacement == "standard" and guarded.get("hotel_level") == "premium":
+            guarded["hotel_level"] = "standard"
+        adjustments.append(labels[key])
+
+        if estimated_total() <= total_budget:
+            break
+
+    if adjustments:
+        guarded["budget_pressure_mode"] = "yes"
+
+    return guarded, adjustments
+
+
 # =========================================================
 # Weighted Budget Compression
 # =========================================================
@@ -2498,7 +2593,8 @@ def _split_under_budget_plan(
     adjusted_plan: Dict[str, int],
     total_budget: int,
     normalized_prefs: Dict[str, str],
-    final_ratio: Optional[Dict[str, float]] = None
+    final_ratio: Optional[Dict[str, float]] = None,
+    allow_optional_upgrades: bool = True
 ) -> Tuple[Dict[str, int], Dict[str, int], int, List[str]]:
     adjustments: List[str] = []
 
@@ -2528,7 +2624,7 @@ def _split_under_budget_plan(
 
     remaining = max(0, total_budget - adjusted_total)
 
-    if remaining == 0:
+    if remaining == 0 or not allow_optional_upgrades:
         optional = {
             "transport": 0,
             "hotel": 0,
@@ -2536,6 +2632,11 @@ def _split_under_budget_plan(
             "attractions": 0,
             "buffer": 0
         }
+        if remaining > 0 and not allow_optional_upgrades:
+            recommended["buffer"] += remaining
+            adjustments.append(
+                "Budget cap mode is active, so remaining money was kept as buffer instead of being spent on optional upgrades."
+            )
         return recommended, optional, 0, adjustments
 
     upgrade_ratio = {
@@ -2793,6 +2894,8 @@ def travel_budget_agent(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
         budget_strategy = _normalize_text(parsed.get("budget_strategy"))
         if budget_strategy not in {"tight", "balanced", "comfortable"}:
             budget_strategy = _heuristic_strategy(parsed_request, llm_cost_level)
+        if _is_budget_cap_mode(parsed_request):
+            budget_strategy = "tight"
 
         normalized_prefs = _normalize_preference_levels(parsed_request)
         weighted_cost_profile = _get_weighted_cost_profile(parsed_request)
@@ -2816,6 +2919,22 @@ def travel_budget_agent(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
         )
 
         season_factor = _get_season_factor(parsed_request, destination_profile)
+
+        normalized_prefs, budget_pressure_adjustments = _apply_budget_pressure_downgrades(
+            parsed_request=parsed_request,
+            cost_profile=weighted_cost_profile,
+            normalized_prefs=normalized_prefs,
+            season_factor=season_factor,
+            budget_strategy=budget_strategy,
+        )
+        if normalized_prefs.get("budget_pressure_mode") == "yes":
+            budget_strategy = "tight"
+            final_cost_level = _merge_cost_level(
+                llm_cost_level=llm_cost_level,
+                profile_cost_level=profile_cost_level,
+                parsed_request=parsed_request,
+                normalized_prefs=normalized_prefs,
+            )
 
         transport_cost = _estimate_transport_cost(
             parsed_request, weighted_cost_profile, normalized_prefs, season_factor
@@ -2858,7 +2977,8 @@ def travel_budget_agent(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
             adjusted_plan=adjusted_plan,
             total_budget=total_budget,
             normalized_prefs=normalized_prefs,
-            final_ratio=final_ratio
+            final_ratio=final_ratio,
+            allow_optional_upgrades=not _is_budget_cap_mode(parsed_request)
         )
 
         budget_plan = {
@@ -2961,7 +3081,7 @@ def travel_budget_agent(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
                 "magnitude": "low",
                 "reason": "Local food tends to keep food allocation realistic rather than aggressively upscale."
             })
-        llm_adjustments = llm_adjustments + feasibility_adjustments
+        llm_adjustments = llm_adjustments + feasibility_adjustments + budget_pressure_adjustments
         result["allocation_basis"]["destination_profile"] = destination_profile
         result["allocation_basis"]["destination_profile_tier"] = destination_profile_tier
         result["allocation_basis"]["effective_cities"] = effective_cities

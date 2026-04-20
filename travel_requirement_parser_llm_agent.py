@@ -18,6 +18,51 @@ ENV_PATH = BASE_DIR / ".env"
 load_dotenv(dotenv_path=ENV_PATH, override=True)
 
 
+CURRENCY_ALIASES = {
+    "cny": "CNY",
+    "rmb": "CNY",
+    "人民币": "CNY",
+    "元": "CNY",
+    "yuan": "CNY",
+    "¥": "CNY",
+    "usd": "USD",
+    "us$": "USD",
+    "$": "USD",
+    "dollar": "USD",
+    "dollars": "USD",
+    "美元": "USD",
+    "eur": "EUR",
+    "€": "EUR",
+    "euro": "EUR",
+    "euros": "EUR",
+    "欧元": "EUR",
+    "gbp": "GBP",
+    "£": "GBP",
+    "pound": "GBP",
+    "pounds": "GBP",
+    "英镑": "GBP",
+    "jpy": "JPY",
+    "yen": "JPY",
+    "日元": "JPY",
+    "hkd": "HKD",
+    "港币": "HKD",
+    "sgd": "SGD",
+    "新币": "SGD",
+}
+
+# The budgeting engine's city profiles and downstream cost estimates are CNY-based.
+# Keep rates explicit so non-CNY input is not silently mislabeled as CNY.
+CURRENCY_TO_CNY = {
+    "CNY": 1.0,
+    "USD": 7.1,
+    "EUR": 7.7,
+    "GBP": 9.0,
+    "JPY": 0.048,
+    "HKD": 0.91,
+    "SGD": 5.3,
+}
+
+
 def get_llm_backend_status() -> dict:
     """
     Return the current LLM backend status.
@@ -119,22 +164,23 @@ Strict rules:
 6. If only one destination is found, still return it as an array.
 7. If the user mentions a country but not a city, put the country in "country" and keep "destination" as [].
 8. "budget.total" must be a number if possible.
-9. "num_people" must be an integer if possible.
-10. "duration_days" must be an integer if possible.
-11. Only fill "travel_dates.start" and "travel_dates.end" when the date is explicit enough.
-12. If the user gives month/day expressions without a year, resolve them to the current calendar year by default.
-13. If a missing year must be resolved, do not roll the date into next year just because the month/day has already passed.
-14. If exact dates still cannot be safely determined, set "start" and "end" to null and keep the original phrase in "travel_dates.text".
-15. Do not invent any information not explicitly mentioned by the user, except for resolving a missing year in travel dates to the current calendar year.
-16. Use controlled vocabulary only for preference categories. Do not output free-form preference text for those category fields.
-17. Preserve both:
+9. Preserve the user's budget currency. For example, "2000dollar", "2000 dollars", "$2000", and "2000 USD" must use "USD", not "CNY".
+10. "num_people" must be an integer if possible.
+11. "duration_days" must be an integer if possible.
+12. Only fill "travel_dates.start" and "travel_dates.end" when the date is explicit enough.
+13. If the user gives month/day expressions without a year, resolve them to the current calendar year by default.
+14. If a missing year must be resolved, do not roll the date into next year just because the month/day has already passed.
+15. If exact dates still cannot be safely determined, set "start" and "end" to null and keep the original phrase in "travel_dates.text".
+16. Do not invent any information not explicitly mentioned by the user, except for resolving a missing year in travel dates to the current calendar year.
+17. Use controlled vocabulary only for preference categories. Do not output free-form preference text for those category fields.
+18. Preserve both:
    - legacy scalar fields for backward compatibility
    - richer new fields for more detailed downstream planning
-18. If multiple styles/preferences are mentioned, keep all of them in the new list fields.
-19. If the user explicitly names a specific attraction, landmark, museum, park, temple, tower, palace, castle, district, street, site, or destination spot they want to visit, put it into preferences.must_visit_attractions.
-20. Do not convert a specific named attraction into only a style label. Keep both if applicable.
-21. preferences.must_visit_attractions must be a JSON array of strings.
-22. Only include attractions explicitly mentioned by the user. Do not guess.
+19. If multiple styles/preferences are mentioned, keep all of them in the new list fields.
+20. If the user explicitly names a specific attraction, landmark, museum, park, temple, tower, palace, castle, district, street, site, or destination spot they want to visit, put it into preferences.must_visit_attractions.
+21. Do not convert a specific named attraction into only a style label. Keep both if applicable.
+22. preferences.must_visit_attractions must be a JSON array of strings.
+23. Only include attractions explicitly mentioned by the user. Do not guess.
 
 Allowed values:
 
@@ -408,6 +454,81 @@ def _normalize_string(value: Any) -> Optional[str]:
         return cleaned if cleaned else None
 
     return str(value).strip() or None
+
+
+def _normalize_currency(value: Any) -> str:
+    text = _normalize_string(value)
+    if not text:
+        return "CNY"
+    compact = text.strip().lower()
+    return CURRENCY_ALIASES.get(compact, compact.upper())
+
+
+def _currency_token_pattern() -> str:
+    tokens = sorted(CURRENCY_ALIASES.keys(), key=len, reverse=True)
+    return "|".join(re.escape(token) for token in tokens)
+
+
+def _infer_budget_currency_from_text(user_request: str, budget_total: Optional[int]) -> Optional[str]:
+    if budget_total is None:
+        return None
+
+    text = user_request or ""
+    number = re.escape(str(budget_total))
+    currency = _currency_token_pattern()
+    patterns = [
+        rf"(?i)(?:{currency})\s*{number}(?:\.0+)?\b",
+        rf"(?i)\b{number}(?:\.0+)?\s*(?:{currency})",
+    ]
+    for pattern in patterns:
+        match = re.search(pattern, text)
+        if match:
+            matched_text = match.group(0).lower()
+            for alias in sorted(CURRENCY_ALIASES.keys(), key=len, reverse=True):
+                if alias.lower() in matched_text:
+                    return CURRENCY_ALIASES[alias]
+
+    budget_nearby = re.search(
+        rf"(?i)(?:budget|预算|费用|cost|spend|total)\D{{0,20}}(\d+(?:\.\d+)?)\s*({currency})",
+        text,
+    )
+    if budget_nearby:
+        return CURRENCY_ALIASES.get(budget_nearby.group(2).lower())
+
+    return None
+
+
+def _normalize_budget_for_planning(
+    budget: Dict[str, Any],
+    user_request: str,
+) -> Dict[str, Any]:
+    total = _extract_number(budget.get("total"))
+    llm_currency = _normalize_currency(budget.get("currency"))
+    text_currency = _infer_budget_currency_from_text(user_request, total)
+    source_currency = text_currency or llm_currency or "CNY"
+
+    normalized = {
+        "total": total,
+        "currency": source_currency,
+    }
+    if total is None:
+        return normalized
+
+    rate = CURRENCY_TO_CNY.get(source_currency)
+    if source_currency != "CNY" and rate:
+        converted_total = int(round(total * rate))
+        normalized.update({
+            "total": converted_total,
+            "currency": "CNY",
+            "source_total": total,
+            "source_currency": source_currency,
+            "conversion_rate_to_cny": rate,
+            "conversion_note": (
+                f"Converted from {total} {source_currency} to approximately "
+                f"{converted_total} CNY for CNY-based planning estimates."
+            ),
+        })
+    return normalized
 
 
 def _extract_number(value: Any) -> Optional[int]:
@@ -830,8 +951,7 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
 
     budget = parsed.get("budget", {})
     if isinstance(budget, dict):
-        result["budget"]["total"] = _extract_number(budget.get("total"))
-        result["budget"]["currency"] = _normalize_string(budget.get("currency")) or "CNY"
+        result["budget"].update(_normalize_budget_for_planning(budget, user_request))
 
     result["preferences"] = _normalize_preferences(
         parsed.get("preferences") or {}

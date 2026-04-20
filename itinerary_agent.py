@@ -12,7 +12,7 @@ POI_VISIT_HOURS = 1.5
 MEAL_HOURS = 1.0
 FLIGHT_BUFFER_HOURS = 2.0
 REDEYE_TIME_FACTOR = 0.5
-LOCAL_TRANSPORT_PER_DAY = 200
+LOCAL_TRANSPORT_RATE_BY_TIER = {"low": 1.0, "medium": 2.0, "high": 8.0}
 MID_DISTANCE_CAR_COST = {"low": 300, "medium": 400, "high": 500}
 MAX_DRIVE_HOURS_PER_LEG = 5.0
 HOTEL_CLUSTER_RADIUS_KM = 5.0
@@ -88,6 +88,8 @@ def _build_flight_day_constraints(selected_all_flight_legs: List[Dict[str, Any]]
 
 def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
     normalized = _normalize_agent3_payload(router_output)
+    local_transport_tier = _local_transport_tier_from_cost_level(normalized.get("cost_level"))
+    local_transport_rate = _local_transport_rate_per_minute(local_transport_tier)
     city_budget_map = _build_city_budget_map(normalized.get("city_budget_plan", []))
     daily_slots = _extract_daily_city_slots(normalized.get("city_date_ranges", {}))
     flight_day_constraints = _build_flight_day_constraints(normalized.get("selected_all_flight_legs", []))
@@ -151,18 +153,9 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         city = _normalize_text(slot.get("city"))
         hotel = city_hotel_map.get(city)
         day_plan = _init_day_plan(slot=slot, hotel=hotel)
+        day_plan["local_transport_tier"] = local_transport_tier
+        day_plan["local_transport_rate_per_minute"] = local_transport_rate
         day_plan.update(flight_day_constraints.get(_normalize_text(slot.get("date")), {}))
-
-        if _normalize_text(day_plan.get("skip_city_local_transport")).lower() != "true":
-            _append_event(
-                day_plan=day_plan,
-                event_type="local_transport",
-                name=f"Local transport in {city}",
-                duration_h=0.0,
-                cost_estimated=float(_estimate_local_transport_cost_per_day()),
-                meta={"city": city, "all_day_cost": True},
-            )
-            day_plan["transport_cost_estimated"] = float(day_plan.get("transport_cost_estimated", 0.0)) + float(_estimate_local_transport_cost_per_day())
 
         day_budget = city_budget_map.get(city, {})
         city_candidates = city_candidates_map.get(city, {"pois": [], "restaurants": []})
@@ -203,6 +196,9 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         selected_all_flight_legs=normalized.get("selected_all_flight_legs", []),
     )
 
+    total_budget = float(_safe_float(normalized.get("trip_summary", {}).get("budget", {}).get("total"), 0.0))
+    budget_trim_warnings = _enforce_total_budget_hard_cap(daily_plans, total_budget)
+
     validated_plans: List[Dict[str, Any]] = []
     for day in daily_plans:
         checks = _validate_day_constraints(day)
@@ -214,7 +210,6 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
             day.setdefault("warnings", []).append(w)
         validated_plans.append(day)
 
-    total_budget = float(_safe_float(normalized.get("trip_summary", {}).get("budget", {}).get("total"), 0.0))
     budget_check = _validate_budget_constraints(
         daily_plans=validated_plans,
         total_budget=total_budget,
@@ -242,6 +237,7 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         daily_plans=validated_plans,
         must_visit_uncovered=must_uncovered,
     )
+    warnings.extend(budget_trim_warnings)
 
     cost_rollup = _build_cost_rollup(validated_plans)
     itinerary_summary = _build_itinerary_summary(
@@ -263,9 +259,11 @@ def _normalize_agent3_payload(router_output: Dict[str, Any]) -> Dict[str, Any]:
     payload = router_output if isinstance(router_output, dict) else {}
     trip_summary = payload.get("trip_summary", {}) or {}
     preferences = trip_summary.get("preferences", {}) or {}
+    agent2_summary = payload.get("agent2_summary", {}) or {}
 
     return {
         "trip_summary": trip_summary,
+        "cost_level": payload.get("cost_level") or agent2_summary.get("cost_level"),
         "city_date_ranges": payload.get("city_date_ranges", {}) or {},
         "city_budget_plan": payload.get("city_budget_plan", []) or [],
         "selected_hotels": payload.get("selected_hotels", []) or [],
@@ -632,8 +630,25 @@ def _estimate_mid_distance_transport_cost(city_tier: str) -> int:
     return int(MID_DISTANCE_CAR_COST[tier])
 
 
-def _estimate_local_transport_cost_per_day() -> int:
-    return int(LOCAL_TRANSPORT_PER_DAY)
+def _local_transport_tier_from_cost_level(cost_level: Any) -> str:
+    level = _normalize_text(cost_level).lower()
+    if level in {"high", "luxury"}:
+        return "high"
+    if level in {"medium", "medium_high"}:
+        return "medium"
+    return "low"
+
+
+def _local_transport_rate_per_minute(tier: str) -> float:
+    key = _normalize_text(tier).lower()
+    return float(LOCAL_TRANSPORT_RATE_BY_TIER.get(key, LOCAL_TRANSPORT_RATE_BY_TIER["medium"]))
+
+
+def _estimate_local_transfer_cost(duration_h: float, tier: Any) -> float:
+    minutes = max(0, int(round(_safe_float(duration_h, 0.0) * 60)))
+    if minutes <= 0:
+        return 0.0
+    return round(minutes * _local_transport_rate_per_minute(_normalize_text(tier)), 2)
 
 
 def _collect_city_candidates(
@@ -1003,19 +1018,28 @@ def _append_commute_before_place(
         return 0.0
 
     from_name = _normalize_text(previous.get("name")) or "previous stop"
+    city = _normalize_text(day_plan.get("city"))
+    local_tier = _normalize_text(day_plan.get("local_transport_tier")) or "medium"
+    cost = _estimate_local_transfer_cost(commute_h, local_tier)
     _append_event(
         day_plan=day_plan,
         event_type="transfer",
         name=f"Transfer {from_name} -> {to_name}",
         duration_h=commute_h,
-        cost_estimated=0.0,
+        cost_estimated=cost,
         meta={
-            "city": _normalize_text(day_plan.get("city")),
+            "city": city,
             "from": from_name,
             "to": _normalize_text(to_name),
             "duration_source": source,
             "distance_km": distance_km,
+            "pricing_rule": f"{local_tier}_tier_{_local_transport_rate_per_minute(local_tier):g}_cny_per_minute",
+            "duration_minutes": int(round(commute_h * 60)),
         },
+    )
+    day_plan["transport_cost_estimated"] = round(
+        _safe_float(day_plan.get("transport_cost_estimated"), 0.0) + cost,
+        2,
     )
     if source != "heigit_routes_api":
         day_plan.setdefault("warnings", []).append(
@@ -1596,6 +1620,83 @@ def _validate_budget_constraints(
     }
 
 
+def _remove_event_at(day: Dict[str, Any], index: int) -> List[str]:
+    events = day.get("events", [])
+    if not isinstance(events, list) or index < 0 or index >= len(events):
+        return []
+
+    removed = []
+    target = events[index]
+    target_name = _normalize_text(target.get("name"))
+    keep: List[Dict[str, Any]] = []
+    for idx, event in enumerate(events):
+        if idx == index:
+            removed.append(target_name or _normalize_text(target.get("type")) or "event")
+            continue
+        event_type = _normalize_text(event.get("type"))
+        meta = event.get("meta") or {}
+        if event_type == "transfer" and isinstance(meta, dict):
+            if _normalize_text(meta.get("to")) == target_name or _normalize_text(meta.get("from")) == target_name:
+                removed.append(_normalize_text(event.get("name")) or "linked transfer")
+                continue
+        keep.append(event)
+
+    day["events"] = keep
+    _sort_and_recompute_day(day)
+    return removed
+
+
+def _enforce_total_budget_hard_cap(
+    daily_plans: List[Dict[str, Any]],
+    total_budget: float,
+) -> List[str]:
+    warnings: List[str] = []
+    if total_budget <= 0:
+        return warnings
+
+    def current_total() -> float:
+        return _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+
+    removable_type_order = ["poi", "meal", "transfer"]
+    while current_total() > total_budget:
+        best: Optional[Tuple[int, float, int, int]] = None
+        for type_rank, event_type in enumerate(removable_type_order):
+            for day_index, day in enumerate(daily_plans):
+                for event_index, event in enumerate(day.get("events", []) or []):
+                    if _normalize_text(event.get("type")) != event_type:
+                        continue
+                    cost = _safe_float(event.get("cost_estimated"), 0.0)
+                    if cost <= 0:
+                        continue
+                    candidate = (type_rank, -cost, day_index, event_index)
+                    if best is None or candidate < best:
+                        best = candidate
+            if best is not None and best[0] == type_rank:
+                break
+
+        if best is None:
+            warnings.append(
+                f"Budget hard cap could not be reached: fixed transport/hotel costs are {round(current_total(), 2)} CNY against budget {round(total_budget, 2)} CNY."
+            )
+            break
+
+        _, _, day_index, event_index = best
+        day = daily_plans[day_index]
+        before = current_total()
+        removed_names = _remove_event_at(day, event_index)
+        after = current_total()
+        if not removed_names or after >= before:
+            warnings.append("Budget hard cap trimming stopped because no further removable paid events reduced cost.")
+            break
+        warnings.append(
+            "Budget hard cap adjustment: removed "
+            + ", ".join(name for name in removed_names if name)
+            + f" to keep total cost within {round(total_budget, 2)} CNY."
+        )
+
+    return warnings
+
+
 def _build_itinerary_warnings(
     daily_plans: List[Dict[str, Any]],
     must_visit_uncovered: List[str],
@@ -1700,6 +1801,10 @@ def _format_agent4_output(
         "itinerary_summary": itinerary_summary,
         "daily_plan": daily_plans,
         "cost_rollup": cost_rollup,
+        "budget_check": {
+            "budget_feasible": itinerary_summary.get("budget_feasible", True),
+            "estimated_total": cost_rollup.get("total_selected_estimated"),
+        },
         "warnings": warnings,
     }
 

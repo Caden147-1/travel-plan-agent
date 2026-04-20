@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import time
 from datetime import datetime
 
 from travel_requirement_parser_llm_agent import (
@@ -365,6 +367,24 @@ def _clean_final_output(agent3_output: dict, parsed: dict, budget_result: dict |
     }
 
 
+def _selected_total_from_budget_check(budget_check: dict) -> float:
+    if not isinstance(budget_check, dict):
+        return 0.0
+    keys = [
+        "selected_total_transport_spend",
+        "selected_hotel_total_reference",
+        "selected_restaurant_total",
+        "selected_poi_total",
+    ]
+    total = 0.0
+    for key in keys:
+        try:
+            total += float(budget_check.get(key) or 0.0)
+        except (TypeError, ValueError):
+            continue
+    return round(total, 2)
+
+
 def _build_mid_distance_car_rental_plan(parsed: dict, budget_result: dict) -> dict:
     city_days = budget_result.get("city_budget_plan") or _normalize_effective_cities(parsed)
     if not isinstance(city_days, list) or len(city_days) <= 1:
@@ -377,6 +397,180 @@ def _build_mid_distance_car_rental_plan(parsed: dict, budget_result: dict) -> di
         currency=currency,
         use_llm=True,
     )
+
+
+def _log_stage(stage: str, started_at: float) -> None:
+    elapsed = time.perf_counter() - started_at
+    print(f"[pipeline] {stage} finished in {elapsed:.2f}s")
+
+
+def _is_budget_cap_followup(user_request: str) -> bool:
+    text = (user_request or "").lower()
+    patterns = [
+        r"\bincrease\s+(?:the\s+)?budget\s+to\b",
+        r"\bbudget\s+(?:is\s+)?now\b",
+        r"\bkeep\s+(?:the\s+)?same\s+plan\b",
+        r"\baccept\s+(?:a\s+)?small\s+over",
+        r"\bfit\s+(?:the\s+)?budget\b",
+        r"\bstay\s+at\s+budget\b",
+        r"\bbudget\s+hotels?\b",
+    ]
+    return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _apply_budget_cap_mode(parsed: dict, user_request: str) -> dict:
+    if not _is_budget_cap_followup(user_request):
+        return parsed
+
+    parsed = dict(parsed)
+    preferences = dict(parsed.get("preferences") or {})
+    planning_signals = dict(parsed.get("planning_signals") or {})
+
+    preferences.setdefault("hotel_features", [])
+    preferences.setdefault("food_preferences", [])
+    preferences.setdefault("attraction_styles", [])
+    preferences["hotel_level"] = "budget"
+    if not preferences.get("hotel") or str(preferences.get("hotel")).lower() in {"standard", "clean", "central"}:
+        preferences["hotel"] = "budget"
+
+    planning_signals["budget_discipline"] = "cap"
+    planning_signals["hotel_level"] = "low"
+    planning_signals.setdefault("food_priority", "medium")
+    planning_signals.setdefault("attraction_intensity", "low")
+
+    parsed["preferences"] = preferences
+    parsed["planning_signals"] = planning_signals
+    parsed["budget_cap_mode"] = True
+    return parsed
+
+
+def _finalize_success_output(final_output: dict, user_request: str, auto_open_report: bool) -> dict:
+    started = time.perf_counter()
+    try:
+        itinerary_output = run_itinerary_agent(final_output)
+        final_output["itinerary"] = itinerary_output
+    except Exception as e:
+        final_output.setdefault("warnings", [])
+        final_output["warnings"].append(f"Agent4 itinerary planning failed: {str(e)}")
+        final_output["itinerary"] = {
+            "success": False,
+            "stage": "agent4_itinerary_planning",
+            "error": str(e),
+        }
+    finally:
+        _log_stage("agent4_itinerary", started)
+
+    itinerary = final_output.get("itinerary") or {}
+    itinerary_summary = itinerary.get("itinerary_summary") or {}
+    if itinerary_summary.get("budget_feasible") is False:
+        cost_rollup = itinerary.get("cost_rollup") or {}
+        total_budget = ((final_output.get("trip_summary") or {}).get("budget") or {}).get("total")
+        final_output["success"] = False
+        final_output["stage"] = "budget_feasibility"
+        final_output["error"] = (
+            f"Even after trimming optional meals and paid activities, fixed costs are "
+            f"{cost_rollup.get('total_selected_estimated')} CNY against budget {total_budget} CNY. "
+            "Please increase the budget, shorten the trip, or change dates/destination."
+        )
+        return final_output
+
+    started = time.perf_counter()
+    try:
+        final_output["report"] = write_travel_report(
+            final_output,
+            user_request,
+            auto_open=auto_open_report,
+        )
+    except Exception as e:
+        final_output.setdefault("warnings", [])
+        final_output["warnings"].append(f"HTML report generation failed: {str(e)}")
+        final_output["report"] = {
+            "success": False,
+            "error": str(e),
+        }
+    finally:
+        _log_stage("html_report", started)
+
+    return final_output
+
+
+def _run_agent2_agent3(parsed: dict) -> tuple[dict | None, dict | None, dict | None, dict]:
+    started = time.perf_counter()
+    budget_result = travel_budget_agent(parsed)
+    _log_stage("agent2_budget", started)
+
+    if budget_result.get("meta", {}).get("error"):
+        return None, None, {
+            "success": False,
+            "stage": "agent2_budget",
+            "error": budget_result.get("meta", {}).get("error"),
+            "parsed_request": parsed,
+            "budget_result": budget_result
+        }, budget_result
+
+    started = time.perf_counter()
+    mid_distance_car_rental = _build_mid_distance_car_rental_plan(parsed, budget_result)
+    _log_stage("mid_distance_car_rental", started)
+
+    agent3_input = {
+        "parsed_request": parsed,
+        "budget_result": budget_result,
+        "mid_distance_car_rental": mid_distance_car_rental,
+        "city_budget_plan": budget_result.get("city_budget_plan", []),
+        "recommended_spend": budget_result.get("recommended_spend", budget_result.get("budget_plan", {})),
+        "budget_plan": budget_result.get("budget_plan", {}),
+        "allocation_basis": budget_result.get("allocation_basis", {}),
+        "normalized_preferences": budget_result.get("normalized_preferences", {}),
+        "budget_strategy": budget_result.get("budget_strategy"),
+        "cost_level": budget_result.get("cost_level"),
+        "budget_status": budget_result.get("budget_status"),
+        "agent2_summary": {
+            "budget_strategy": budget_result.get("budget_strategy"),
+            "cost_level": budget_result.get("cost_level"),
+            "budget_status": budget_result.get("budget_status"),
+            "normalized_preferences": budget_result.get("normalized_preferences", {}),
+            "budget_plan": budget_result.get("budget_plan", {}),
+            "city_budget_plan": budget_result.get("city_budget_plan", []),
+        },
+        "num_people": parsed.get("num_people"),
+        "duration_days": parsed.get("duration_days"),
+        "budget": parsed.get("budget"),
+        "origin": parsed.get("origin"),
+        "destination": parsed.get("destination"),
+        "preferences": parsed.get("preferences", {}),
+        "planning_signals": parsed.get("planning_signals", {}),
+    }
+
+    started = time.perf_counter()
+    try:
+        agent3_agent = Agent3Selection(agent3_input)
+        agent3_output = agent3_agent.generate_shortlist()
+    except Exception as e:
+        return None, None, {
+            "success": False,
+            "stage": "agent3_real_selection",
+            "error": f"agent3 selection failed: {str(e)}",
+            "parsed_request": parsed,
+            "budget_result": budget_result,
+            "agent3_input_preview": {
+                "city_budget_plan": agent3_input.get("city_budget_plan", []),
+                "normalized_preferences": agent3_input.get("normalized_preferences", {}),
+                "allocation_basis": agent3_input.get("allocation_basis", {}),
+            }
+        }, budget_result
+    finally:
+        _log_stage("agent3_realtime_selection", started)
+
+    if not agent3_output.get("success"):
+        return None, agent3_output, {
+            "success": False,
+            "stage": agent3_output.get("stage", "agent3_real_selection"),
+            "error": agent3_output.get("error", "agent3 failed"),
+            "parsed_request": parsed,
+            "budget_result": budget_result
+        }, budget_result
+
+    return budget_result, agent3_output, None, budget_result
 
 
 def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dict:
@@ -412,6 +606,74 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
             "error": validation_error,
             "parsed_request": parsed
         }
+
+    parsed = _apply_budget_cap_mode(parsed, user_request)
+
+    budget_result, agent3_output, pipeline_error, _ = _run_agent2_agent3(parsed)
+    if pipeline_error:
+        return pipeline_error
+
+    # Clean final output
+    final_output = _clean_final_output(agent3_output, parsed, budget_result)
+    final_output["original_request"] = user_request
+
+    budget_check = final_output.get("budget_check") or {}
+    total_budget = float(budget_check.get("total_budget_input") or 0.0)
+    selected_total = _selected_total_from_budget_check(budget_check)
+    if total_budget > 0 and selected_total > total_budget:
+        final_failed_total = selected_total
+        if not parsed.get("budget_cap_mode"):
+            retry_parsed = _apply_budget_cap_mode(
+                parsed,
+                "fit the budget with cheap flights, budget hotels, fewer paid activities, and no comfort upgrades",
+            )
+            retry_budget_result, retry_agent3_output, retry_error, _ = _run_agent2_agent3(retry_parsed)
+            if not retry_error:
+                retry_final_output = _clean_final_output(retry_agent3_output, retry_parsed, retry_budget_result)
+                retry_final_output["original_request"] = user_request
+                retry_budget_check = retry_final_output.get("budget_check") or {}
+                retry_total_budget = float(retry_budget_check.get("total_budget_input") or 0.0)
+                retry_selected_total = _selected_total_from_budget_check(retry_budget_check)
+                final_failed_total = retry_selected_total or final_failed_total
+                if retry_total_budget > 0 and retry_selected_total <= retry_total_budget:
+                    retry_final_output.setdefault("warnings", [])
+                    retry_final_output["warnings"].append(
+                        "Budget pressure adjustment: the first selected plan exceeded the budget, so the system automatically retried with cheaper flights, budget hotels, fewer paid activities, and no comfort upgrades."
+                    )
+                    retry_final_output["agent2_summary"] = {
+                        "budget_strategy": retry_budget_result.get("budget_strategy"),
+                        "cost_level": retry_budget_result.get("cost_level"),
+                        "budget_status": retry_budget_result.get("budget_status"),
+                        "normalized_preferences": retry_budget_result.get("normalized_preferences", {}),
+                        "budget_plan": retry_budget_result.get("budget_plan", {}),
+                        "city_budget_plan": retry_budget_result.get("city_budget_plan", []),
+                    }
+                    return _finalize_success_output(retry_final_output, user_request, auto_open_report)
+
+        return {
+            "success": False,
+            "stage": "budget_feasibility",
+            "error": (
+                f"Selected plan still exceeds the budget after automatic downgrades: estimated selected spend is {final_failed_total} CNY, "
+                f"but the planning budget is {total_budget} CNY. Please increase the budget or shorten the trip."
+            ),
+            "parsed_request": parsed,
+            "budget_result": budget_result,
+            "trip_summary": final_output.get("trip_summary", {}),
+            "budget_check": budget_check,
+            "warnings": final_output.get("warnings", []),
+        }
+
+    final_output["agent2_summary"] = {
+        "budget_strategy": budget_result.get("budget_strategy"),
+        "cost_level": budget_result.get("cost_level"),
+        "budget_status": budget_result.get("budget_status"),
+        "normalized_preferences": budget_result.get("normalized_preferences", {}),
+        "budget_plan": budget_result.get("budget_plan", {}),
+        "city_budget_plan": budget_result.get("city_budget_plan", []),
+    }
+
+    return _finalize_success_output(final_output, user_request, auto_open_report)
 
     # Agent2 budget planning
     budget_result = travel_budget_agent(parsed)
@@ -494,6 +756,26 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
     # Clean final output
     final_output = _clean_final_output(agent3_output, parsed, budget_result)
     final_output["original_request"] = user_request
+
+    budget_check = final_output.get("budget_check") or {}
+    total_budget = float(budget_check.get("total_budget_input") or 0.0)
+    selected_total = _selected_total_from_budget_check(budget_check)
+    if total_budget > 0 and selected_total > total_budget:
+        return {
+            "success": False,
+            "stage": "budget_feasibility",
+            "error": (
+                f"Selected plan exceeds the budget: estimated selected spend is {selected_total} CNY, "
+                f"but the planning budget is {total_budget} CNY. Please increase the budget, shorten the trip, "
+                "or relax route/hotel constraints."
+            ),
+            "parsed_request": parsed,
+            "budget_result": budget_result,
+            "trip_summary": final_output.get("trip_summary", {}),
+            "budget_check": budget_check,
+            "warnings": final_output.get("warnings", []),
+        }
+
     final_output["agent2_summary"] = {
         "budget_strategy": budget_result.get("budget_strategy"),
         "cost_level": budget_result.get("cost_level"),

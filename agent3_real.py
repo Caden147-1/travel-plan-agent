@@ -202,6 +202,12 @@ class Agent3Selection:
 
         self.rooms_needed = max(1, math.ceil(self.num_people / 2))
 
+        self.budget_pressure_mode = (
+            self._normalize_text(self.normalized_preferences.get("budget_pressure_mode")).lower() == "yes"
+            or self._normalize_text(self.raw_planning_signals.get("budget_discipline")).lower() == "cap"
+            or self._normalize_text(self.budget_strategy).lower() == "tight"
+        )
+
         self.flight_selected_limit = 1
         self.flight_budget_tolerance = 1.15
         self.flight_relaxed_budget_tolerance = 1.25
@@ -224,6 +230,22 @@ class Agent3Selection:
             "historical centre", "near cathedral", "near station"
         ]
         self.strict_preference_filtering = True
+        if self.budget_pressure_mode:
+            self.flight_pref = "cheap"
+            self.flight_priority = "low"
+            self.hotel_pref = "budget"
+            self.hotel_level = "budget"
+            self.hotel_level_rich = "budget"
+            self.food_level = "budget"
+            self.attraction_intensity = "light"
+            self.flight_type = "budget"
+            self.flight_budget_tolerance = 1.05
+            self.flight_relaxed_budget_tolerance = 1.10
+            self.hotel_budget_tolerance = 1.05
+            self.restaurant_budget_tolerance = 1.00
+            self.poi_budget_tolerance = 1.00
+            self.prefer_direct_price_gap_ratio = 0.05
+            self.strict_preference_filtering = False
 
         self.selection_policy = self._build_selection_policy()
 
@@ -1774,6 +1796,8 @@ class Agent3Selection:
         return base
 
     def _restaurant_target_count(self, city_days: int) -> int:
+        if self.budget_pressure_mode:
+            return max(1, city_days)
         return max(2, city_days * 2)
 
     # =========================================================
@@ -2732,6 +2756,14 @@ class Agent3Selection:
     def _estimate_restaurant_cost(self, restaurant: Dict[str, Any], city_days: int) -> Dict[str, Any]:
         tier_result = self._get_restaurant_tier(restaurant)
         estimated_meal_per_person = float(tier_result.get("tier_price_per_person", 300))
+        if self.budget_pressure_mode:
+            estimated_meal_per_person = min(estimated_meal_per_person, 100.0)
+            tier_result = {
+                **tier_result,
+                "tier_price_per_person": 100,
+                "source": "budget_pressure_cap",
+                "reason": "Budget is a hard cap, so restaurant execution is capped at budget/local meal pricing.",
+            }
         recommended_visits = 1
         estimated_total_cost = round(estimated_meal_per_person * self.num_people * recommended_visits, 2)
         restaurant["estimated_meal_per_person"] = estimated_meal_per_person
@@ -3387,11 +3419,22 @@ class Agent3Selection:
         if not flights:
             return [], "no_candidates"
 
-        ranked = sorted(
-            flights,
-            key=lambda x: (x.get("score", 0), -self._safe_float(x.get("price_total"), 0.0)),
-            reverse=True
-        )
+        if self.budget_pressure_mode:
+            ranked = sorted(
+                flights,
+                key=lambda x: (
+                    self._safe_float(x.get("price_total"), 999999.0)
+                    if self._safe_float(x.get("price_total"), 0.0) > 0
+                    else 999999.0,
+                    -self._safe_float(x.get("score"), 0.0),
+                ),
+            )
+        else:
+            ranked = sorted(
+                flights,
+                key=lambda x: (x.get("score", 0), -self._safe_float(x.get("price_total"), 0.0)),
+                reverse=True
+            )
 
         strict = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget]
         if strict:
@@ -3407,7 +3450,10 @@ class Agent3Selection:
 
         priced = [f for f in ranked if self._safe_float(f.get("price_total"), 0.0) > 0]
         if priced:
-            closest = sorted(priced, key=lambda x: abs(self._safe_float(x.get("price_total"), 0.0) - budget))
+            if self.budget_pressure_mode:
+                closest = sorted(priced, key=lambda x: self._safe_float(x.get("price_total"), 0.0))
+            else:
+                closest = sorted(priced, key=lambda x: abs(self._safe_float(x.get("price_total"), 0.0) - budget))
             return closest[:max_items], "closest_to_budget"
 
         return ranked[:max_items], "price_unavailable"
@@ -3423,11 +3469,22 @@ class Agent3Selection:
         if not items:
             return [], "no_candidates"
 
-        ranked = sorted(
-            items,
-            key=lambda x: (x.get("score", 0), -self._safe_float(x.get(cost_key), 0.0)),
-            reverse=True
-        )
+        if self.budget_pressure_mode:
+            ranked = sorted(
+                items,
+                key=lambda x: (
+                    self._safe_float(x.get(cost_key), 999999.0)
+                    if self._safe_float(x.get(cost_key), 0.0) > 0
+                    else 999999.0,
+                    -self._safe_float(x.get("score"), 0.0),
+                ),
+            )
+        else:
+            ranked = sorted(
+                items,
+                key=lambda x: (x.get("score", 0), -self._safe_float(x.get(cost_key), 0.0)),
+                reverse=True
+            )
 
         selected = []
         spent = 0.0
@@ -3444,6 +3501,9 @@ class Agent3Selection:
 
         if selected:
             return selected, "within_budget"
+
+        if self.budget_pressure_mode:
+            return [], "not_found_within_hard_budget"
 
         relaxed = []
         for item in ranked:
@@ -3505,7 +3565,7 @@ class Agent3Selection:
                 can_take = True
             elif spent + item_cost <= effective_budget:
                 can_take = True
-            elif not selected and spent == 0:
+            elif not self.budget_pressure_mode and not selected and spent == 0:
                 can_take = True
 
             if can_take:
@@ -3560,6 +3620,9 @@ class Agent3Selection:
                 return selected, "slightly_over_budget", warnings
             return selected, "within_budget", warnings
 
+        if self.budget_pressure_mode:
+            return [], "not_found_within_hard_budget", warnings
+
         relaxed = []
         for item in ranked:
             item_cost = self._safe_float(item.get(cost_key), 0.0)
@@ -3572,6 +3635,9 @@ class Agent3Selection:
 
         if relaxed:
             return relaxed, "not_found_within_tolerance", warnings
+
+        if self.budget_pressure_mode:
+            return [], "not_found_within_hard_budget", warnings
 
         return ranked[:max_items], "not_found_within_tolerance", warnings
 
@@ -3586,11 +3652,22 @@ class Agent3Selection:
         if not hotels:
             return [], "no_candidates"
 
-        ranked = sorted(
-            hotels,
-            key=lambda x: (x.get("score", 0), -self._safe_float(x.get("estimated_total_cost"), 0.0)),
-            reverse=True
-        )
+        if self.budget_pressure_mode:
+            ranked = sorted(
+                hotels,
+                key=lambda x: (
+                    self._safe_float(x.get("estimated_total_cost"), 999999.0)
+                    if self._safe_float(x.get("estimated_total_cost"), 0.0) > 0
+                    else 999999.0,
+                    -self._safe_float(x.get("score"), 0.0),
+                ),
+            )
+        else:
+            ranked = sorted(
+                hotels,
+                key=lambda x: (x.get("score", 0), -self._safe_float(x.get("estimated_total_cost"), 0.0)),
+                reverse=True
+            )
 
         within_budget = []
         slightly_over_budget = []
@@ -3609,6 +3686,11 @@ class Agent3Selection:
 
         if len(within_budget) >= minimum_items:
             return within_budget[:max_items], "within_budget"
+
+        if self.budget_pressure_mode:
+            if within_budget:
+                return within_budget[:max_items], "partial_within_hard_budget"
+            return [], "not_found_within_hard_budget"
 
         combined = within_budget + slightly_over_budget
         if len(combined) >= minimum_items:
@@ -4236,7 +4318,7 @@ class Agent3Selection:
                 tolerance=self.hotel_budget_tolerance
             )
 
-            if not selected_city_hotels and estimated_hotels:
+            if not selected_city_hotels and estimated_hotels and not self.budget_pressure_mode:
                 fallback_ranked_hotels = self._rank_hotels(estimated_hotels)
                 selected_city_hotels, hotel_status = self.select_hotels_with_minimum(
                     hotels=fallback_ranked_hotels,
