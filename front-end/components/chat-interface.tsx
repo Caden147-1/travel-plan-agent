@@ -38,9 +38,11 @@ interface PlanResponse {
 interface HistoryItem {
   id: string
   request: string
+  messages?: Message[]
   summary?: string
   reportUrl?: string
   createdAt: string
+  updatedAt?: string
   status?: "pending" | "ready" | "error"
   error?: string
 }
@@ -109,121 +111,132 @@ export function ChatInterface() {
     if (!request || isLoading) return
     setInput("")
 
-    const historyId = crypto.randomUUID()
+    const historyId = activeHistoryIdRef.current || crypto.randomUUID()
+    const existingHistory = history.find((item) => item.id === historyId)
+    const previousMessages = existingHistory?.messages?.length
+      ? existingHistory.messages
+      : messages.length
+        ? messages
+        : []
+    const userMessage: Message = {
+      id: crypto.randomUUID(),
+      role: "user",
+      content: request,
+    }
+    const submittedMessages = [...previousMessages, userMessage]
+    const plannerRequest = buildPlannerRequest(submittedMessages)
+
     setActiveConversation(historyId)
-    setMessages([
-      {
-        id: crypto.randomUUID(),
-        role: "user",
-        content: request,
-      },
-    ])
-    saveHistory((previous) => [
-      {
+    setMessages(submittedMessages)
+    saveHistory((previous) => {
+      const now = new Date().toISOString()
+      const existing = previous.find((item) => item.id === historyId)
+      const nextItem: HistoryItem = {
+        ...existing,
         id: historyId,
-        request,
-        createdAt: new Date().toISOString(),
+        request: existing?.request || request,
+        messages: submittedMessages,
+        createdAt: existing?.createdAt || now,
+        updatedAt: now,
         status: "pending",
-      },
-      ...previous.filter((item) => item.request !== request),
-    ])
+        error: undefined,
+      }
+      return [nextItem, ...previous.filter((item) => item.id !== historyId)]
+    })
     setIsLoading(true)
 
     try {
       const response = await fetch(`${apiBase}/api/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: request }),
+        body: JSON.stringify({ message: plannerRequest }),
       })
       const data = (await response.json()) as PlanResponse
 
       if (!response.ok || !data.success) {
         const guidance = data.guidance || buildFallbackGuidance(data.error)
+        const nextMessages: Message[] = [
+          ...submittedMessages,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: guidance,
+          },
+        ]
         saveHistory((previous) =>
           previous.map((item) =>
             item.id === historyId
               ? {
                   ...item,
+                  messages: nextMessages,
                   summary: guidance,
                   status: "error",
                   error: data.error || "Planning failed.",
+                  updatedAt: new Date().toISOString(),
                 }
               : item,
           ),
         )
         if (activeHistoryIdRef.current === historyId) {
-          setMessages([
-            {
-              id: crypto.randomUUID(),
-              role: "user",
-              content: request,
-            },
-            {
-              id: crypto.randomUUID(),
-              role: "assistant",
-              content: guidance,
-            },
-          ])
+          setMessages(nextMessages)
         }
         return
       }
 
       const summary = formatSummary(data)
+      const nextMessages: Message[] = [
+        ...submittedMessages,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: summary,
+          reportUrl: data.report_url,
+        },
+      ]
       saveHistory((previous) =>
         previous.map((item) =>
           item.id === historyId
             ? {
                 ...item,
+                messages: nextMessages,
                 summary,
                 reportUrl: data.report_url,
                 status: "ready",
+                updatedAt: new Date().toISOString(),
               }
             : item,
         ),
       )
       if (activeHistoryIdRef.current === historyId) {
-        setMessages([
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            content: request,
-          },
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: summary,
-            reportUrl: data.report_url,
-          },
-        ])
+        setMessages(nextMessages)
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown error."
       const errorSummary = `The plan could not be generated.\n\n${message}`
+      const nextMessages: Message[] = [
+        ...submittedMessages,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: errorSummary,
+        },
+      ]
       saveHistory((previous) =>
         previous.map((item) =>
           item.id === historyId
             ? {
                 ...item,
+                messages: nextMessages,
                 summary: errorSummary,
                 status: "error",
                 error: message,
+                updatedAt: new Date().toISOString(),
               }
             : item,
         ),
       )
       if (activeHistoryIdRef.current === historyId) {
-        setMessages([
-          {
-            id: crypto.randomUUID(),
-            role: "user",
-            content: request,
-          },
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: errorSummary,
-          },
-        ])
+        setMessages(nextMessages)
       }
     } finally {
       setIsLoading(false)
@@ -232,6 +245,13 @@ export function ChatInterface() {
 
   function handleHistoryClick(item: HistoryItem) {
     setActiveConversation(item.id)
+    if (item.messages?.length) {
+      setMessages(item.messages)
+      setInput("")
+      textareaRef.current?.focus()
+      return
+    }
+
     const nextMessages: Message[] = [
       {
         id: crypto.randomUUID(),
@@ -522,6 +542,21 @@ function formatHistoryDate(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function buildPlannerRequest(messages: Message[]): string {
+  const userMessages = messages
+    .filter((message) => message.role === "user")
+    .map((message) => message.content.trim())
+    .filter(Boolean)
+
+  if (userMessages.length <= 1) return userMessages[0] || ""
+
+  return [
+    "The user is continuing the same travel planning request. Combine these user messages into one complete request:",
+    "",
+    ...userMessages.map((message, index) => `${index + 1}. ${message}`),
+  ].join("\n")
 }
 
 function validateRequest(request: string): string | null {
