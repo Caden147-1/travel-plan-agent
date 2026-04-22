@@ -526,8 +526,6 @@ def _run_rough_budget_precheck(parsed: dict) -> dict:
 def _is_budget_cap_followup(user_request: str) -> bool:
     text = (user_request or "").lower()
     patterns = [
-        r"\bincrease\s+(?:the\s+)?budget\s+to\b",
-        r"\bbudget\s+(?:is\s+)?now\b",
         r"\bkeep\s+(?:the\s+)?same\s+plan\b",
         r"\baccept\s+(?:a\s+)?small\s+over",
         r"\bfit\s+(?:the\s+)?budget\b",
