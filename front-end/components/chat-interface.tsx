@@ -64,7 +64,7 @@ const suggestedPrompts = [
 const thinkingSteps = [
   { afterSeconds: 0, text: "Understanding your route, dates, budget, and preferences" },
   { afterSeconds: 4, text: "Checking the request for missing or conflicting details" },
-  { afterSeconds: 8, text: "Estimating the budget and feasibility" },
+  { afterSeconds: 8, text: "Core precheck: if flight + hotel + three meals exceed 70% of budget, requirements will be lowered" },
   { afterSeconds: 14, text: "Searching flights, hotels, food, and attractions" },
   { afterSeconds: 24, text: "The default plan may exceed the budget, switching to a lower-cost option" },
   { afterSeconds: 36, text: "The default plan exceeded the budget, preparing an updated plan" },

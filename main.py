@@ -35,6 +35,52 @@ def _compact_json(value: Any, limit: int = 2500) -> str:
 
 
 def _fallback_guidance(result: dict) -> str:
+    if result.get("stage") == "budget_feasibility":
+        trip = result.get("trip_summary") or {}
+        origin = trip.get("origin") or "your origin"
+        destination = ", ".join(trip.get("destination") or []) or "your destination"
+        travelers = trip.get("num_people") or 1
+        budget = (trip.get("budget") or {}).get("total")
+        budget_currency = (trip.get("budget") or {}).get("currency") or "CNY"
+        duration_days = trip.get("duration_days")
+        travel_dates = trip.get("travel_dates") or {}
+        start = travel_dates.get("start")
+        end = travel_dates.get("end")
+        if start and end:
+            date_phrase = f"{start} to {end}"
+        elif duration_days:
+            date_phrase = f"{duration_days} days"
+        else:
+            date_phrase = "the requested dates"
+        people_phrase = "traveler" if int(travelers) == 1 else "travelers"
+        budget_text = f"{budget} {budget_currency}" if budget else f"your {budget_currency} cap"
+
+        budget_check = result.get("budget_check") or {}
+        flight_spend = budget_check.get("selected_total_flight_spend")
+        if flight_spend is None:
+            flight_spend = ((result.get("rough_budget_check") or {}).get("normal_estimate") or {}).get("transport")
+        flight_line = ""
+        if isinstance(flight_spend, (int, float)) and float(flight_spend) > 0:
+            flight_line = (
+                f" Even with strict cost control, flight costs alone are around "
+                f"{int(round(float(flight_spend))):,} {budget_currency} roundtrip."
+            )
+
+        return (
+            f"Great, I have {origin} -> {destination}, {date_phrase}, {travelers} {people_phrase}, "
+            f"budget {budget_text}, with a focus on local food.\n\n"
+            f"The system already tried the cheapest flights, budget hotels, local meals, and minimal paid activities, "
+            f"but the trip still exceeds your budget.{flight_line}\n\n"
+            "To make this work, you could:\n"
+            "- Increase your budget\n"
+            "- Shorten the trip (e.g., 2 days instead of 3)\n"
+            "- Remove paid attractions\n"
+            "- Be flexible on dates (avoiding peak times)\n\n"
+            "Could you reply with one of these options?\n"
+            f'For example: "Increase budget to 8000 {budget_currency}" or '
+            f'"Keep {budget_text} but remove all paid activities."'
+        )
+
     parsed = result.get("parsed_request") or {}
     missing = (parsed.get("missing_fields") or {}).get("critical") or []
     labels = {
@@ -106,6 +152,8 @@ Planner failure result:
 
 
 def _build_guidance(user_request: str, result: dict) -> str:
+    if result.get("stage") == "budget_feasibility":
+        return _fallback_guidance(result)
     try:
         guidance = _call_llm(_build_guidance_prompt(user_request, result)).strip()
         return guidance or _fallback_guidance(result)

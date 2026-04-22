@@ -45,6 +45,19 @@ def _money(value: Any, currency: str = "CNY") -> str:
     return f"{amount:.2f} {currency}"
 
 
+def _flight_class_label(value: Any) -> str:
+    text = _text(value).lower()
+    if text in {"economy", "econ"}:
+        return "Economy"
+    if text in {"business", "biz"}:
+        return "Business"
+    if text in {"first", "first_class", "first class"}:
+        return "First"
+    if text:
+        return text.replace("_", " ").title()
+    return "Economy"
+
+
 def _slug(value: str) -> str:
     text = re.sub(r"[^a-zA-Z0-9_-]+", "_", value).strip("_")
     return text[:70] or "travel_report"
@@ -242,9 +255,12 @@ def _collect_city_route_points(router_output: Dict[str, Any]) -> List[Dict[str, 
             leg_type = _text(leg.get("leg_type")).lower()
             departure_code = _text((leg.get("selected_flights") or [{}])[0].get("departure_code")) if leg.get("selected_flights") else ""
             arrival_code = _text((leg.get("selected_flights") or [{}])[0].get("arrival_code")) if leg.get("selected_flights") else ""
+            travel_class = ""
+            flights = leg.get("selected_flights") or []
+            if flights and isinstance(flights[0], dict):
+                travel_class = _flight_class_label(flights[0].get("travel_class"))
             cost = _safe_float(leg.get("rental_car_cost_estimated"), 0.0)
             if cost <= 0:
-                flights = leg.get("selected_flights") or []
                 if flights and isinstance(flights[0], dict):
                     cost = _safe_float(flights[0].get("price_total"), 0.0)
 
@@ -253,7 +269,8 @@ def _collect_city_route_points(router_output: Dict[str, Any]) -> List[Dict[str, 
             elif mode == "flight":
                 from_label = f"{from_city} ({departure_code})" if departure_code else from_city
                 to_label = f"{to_city} ({arrival_code})" if arrival_code else to_city
-                arrive_label = f"Fly {from_label} -> {to_label}"
+                class_suffix = f" [{travel_class}]" if travel_class else ""
+                arrive_label = f"Fly {from_label} -> {to_label}{class_suffix}"
             else:
                 arrive_label = f"Transfer {from_city} -> {to_city}"
 
@@ -543,6 +560,8 @@ def _render_day_cards(router_output: Dict[str, Any], currency: str) -> str:
             event_type = _text(event.get("type"), "event").replace("_", " ").title()
             meta = event.get("meta") or {}
             raw_event_type = _text(event.get("type"))
+            if raw_event_type == "flight" and isinstance(meta, dict):
+                event_type = f"Flight ({_flight_class_label(meta.get('travel_class'))})"
             event_cost = _safe_float(event.get("cost_estimated"), 0.0)
             if raw_event_type in {"flight_unavailable", "transfer_unavailable"}:
                 time_label = "Needs selection"
