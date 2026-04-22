@@ -7,7 +7,7 @@ import os
 import re
 import webbrowser
 from functools import lru_cache
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -43,6 +43,64 @@ def _money(value: Any, currency: str = "CNY") -> str:
     if abs(amount - round(amount)) < 0.005:
         return f"{int(round(amount))} {currency}"
     return f"{amount:.2f} {currency}"
+
+
+def _traveler_count(router_output: Dict[str, Any]) -> int:
+    trip = router_output.get("trip_summary") or {}
+    count = int(round(_safe_float(trip.get("num_people"), 1.0)))
+    return max(1, count)
+
+
+def _computed_end_date(trip: Dict[str, Any]) -> str:
+    travel_dates = trip.get("travel_dates") or {}
+    start = _text(travel_dates.get("start"))
+    end = _text(travel_dates.get("end"))
+    if end:
+        return end
+
+    duration_days = trip.get("duration_days")
+    if not start or duration_days in {None, ""}:
+        return ""
+
+    try:
+        duration = int(float(duration_days))
+        start_dt = datetime.strptime(start, "%Y-%m-%d")
+    except Exception:
+        return ""
+
+    if duration <= 0:
+        return ""
+
+    return (start_dt + timedelta(days=duration - 1)).strftime("%Y-%m-%d")
+
+
+def _request_preferences_text(trip: Dict[str, Any]) -> str:
+    preferences = trip.get("preferences") or {}
+    parts: List[str] = []
+
+    hotel_level = _text(preferences.get("hotel_level"))
+    if hotel_level:
+        parts.append(f"{hotel_level} hotel")
+
+    hotel_features = preferences.get("hotel_features") or []
+    if isinstance(hotel_features, list):
+        values = [_text(x) for x in hotel_features if _text(x)]
+        if values:
+            parts.append("hotel features: " + ", ".join(values))
+
+    food_preferences = preferences.get("food_preferences") or []
+    if isinstance(food_preferences, list):
+        values = [_text(x) for x in food_preferences if _text(x)]
+        if values:
+            parts.append("food: " + ", ".join(values))
+
+    attraction_styles = preferences.get("attraction_styles") or []
+    if isinstance(attraction_styles, list):
+        values = [_text(x) for x in attraction_styles if _text(x)]
+        if values:
+            parts.append("attractions: " + ", ".join(values))
+
+    return "; ".join(parts)
 
 
 def _flight_class_label(value: Any) -> str:
@@ -548,6 +606,7 @@ def _render_day_cards(router_output: Dict[str, Any], currency: str) -> str:
     cards: List[str] = []
     daily_plan = itinerary.get("daily_plan", []) or []
     checkin_dates = _actual_checkin_dates(daily_plan if isinstance(daily_plan, list) else [])
+    traveler_count = _traveler_count(router_output)
 
     for day_index, day in enumerate(daily_plan, start=1):
         if not isinstance(day, dict):
@@ -573,6 +632,9 @@ def _render_day_cards(router_output: Dict[str, Any], currency: str) -> str:
                 time_label = _text(event.get("start")) or _text(event.get("end")) or ""
             if raw_event_type == "transfer" and event_cost <= 0:
                 cost_label = "Included"
+            elif raw_event_type == "flight" and event_cost > 0 and traveler_count > 1:
+                event_type = f"{event_type} x{traveler_count}"
+                cost_label = f"{_money(event_cost, currency)} total"
             else:
                 cost_label = _money(event.get("cost_estimated"), currency)
 
@@ -652,6 +714,18 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
         .replace("\u2029", "\\u2029")
     )
     destination = ", ".join(_text(x) for x in trip.get("destination", []) or [] if _text(x))
+    travel_dates = trip.get("travel_dates") or {}
+    start_date = _text(travel_dates.get("start"))
+    end_date = _computed_end_date(trip)
+    if start_date and end_date:
+        date_range = f"{start_date} - {end_date}"
+    elif start_date:
+        date_range = start_date
+    elif trip.get("duration_days"):
+        date_range = f"{trip.get('duration_days')} days"
+    else:
+        date_range = "Not specified"
+    preferences_text = _request_preferences_text(trip) or "Not specified"
     total = _money(_total_cost(router_output), currency)
     budget_total = _money(budget.get("total"), currency) if budget.get("total") is not None else "Not specified"
     if budget.get("source_total") and budget.get("source_currency") and budget.get("source_currency") != currency:
@@ -699,6 +773,26 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
       background: var(--soft);
       border-radius: 6px;
       color: #263331;
+    }}
+    .request > strong {{
+      display: block;
+      margin-bottom: 10px;
+    }}
+    .request-grid {{
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }}
+    .request-item span {{
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }}
+    .request-item b {{
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
     }}
     .summary {{
       display: grid;
@@ -830,6 +924,7 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
     @media (max-width: 820px) {{
       h1 {{ font-size: 26px; }}
       .summary, .cost-grid {{ grid-template-columns: 1fr 1fr; }}
+      .request-grid {{ grid-template-columns: 1fr; }}
       #map {{ height: 380px; }}
       .step-panel {{ flex-direction: column; }}
       .event-list li {{ grid-template-columns: 1fr; gap: 4px; }}
@@ -843,9 +938,18 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
     <div class="wrap">
       <p class="eyebrow">Travel Plan Report</p>
       <h1>{_esc(trip.get("origin"))} to {_esc(destination or "your destinations")}</h1>
-      <div class="request"><strong>Your request:</strong> {_esc(user_request)}</div>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>{_esc(_text(trip.get("origin"), "Not specified"))} -> {_esc(destination or "Not specified")}</b></div>
+          <div class="request-item"><span>Dates</span><b>{_esc(date_range)}</b></div>
+          <div class="request-item"><span>Travelers</span><b>{_esc(trip.get("num_people") or "Not specified")}</b></div>
+          <div class="request-item"><span>Budget</span><b>{_esc(budget_total)}</b></div>
+          <div class="request-item"><span>Preferences</span><b>{_esc(preferences_text)}</b></div>
+        </div>
+      </div>
       <div class="summary">
-        <div><span>Dates</span><strong>{_esc((trip.get("travel_dates") or {}).get("start"))} - {_esc((trip.get("travel_dates") or {}).get("end"))}</strong></div>
+        <div><span>Dates</span><strong>{_esc(date_range)}</strong></div>
         <div><span>Travelers</span><strong>{_esc(trip.get("num_people"))}</strong></div>
         <div><span>Budget</span><strong>{_esc(budget_total)}</strong></div>
         <div><span>Estimated Spend</span><strong>{_esc(total)}</strong></div>

@@ -55,6 +55,12 @@ def _validate_request_for_planning(parsed: dict) -> str | None:
     end = _parse_iso_date(travel_dates.get("end"))
     today = get_today_date()
 
+    if not start:
+        return (
+            "An exact departure date is required before planning flights. "
+            "If the trip starts tomorrow, confirm that. Otherwise provide the departure date in YYYY-MM-DD format."
+        )
+
     if start and start < today:
         return f"Travel start date {start.isoformat()} is in the past. Please provide a date from {today.isoformat()} onward."
     if start and start > _one_year_from_today():

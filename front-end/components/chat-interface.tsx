@@ -39,6 +39,13 @@ interface PlanResponse {
   }
 }
 
+interface GuidanceResponse {
+  success: boolean
+  ready?: boolean
+  guidance?: string
+  error?: string
+}
+
 interface HistoryItem {
   id: string
   request: string
@@ -172,6 +179,7 @@ export function ChatInterface() {
     }
     const submittedMessages = [...previousMessages, userMessage]
     const plannerRequest = buildPlannerRequest(submittedMessages)
+    const requestValidationError = validateRequest(plannerRequest)
 
     setActiveConversation(historyId)
     setMessages(submittedMessages)
@@ -198,6 +206,78 @@ export function ChatInterface() {
     abortControllerRef.current = abortController
 
     try {
+      if (requestValidationError) {
+        const guidance = buildFallbackGuidance(requestValidationError)
+        const nextMessages: Message[] = [
+          ...submittedMessages,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: guidance,
+          },
+        ]
+        saveHistory((previous) =>
+          previous.map((item) =>
+            item.id === historyId
+              ? {
+                  ...item,
+                  messages: nextMessages,
+                  summary: guidance,
+                  status: "error",
+                  error: requestValidationError,
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
+        )
+        if (activeHistoryIdRef.current === historyId) {
+          setMessages(nextMessages)
+        }
+        return
+      }
+
+      const guidanceResponse = await fetch(`${apiBase}/api/guidance`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ message: plannerRequest }),
+        signal: abortController.signal,
+      })
+      const guidanceData = (await guidanceResponse.json()) as GuidanceResponse
+
+      if (!guidanceResponse.ok || !guidanceData.success) {
+        throw new Error(guidanceData.error || "Request intake failed.")
+      }
+
+      if (!guidanceData.ready) {
+        const guidance = guidanceData.guidance || buildFallbackGuidance()
+        const nextMessages: Message[] = [
+          ...submittedMessages,
+          {
+            id: crypto.randomUUID(),
+            role: "assistant",
+            content: guidance,
+          },
+        ]
+        saveHistory((previous) =>
+          previous.map((item) =>
+            item.id === historyId
+              ? {
+                  ...item,
+                  messages: nextMessages,
+                  summary: guidance,
+                  status: "error",
+                  error: guidanceData.error || "The request needs more details.",
+                  updatedAt: new Date().toISOString(),
+                }
+              : item,
+          ),
+        )
+        if (activeHistoryIdRef.current === historyId) {
+          setMessages(nextMessages)
+        }
+        return
+      }
+
       const response = await fetch(`${apiBase}/api/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -772,11 +852,11 @@ function buildPlannerRequest(messages: Message[]): string {
 
   if (userMessages.length <= 1) return userMessages[0] || ""
 
+  const [firstMessage, ...followUps] = userMessages
+
   return [
-    "The user is continuing the same travel planning request. Combine these user messages into one complete request:",
-    "If the latest message only increases the budget, keeps the same plan, or accepts a small overage, treat the new budget as a cap for the previous lowest-cost plan. Do not upgrade hotels, food, flights, attractions, or trip comfort unless the user explicitly asks for upgrades.",
-    "",
-    ...userMessages.map((message, index) => `${index + 1}. ${message}`),
+    firstMessage,
+    ...followUps.map((message) => `Additional user update: ${message}`),
   ].join("\n")
 }
 
@@ -830,9 +910,9 @@ function buildFallbackGuidance(error?: string): string {
     "I can help turn this into a complete travel request.",
     "",
     error ? `What happened: ${error}` : null,
-    "Please include these information points: departure city, destination city or country, travel dates or trip length, number of travelers, total budget and currency, and any hotel, food, transport, attraction, or pace preferences.",
+    "To continue, tell me your departure city, destination city or country, travel dates or trip length, number of travelers, total budget and currency, and any hotel, food, transport, attraction, or pace preferences.",
     "",
-    "You can reply like this: I want to travel from Shanghai to Paris from 2026-06-10 to 2026-06-15 for 2 people with a budget of 15000 CNY. I prefer clean central hotels, local food, and a relaxed pace.",
+    "For example: I want to travel from Shanghai to Paris from 2026-06-10 to 2026-06-15 for 2 people with a budget of 15000 CNY. I prefer clean central hotels, local food, and a relaxed pace.",
   ]
     .filter(Boolean)
     .join("\n")

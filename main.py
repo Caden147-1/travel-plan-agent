@@ -17,6 +17,7 @@ from urllib.parse import unquote, urlparse
 
 from router import get_router_backend_status, run_budget_pipeline
 from travel_requirement_parser_llm_agent import _call_llm
+from travel_requirement_parser_llm_agent import travel_requirement_parser_llm_agent
 
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -37,47 +38,44 @@ def _compact_json(value: Any, limit: int = 2500) -> str:
 def _fallback_guidance(result: dict) -> str:
     if result.get("stage") == "budget_feasibility":
         trip = result.get("trip_summary") or {}
-        origin = trip.get("origin") or "your origin"
-        destination = ", ".join(trip.get("destination") or []) or "your destination"
-        travelers = trip.get("num_people") or 1
         budget = (trip.get("budget") or {}).get("total")
         budget_currency = (trip.get("budget") or {}).get("currency") or "CNY"
         duration_days = trip.get("duration_days")
-        travel_dates = trip.get("travel_dates") or {}
-        start = travel_dates.get("start")
-        end = travel_dates.get("end")
-        if start and end:
-            date_phrase = f"{start} to {end}"
-        elif duration_days:
-            date_phrase = f"{duration_days} days"
-        else:
-            date_phrase = "the requested dates"
-        people_phrase = "traveler" if int(travelers) == 1 else "travelers"
         budget_text = f"{budget} {budget_currency}" if budget else f"your {budget_currency} cap"
 
         budget_check = result.get("budget_check") or {}
         flight_spend = budget_check.get("selected_total_flight_spend")
         if flight_spend is None:
             flight_spend = ((result.get("rough_budget_check") or {}).get("normal_estimate") or {}).get("transport")
-        flight_line = ""
+        flight_line = "Flight costs are too high for this budget."
         if isinstance(flight_spend, (int, float)) and float(flight_spend) > 0:
-            flight_line = (
-                f" Even with strict cost control, flight costs alone are around "
-                f"{int(round(float(flight_spend))):,} {budget_currency} roundtrip."
-            )
+            flight_line = f"Flight costs alone are about {int(round(float(flight_spend)))} {budget_currency} roundtrip."
+
+        suggested_budget_text = f"more than {budget_text}"
+        if isinstance(budget, (int, float)) and float(budget) > 0:
+            suggested_budget = int(round(float(budget) * 1.2 / 1000.0) * 1000)
+            if suggested_budget <= int(round(float(budget))):
+                suggested_budget = int(round(float(budget))) + 1000
+            suggested_budget_text = f"{suggested_budget} {budget_currency}"
+
+        shorten_example = "a shorter trip"
+        if isinstance(duration_days, (int, float)) and int(duration_days) > 1:
+            current_days = int(duration_days)
+            shorter_days = max(1, current_days - 1)
+            day_label = "day" if shorter_days == 1 else "days"
+            current_day_label = "day" if current_days == 1 else "days"
+            shorten_example = f"{shorter_days} {day_label} instead of {current_days} {current_day_label}"
 
         return (
-            f"Great, I have {origin} -> {destination}, {date_phrase}, {travelers} {people_phrase}, "
-            f"budget {budget_text}, with a focus on local food.\n\n"
-            f"The system already tried the cheapest flights, budget hotels, local meals, and minimal paid activities, "
-            f"but the trip still exceeds your budget.{flight_line}\n\n"
-            "To make this work, you could:\n"
+            f"This trip is over budget.\n\n"
+            f"{flight_line}\n\n"
+            "Options:\n"
             "- Increase your budget\n"
-            "- Shorten the trip (e.g., 2 days instead of 3)\n"
+            f"- Shorten the trip (for example, {shorten_example})\n"
             "- Remove paid attractions\n"
-            "- Be flexible on dates (avoiding peak times)\n\n"
-            "Could you reply with one of these options?\n"
-            f'For example: "Increase budget to 8000 {budget_currency}" or '
+            "- Change dates\n\n"
+            "Reply with one option.\n"
+            f'For example: "Increase budget to {suggested_budget_text}" or '
             f'"Keep {budget_text} but remove all paid activities."'
         )
 
@@ -87,61 +85,56 @@ def _fallback_guidance(result: dict) -> str:
         "origin": "departure city",
         "destination_or_country": "destination city or country",
         "travel_dates_or_duration": "travel dates or trip length",
+        "travel_dates.start": "exact departure date",
         "budget.total": "total budget",
     }
     missing_text = ", ".join(labels.get(item, item) for item in missing)
-    understood = [
-        f"Departure city: {parsed.get('origin') or 'not provided'}",
-        f"Destination: {', '.join(parsed.get('destination') or []) if parsed.get('destination') else parsed.get('country') or 'not provided'}",
-        f"Dates or duration: {(parsed.get('travel_dates') or {}).get('text') or (parsed.get('travel_dates') or {}).get('start') or parsed.get('duration_days') or 'not provided'}",
-        f"Travelers: {parsed.get('num_people') or 1}",
-        f"Budget: {(parsed.get('budget') or {}).get('total') or 'not provided'} {(parsed.get('budget') or {}).get('currency') or 'CNY'}",
-    ]
     if missing_text:
+        if missing == ["travel_dates.start"] and (parsed.get("duration_days") or (parsed.get("travel_dates") or {}).get("text")):
+            return (
+                "The departure date is missing. If this trip is starting tomorrow, "
+                "please reply with \"starting tomorrow\".\n\n"
+                "If not, please provide the exact departure date in YYYY-MM-DD format.\n\n"
+                "For example: 2026-06-01."
+            )
         return (
-            "I can help turn this into a complete travel request.\n\n"
-            "What I have so far:\n"
-            + "\n".join(f"- {item}" for item in understood)
-            + "\n\n"
-            f"What I still need: {missing_text}.\n\n"
-            "Please reply with the missing details, for example:\n"
-            "I want to travel from Shanghai to Paris from 2026-06-10 to 2026-06-15 "
-            "for 2 people with a budget of 15000 CNY, or 2000 USD. I prefer clean central hotels and local food."
+            f"Please provide {missing_text}.\n\n"
+            "For example: 2026-06-10 to 2026-06-15, 2 people, 15000 CNY."
         )
     return (
-        "I can help refine this request before creating the report.\n\n"
-        "Please make sure it includes these information points: departure city, destination, travel dates or trip length, "
-        "traveler count, total budget and currency, plus hotel, food, transport, or attraction preferences."
+        "Please provide your departure city, destination, travel dates or trip length, traveler count, and budget."
     )
 
 
 def _build_guidance_prompt(user_request: str, result: dict) -> str:
+    default_example_date = "2026-06-01"
     return f"""
 You are a friendly travel planning intake assistant.
 
 The planner could not create a report from the user's request yet. Your job is to help the user revise it into a complete request for the downstream travel planning system.
 
+If you need an example explicit departure date, use {default_example_date}.
+
 Rules:
 1. Reply in English.
 2. Do not say the request is simply rejected.
-3. Summarize what you already understood from the request.
+3. Do not rewrite or normalize the user's wording, number style, punctuation, capitalization, or formatting.
 4. Identify missing or unreasonable information in plain language.
-5. Ask focused guiding questions for the smallest set of details needed to continue.
-6. If this is the first assistant clarification, you may end with one rewritten complete request template tailored to the user's intent.
-7. If the user is continuing a previous request or only added one missing detail, do not restart with a full template. Acknowledge the new detail, state what is now locked in, and ask the next missing details as clear fill-in prompts.
-8. Make follow-up guidance feel progressive and helpful, for example:
-   - "Great, I have Guangzhou -> Paris now."
-   - "Next I just need the dates or trip length, total budget, and traveler count."
-   - "You can reply in one line, like: June 10 to June 15, 2 people, 15000 CNY, or 2000 USD."
-9. Cover these required downstream information points when relevant:
+5. Ask focused guiding questions only when required information is missing or unreasonable. Do not ask the user to confirm information that is already present.
+6. Do not ask confirmation questions such as "Is this trip starting tomorrow?" or "Do you mean...?" unless the request is genuinely ambiguous and cannot proceed safely.
+7. When one exact field is missing, ask directly for that field in one sentence, without restating the whole request unless absolutely necessary.
+8. If you give an example departure date, use 2026-06-01 by default. Do not give past dates.
+9. Do not produce a rewritten full request template unless the user explicitly asks for help rewriting.
+10. If the user is continuing a previous request or only added one missing detail, ask only for the next missing detail and keep the reply short.
+11. Cover these required downstream information points when relevant:
    - departure city
    - destination city or country
    - travel dates or trip length
    - number of travelers
    - total budget and currency
    - useful preferences such as hotel level/location, food, transport, attractions, pace
-10. Keep it concise, under 140 words.
-11. If the failure stage is "budget_feasibility", treat the user's budget as a hard cap. Say the system already tried cheaper flights, budget hotels, lower-cost meals, and fewer paid activities when applicable. Do not suggest accepting an over-budget plan. Ask the user to either increase the budget, shorten the trip, remove paid activities, or relax destination/date constraints.
+12. Keep it concise, under 80 words when only one field is missing, otherwise under 140 words.
+13. If the failure stage is "budget_feasibility", treat the user's budget as a hard cap. Say the system already tried cheaper flights, budget hotels, lower-cost meals, and fewer paid activities when applicable. Do not suggest accepting an over-budget plan. Ask the user to either increase the budget, shorten the trip, remove paid activities, or relax destination/date constraints.
 
 User request:
 {user_request}
@@ -152,6 +145,10 @@ Planner failure result:
 
 
 def _build_guidance(user_request: str, result: dict) -> str:
+    parsed = result.get("parsed_request") or {}
+    missing = (parsed.get("missing_fields") or {}).get("critical") or []
+    if missing:
+        return _fallback_guidance(result)
     if result.get("stage") == "budget_feasibility":
         return _fallback_guidance(result)
     try:
@@ -159,6 +156,51 @@ def _build_guidance(user_request: str, result: dict) -> str:
         return guidance or _fallback_guidance(result)
     except Exception:
         return _fallback_guidance(result)
+
+
+def _run_intake_check(user_request: str) -> Dict[str, Any]:
+    try:
+        parsed_request = travel_requirement_parser_llm_agent(user_request)
+        parse_status = str(parsed_request.get("parse_status") or "").lower()
+        parse_error = ((parsed_request.get("meta") or {}).get("error") or "").strip()
+        if parse_status == "failed" or parse_error:
+            return {
+                "success": True,
+                "ready": True,
+                "guidance": None,
+                "parsed_request": parsed_request,
+                "missing_fields": parsed_request.get("missing_fields", {}),
+                "intake_error": parse_error or "Travel intake parsing failed.",
+            }
+        missing_fields = (parsed_request.get("missing_fields") or {}).get("critical") or []
+        is_ready = bool(parsed_request.get("is_ready_for_planning")) and not missing_fields
+        result = {
+            "success": is_ready,
+            "stage": "agent1_parse" if not is_ready else "intake_ready",
+            "error": None if is_ready else "The request needs clarification before planning.",
+            "parsed_request": parsed_request,
+        }
+        return {
+            "success": True,
+            "ready": is_ready,
+            "guidance": None if is_ready else _build_guidance(user_request, result),
+            "parsed_request": parsed_request,
+            "missing_fields": parsed_request.get("missing_fields", {}),
+        }
+    except Exception as exc:
+        result = {
+            "success": False,
+            "stage": "frontend_validation",
+            "error": str(exc),
+        }
+        return {
+            "success": True,
+            "ready": True,
+            "guidance": None,
+            "parsed_request": {},
+            "missing_fields": {"critical": [], "optional": []},
+            "intake_error": str(exc),
+        }
 
 
 def _fallback_frontend_html() -> bytes:
@@ -324,21 +366,7 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/guidance":
-            reason = str(payload.get("reason") or "The request needs clarification.").strip()
-            guidance_result = {
-                "success": False,
-                "stage": "frontend_validation",
-                "error": reason,
-                "parsed_request": {},
-            }
-            _json_response(
-                self,
-                200,
-                {
-                    "success": True,
-                    "guidance": _build_guidance(user_request, guidance_result),
-                },
-            )
+            _json_response(self, 200, _run_intake_check(user_request))
             return
 
         try:
@@ -459,20 +487,27 @@ def main() -> None:
     try:
         print(f"TravelAI API: http://{API_HOST}:{API_PORT}")
         try:
-            frontend_process = _start_frontend()
-            print(f"TravelAI frontend: {frontend_url}")
-
-            if _wait_for_port("127.0.0.1", FRONTEND_PORT):
+            if _wait_for_port("127.0.0.1", FRONTEND_PORT, timeout_s=1.0):
+                print(f"TravelAI frontend already running: {frontend_url}")
                 webbrowser.open(frontend_url)
             else:
-                print("Frontend did not become ready in time. Open this URL after it finishes compiling:")
-                print(frontend_url)
+                frontend_process = _start_frontend()
+                print(f"TravelAI frontend: {frontend_url}")
+
+                if _wait_for_port("127.0.0.1", FRONTEND_PORT):
+                    webbrowser.open(frontend_url)
+                else:
+                    print("Frontend did not become ready in time. Open this URL after it finishes compiling:")
+                    print(frontend_url)
         except RuntimeError as exc:
             print(f"Next frontend unavailable: {exc}")
             print(f"Opening Python fallback frontend: {fallback_url}")
             webbrowser.open(fallback_url)
 
-        while frontend_process is None or frontend_process.poll() is None:
+        while True:
+            if frontend_process is not None and frontend_process.poll() is not None:
+                print("Frontend process exited. Keeping API server alive so an existing frontend can still connect.")
+                frontend_process = None
             time.sleep(0.5)
     except KeyboardInterrupt:
         print("\nStopping TravelAI...")

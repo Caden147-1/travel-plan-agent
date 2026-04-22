@@ -5,7 +5,7 @@ import re
 import json
 import requests
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 from destination import run_city_planning_agent
@@ -879,6 +879,26 @@ def _compute_duration_days(start: Optional[str], end: Optional[str]) -> Optional
     return delta
 
 
+def _compute_end_date_from_start_and_duration(start: Optional[str], duration_days: Any) -> Optional[str]:
+    if not start or not _looks_like_full_date(start):
+        return None
+
+    try:
+        duration = int(duration_days)
+    except Exception:
+        return None
+
+    if duration <= 0:
+        return None
+
+    try:
+        start_dt = datetime.strptime(start, "%Y-%m-%d")
+    except ValueError:
+        return None
+
+    return (start_dt + timedelta(days=duration - 1)).strftime("%Y-%m-%d")
+
+
 def _detect_missing_fields(data: Dict[str, Any]) -> Dict[str, List[str]]:
     """
     Detect missing fields and split them into critical / optional.
@@ -893,6 +913,7 @@ def _detect_missing_fields(data: Dict[str, Any]) -> Dict[str, List[str]]:
         critical.append("destination_or_country")
 
     travel_dates = data.get("travel_dates", {})
+    has_explicit_start = bool(travel_dates.get("start"))
     has_dates = (
         travel_dates.get("start")
         or travel_dates.get("end")
@@ -902,6 +923,8 @@ def _detect_missing_fields(data: Dict[str, Any]) -> Dict[str, List[str]]:
 
     if not has_dates and not has_duration:
         critical.append("travel_dates_or_duration")
+    elif not has_explicit_start:
+        critical.append("travel_dates.start")
 
     if data.get("budget", {}).get("total") is None:
         critical.append("budget.total")
@@ -967,6 +990,13 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
     )
     if computed_duration is not None:
         result["duration_days"] = computed_duration
+    elif result["travel_dates"].get("start") and result["duration_days"] and not result["travel_dates"].get("end"):
+        computed_end = _compute_end_date_from_start_and_duration(
+            result["travel_dates"].get("start"),
+            result["duration_days"],
+        )
+        if computed_end:
+            result["travel_dates"]["end"] = computed_end
 
     result["missing_fields"] = _detect_missing_fields(result)
     result["is_ready_for_planning"] = len(result["missing_fields"]["critical"]) == 0

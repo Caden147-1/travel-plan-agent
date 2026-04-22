@@ -1003,10 +1003,18 @@ def _hotel_checkin_window(arrival_time: Any = None) -> Tuple[str, str]:
 def _hotel_checkout_window(departure_time: Any = None) -> Tuple[str, str]:
     departure = _parse_time_value(departure_time)
     noon = _parse_time_value("12:00")
-    if departure and noon and departure < noon:
-        end = (departure - timedelta(minutes=120)).strftime("%H:%M")
-        if end < "06:00":
-            end = "06:00"
+    if departure:
+        departure_minutes = departure.hour * 60 + departure.minute
+        # For very early departures after midnight, keep checkout shortly before leaving
+        # instead of wrapping it to the previous evening on the same report day.
+        if departure_minutes <= 3 * 60:
+            end_minutes = max(0, departure_minutes - 30)
+            end = f"{end_minutes // 60:02d}:{end_minutes % 60:02d}"
+        elif noon and departure < noon:
+            end_minutes = max(6 * 60, departure_minutes - 120)
+            end = f"{end_minutes // 60:02d}:{end_minutes % 60:02d}"
+        else:
+            end = "12:00"
     else:
         end = "12:00"
     start = _add_minutes_to_time(end, -30) or "11:30"
@@ -2001,6 +2009,24 @@ def _ensure_adjacent_event_transfers(day_plan: Dict[str, Any]) -> None:
             continue
         if not _is_location_event(current) or not _is_location_event(nxt):
             continue
+        current_type = _normalize_text(current.get("type"))
+        next_type = _normalize_text(nxt.get("type"))
+        current_meta = current.get("meta") or {}
+        if (
+            current_type == "flight"
+            and next_type == "checkout"
+            and isinstance(current_meta, dict)
+            and _normalize_text(current_meta.get("leg_type")) == "inbound"
+        ):
+            continue
+        if (
+            current_type == "checkout"
+            and next_type == "flight"
+            and isinstance((nxt.get("meta") or {}), dict)
+            and _normalize_text((nxt.get("meta") or {}).get("leg_type")) == "inbound"
+        ):
+            # Hotel -> airport transfer is valid before an inbound flight home.
+            pass
 
         current_end = _event_end_minutes(current)
         next_start = _event_start_minutes(nxt)
@@ -2061,6 +2087,58 @@ def _interval_overlaps(a_start: int, a_end: int, b_start: int, b_end: int) -> bo
     return a_start < b_end and b_start < a_end
 
 
+def _find_linked_transfer_index(events: List[Dict[str, Any]], meal_index: int) -> Optional[int]:
+    prev_index = meal_index - 1
+    if prev_index < 0:
+        return None
+    prev_event = events[prev_index]
+    if _normalize_text(prev_event.get("type")) != "transfer":
+        return None
+    meta = prev_event.get("meta") or {}
+    if isinstance(meta, dict) and _normalize_text(meta.get("to")) == _normalize_text(events[meal_index].get("name")):
+        return prev_index
+    return None
+
+
+def _next_non_meal_event_end(events: List[Dict[str, Any]], end_index: int) -> int:
+    for idx in range(end_index - 1, -1, -1):
+        event = events[idx]
+        if _normalize_text(event.get("type")) == "meal":
+            continue
+        end = _event_end_minutes(event)
+        if end is not None:
+            return end
+    return _event_minutes_from_hhmm("08:00") or 8 * 60
+
+
+def _resolve_meal_start_within_window(
+    earliest_start: int,
+    duration_minutes: int,
+    window_start: int,
+    window_end: int,
+    blocked_ranges: List[Tuple[int, int]],
+) -> Optional[int]:
+    candidate_start = max(earliest_start, window_start)
+    candidate_end = candidate_start + duration_minutes
+
+    if candidate_end > window_end:
+        return None
+
+    changed = True
+    while changed:
+        changed = False
+        for block_start, block_end in blocked_ranges:
+            if _interval_overlaps(candidate_start, candidate_end, block_start, block_end):
+                candidate_start = max(candidate_start, block_end)
+                candidate_end = candidate_start + duration_minutes
+                changed = True
+                break
+        if candidate_end > window_end:
+            return None
+
+    return candidate_start
+
+
 def _enforce_meal_time_windows(day_plan: Dict[str, Any]) -> None:
     events = day_plan.get("events", [])
     if not isinstance(events, list):
@@ -2071,9 +2149,9 @@ def _enforce_meal_time_windows(day_plan: Dict[str, Any]) -> None:
         return
 
     target_slots = [
-        ("08:00", "09:00", "breakfast"),
-        ("12:00", "13:00", "lunch"),
-        ("18:00", "19:00", "dinner"),
+        ("08:00", "10:00", "breakfast"),
+        ("11:30", "14:00", "lunch"),
+        ("17:30", "20:00", "dinner"),
     ]
     fixed_blocks: List[Tuple[int, int]] = []
     flight_blocks: List[Tuple[int, int]] = []
@@ -2096,6 +2174,13 @@ def _enforce_meal_time_windows(day_plan: Dict[str, Any]) -> None:
     last_end = 19 * 60
     for order, index in enumerate(meal_indices):
         event = events[index]
+        linked_transfer_index = _find_linked_transfer_index(events, index)
+        linked_transfer = events[linked_transfer_index] if linked_transfer_index is not None else None
+        linked_transfer_duration = (
+            int(round(max(0.0, _safe_float(linked_transfer.get("duration_h"), 0.0)) * 60))
+            if linked_transfer is not None
+            else 0
+        )
         dur_minutes = int(round(max(0.5, _safe_float(event.get("duration_h"), 1.0)) * 60))
         if dur_minutes <= 0:
             dur_minutes = 60
@@ -2119,38 +2204,61 @@ def _enforce_meal_time_windows(day_plan: Dict[str, Any]) -> None:
                     }
                 remove_indices.append(index)
                 continue
-            candidate_start = slot_start
+            previous_event_end = _next_non_meal_event_end(events, linked_transfer_index if linked_transfer_index is not None else index)
+            earliest_start = max(previous_event_end + linked_transfer_duration, slot_start)
+            blocked_ranges = fixed_blocks + assigned_meals
+            candidate_start = _resolve_meal_start_within_window(
+                earliest_start=earliest_start,
+                duration_minutes=dur_minutes,
+                window_start=slot_start,
+                window_end=slot_end,
+                blocked_ranges=blocked_ranges,
+            )
+            if candidate_start is None:
+                candidate_start = _resolve_meal_start_within_window(
+                    earliest_start=slot_start,
+                    duration_minutes=dur_minutes,
+                    window_start=slot_start,
+                    window_end=slot_end,
+                    blocked_ranges=blocked_ranges,
+                )
+            if candidate_start is None:
+                continue
             candidate_end = candidate_start + dur_minutes
-            can_place = candidate_end <= slot_end
-            if can_place:
-                for block_start, block_end in fixed_blocks + assigned_meals:
-                    if _interval_overlaps(candidate_start, candidate_end, block_start, block_end):
-                        can_place = False
-                        break
-            if can_place:
-                event["start"] = f"{candidate_start // 60:02d}:{candidate_start % 60:02d}"
-                event["end"] = f"{candidate_end // 60:02d}:{candidate_end % 60:02d}"
-                assigned_meals.append((candidate_start, candidate_end))
-                last_end = candidate_end
-                for other_idx, other in enumerate(events):
-                    if other_idx == index:
-                        continue
-                    other_type = _normalize_text(other.get("type"))
-                    if other_type not in {"poi", "transfer"}:
-                        continue
-                    o_start = _event_start_minutes(other)
-                    o_end = _event_end_minutes(other)
-                    if o_start is None or o_end is None:
-                        continue
-                    if not _interval_overlaps(o_start, o_end, candidate_start, candidate_end):
-                        continue
-                    shift_minutes = candidate_end - o_start
-                    if shift_minutes <= 0:
-                        continue
-                    new_start = o_start + shift_minutes
-                    new_end = o_end + shift_minutes
-                    other["start"] = f"{new_start // 60:02d}:{new_start % 60:02d}"
-                    other["end"] = f"{new_end // 60:02d}:{new_end % 60:02d}"
+            event["start"] = f"{candidate_start // 60:02d}:{candidate_start % 60:02d}"
+            event["end"] = f"{candidate_end // 60:02d}:{candidate_end % 60:02d}"
+            block_start = candidate_start
+            if linked_transfer is not None and linked_transfer_duration > 0:
+                transfer_end = candidate_start
+                transfer_start = max(previous_event_end, transfer_end - linked_transfer_duration)
+                transfer_end = transfer_start + linked_transfer_duration
+                if transfer_end > candidate_start:
+                    transfer_end = candidate_start
+                    transfer_start = max(previous_event_end, transfer_end - linked_transfer_duration)
+                linked_transfer["start"] = f"{transfer_start // 60:02d}:{transfer_start % 60:02d}"
+                linked_transfer["end"] = f"{transfer_end // 60:02d}:{transfer_end % 60:02d}"
+                block_start = transfer_start
+            assigned_meals.append((block_start, candidate_end))
+            last_end = candidate_end
+            for other_idx, other in enumerate(events):
+                if other_idx == index or other_idx == linked_transfer_index:
+                    continue
+                other_type = _normalize_text(other.get("type"))
+                if other_type not in {"poi", "transfer"}:
+                    continue
+                o_start = _event_start_minutes(other)
+                o_end = _event_end_minutes(other)
+                if o_start is None or o_end is None:
+                    continue
+                if not _interval_overlaps(o_start, o_end, block_start, candidate_end):
+                    continue
+                shift_minutes = candidate_end - o_start
+                if shift_minutes <= 0:
+                    continue
+                new_start = o_start + shift_minutes
+                new_end = o_end + shift_minutes
+                other["start"] = f"{new_start // 60:02d}:{new_start % 60:02d}"
+                other["end"] = f"{new_end // 60:02d}:{new_end % 60:02d}"
         else:
             slot = "extra_meal"
             candidate_start = max(last_end + 60, (_event_minutes_from_hhmm(_normalize_text(event.get("start"))) or last_end + 60))
