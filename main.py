@@ -448,10 +448,24 @@ def _install_command() -> list[str]:
     raise RuntimeError("Neither pnpm nor npm was found. Please install Node.js and pnpm/npm.")
 
 
+def _frontend_dependencies_ready() -> bool:
+    node_modules_dir = FRONTEND_DIR / "node_modules"
+    if not node_modules_dir.exists():
+        return False
+
+    next_package = node_modules_dir / "next" / "package.json"
+    if not next_package.exists():
+        return False
+
+    bin_dir = node_modules_dir / ".bin"
+    next_bin = bin_dir / ("next.cmd" if os.name == "nt" else "next")
+    return next_bin.exists()
+
+
 def _ensure_frontend_dependencies() -> None:
-    if (FRONTEND_DIR / "node_modules").exists():
+    if _frontend_dependencies_ready():
         return
-    print("Frontend dependencies are missing. Installing them now...")
+    print("Frontend dependencies are missing or incomplete. Installing them now...")
     subprocess.check_call(_install_command(), cwd=str(FRONTEND_DIR))
 
 
