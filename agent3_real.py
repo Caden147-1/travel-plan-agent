@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import itertools
 import math
 import os
 import re
@@ -2826,6 +2827,43 @@ class Agent3Selection:
             enriched.append(copied)
         return enriched
 
+    def _select_combo_close_to_budget(
+        self,
+        items: List[Dict[str, Any]],
+        budget: float,
+        cost_key: str,
+        max_items: int,
+        tolerance: float = 1.0,
+        minimum_items: int = 1,
+    ) -> List[Dict[str, Any]]:
+        if not items or max_items <= 0:
+            return []
+
+        effective_budget = budget * tolerance if budget > 0 else 0.0
+        candidates = [item for item in items if self._safe_float(item.get(cost_key), 0.0) > 0][:14]
+        best_combo: Tuple[Dict[str, Any], ...] = ()
+        best_total = -1.0
+        best_score = -1.0
+
+        min_count = max(1, minimum_items)
+        max_count = min(max_items, len(candidates))
+
+        for count in range(min_count, max_count + 1):
+            for combo in itertools.combinations(candidates, count):
+                total_cost = sum(self._safe_float(item.get(cost_key), 0.0) for item in combo)
+                if budget > 0 and total_cost > effective_budget:
+                    continue
+                total_score = sum(self._safe_float(item.get("score"), 0.0) for item in combo)
+                if (
+                    total_cost > best_total
+                    or (abs(total_cost - best_total) < 1e-6 and total_score > best_score)
+                ):
+                    best_combo = combo
+                    best_total = total_cost
+                    best_score = total_score
+
+        return list(best_combo)
+
 
     def _text_contains_any(self, text: str, keywords: List[str]) -> bool:
         text = self._normalize_text(text).lower()
@@ -3486,6 +3524,17 @@ class Agent3Selection:
                 reverse=True
             )
 
+        if not self.budget_pressure_mode and budget > 0:
+            selected_combo = self._select_combo_close_to_budget(
+                items=ranked,
+                budget=budget,
+                cost_key=cost_key,
+                max_items=max_items,
+                tolerance=1.0,
+            )
+            if selected_combo:
+                return selected_combo, "within_budget"
+
         selected = []
         spent = 0.0
 
@@ -3504,6 +3553,18 @@ class Agent3Selection:
 
         if self.budget_pressure_mode:
             return [], "not_found_within_hard_budget"
+
+        if budget > 0:
+            relaxed_combo = self._select_combo_close_to_budget(
+                items=ranked,
+                budget=budget,
+                cost_key=cost_key,
+                max_items=max_items,
+                tolerance=tolerance,
+            )
+            if relaxed_combo:
+                relaxed_total = sum(self._safe_float(item.get(cost_key), 0.0) for item in relaxed_combo)
+                return relaxed_combo, "slightly_over_budget" if relaxed_total > budget else "within_budget"
 
         relaxed = []
         for item in ranked:
@@ -3668,6 +3729,18 @@ class Agent3Selection:
                 key=lambda x: (x.get("score", 0), -self._safe_float(x.get("estimated_total_cost"), 0.0)),
                 reverse=True
             )
+
+        if not self.budget_pressure_mode and budget > 0:
+            selected_combo = self._select_combo_close_to_budget(
+                items=ranked,
+                budget=budget,
+                cost_key="estimated_total_cost",
+                max_items=max_items,
+                tolerance=1.0,
+                minimum_items=minimum_items,
+            )
+            if len(selected_combo) >= minimum_items:
+                return selected_combo[:max_items], "within_budget"
 
         within_budget = []
         slightly_over_budget = []

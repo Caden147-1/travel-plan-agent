@@ -852,11 +852,12 @@ function buildPlannerRequest(messages: Message[]): string {
 
   if (userMessages.length <= 1) return userMessages[0] || ""
 
-  const [firstMessage, ...followUps] = userMessages
-
   return [
-    firstMessage,
-    ...followUps.map((message) => `Additional user update: ${message}`),
+    "The user is continuing the same travel planning request. Combine these user messages into one complete request.",
+    "Keep all valid details from earlier messages unless a later message clearly changes them.",
+    "If a later message only supplies one missing field, merge it into the same trip instead of treating it as a new request.",
+    "",
+    ...userMessages.map((message, index) => `${index + 1}. ${message}`),
   ].join("\n")
 }
 
@@ -906,13 +907,14 @@ function validateRequest(request: string): string | null {
 }
 
 function buildFallbackGuidance(error?: string): string {
+  const exampleRange = getExampleDateRange()
   return [
     "I can help turn this into a complete travel request.",
     "",
     error ? `What happened: ${error}` : null,
     "To continue, tell me your departure city, destination city or country, travel dates or trip length, number of travelers, total budget and currency, and any hotel, food, transport, attraction, or pace preferences.",
     "",
-    "For example: I want to travel from Shanghai to Paris from 2026-06-10 to 2026-06-15 for 2 people with a budget of 15000 CNY. I prefer clean central hotels, local food, and a relaxed pace.",
+    `For example: I want to travel from Shanghai to Paris from ${exampleRange.start} to ${exampleRange.end} for 2 people with a budget of 15000 CNY. I prefer clean central hotels, local food, and a relaxed pace.`,
   ]
     .filter(Boolean)
     .join("\n")
@@ -979,6 +981,20 @@ function formatIsoDate(date: Date): string {
   const month = String(date.getMonth() + 1).padStart(2, "0")
   const day = String(date.getDate()).padStart(2, "0")
   return `${year}-${month}-${day}`
+}
+
+function getExampleDateRange(): { start: string; end: string } {
+  const today = startOfDay(new Date())
+  const start = new Date(today)
+  start.setDate(start.getDate() + 14)
+
+  const end = new Date(start)
+  end.setDate(end.getDate() + 4)
+
+  return {
+    start: formatIsoDate(start),
+    end: formatIsoDate(end),
+  }
 }
 
 function formatSummary(data: PlanResponse): string {

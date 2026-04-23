@@ -311,6 +311,7 @@ def _clean_final_output(agent3_output: dict, parsed: dict, budget_result: dict |
         "trip_summary": {
             "origin": agent3_output.get("origin"),
             "destination": agent3_output.get("destination", []),
+            "country": parsed.get("country"),
             "num_people": parsed.get("num_people"),
             "duration_days": parsed.get("duration_days"),
             "travel_dates": parsed.get("travel_dates", {}),

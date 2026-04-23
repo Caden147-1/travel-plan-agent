@@ -2640,11 +2640,11 @@ def _split_under_budget_plan(
         return recommended, optional, 0, adjustments
 
     upgrade_ratio = {
-        "transport": 0.10,
-        "hotel": 0.35,
-        "food": 0.20,
-        "attractions": 0.20,
-        "buffer": 0.15
+        "transport": 0.14,
+        "hotel": 0.38,
+        "food": 0.24,
+        "attractions": 0.21,
+        "buffer": 0.03
     }
 
     if normalized_prefs["hotel_level"] == "premium":

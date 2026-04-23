@@ -33,6 +33,8 @@ LOW_QUALITY_MEAL_COST_FLOOR = 30.0
 LOW_QUALITY_POI_COST_FLOOR = 20.0
 HOTEL_DAY_BOUNDARY_TRANSFER_MINUTES = 15
 DEFAULT_INTER_EVENT_TRANSFER_MINUTES = 15
+INTERNATIONAL_LOCAL_TRANSPORT_RATE_PER_MINUTE = 7.0
+CHINA_COUNTRY_ALIASES = {"china", "cn", "中国", "中华人民共和国", "people's republic of china", "prc"}
 
 
 def _build_flight_day_constraints(selected_all_flight_legs: List[Dict[str, Any]]) -> Dict[str, Dict[str, str]]:
@@ -98,7 +100,10 @@ def _build_flight_day_constraints(selected_all_flight_legs: List[Dict[str, Any]]
 def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
     normalized = _normalize_agent3_payload(router_output)
     local_transport_tier = _local_transport_tier_from_cost_level(normalized.get("cost_level"))
-    local_transport_rate = _local_transport_rate_per_minute(local_transport_tier)
+    local_transport_rate = _local_transport_rate_per_minute(
+        local_transport_tier,
+        is_international=_is_international_trip(normalized),
+    )
     city_budget_map = _build_city_budget_map(normalized.get("city_budget_plan", []))
     daily_slots = _extract_daily_city_slots(normalized.get("city_date_ranges", {}))
     flight_day_constraints = _build_flight_day_constraints(normalized.get("selected_all_flight_legs", []))
@@ -168,6 +173,7 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         day_plan = _init_day_plan(slot=slot, hotel=hotel)
         day_plan["local_transport_tier"] = local_transport_tier
         day_plan["local_transport_rate_per_minute"] = local_transport_rate
+        day_plan["local_transport_is_international"] = _is_international_trip(normalized)
         day_plan.update(flight_day_constraints.get(_normalize_text(slot.get("date")), {}))
 
         day_budget = city_budget_map.get(city, {})
@@ -311,6 +317,7 @@ def _normalize_agent3_payload(router_output: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "trip_summary": trip_summary,
+        "country": trip_summary.get("country"),
         "cost_level": payload.get("cost_level") or agent2_summary.get("cost_level"),
         "city_date_ranges": payload.get("city_date_ranges", {}) or {},
         "city_budget_plan": payload.get("city_budget_plan", []) or [],
@@ -687,16 +694,25 @@ def _local_transport_tier_from_cost_level(cost_level: Any) -> str:
     return "low"
 
 
-def _local_transport_rate_per_minute(tier: str) -> float:
+def _is_international_trip(normalized: Dict[str, Any]) -> bool:
+    country = _normalize_text(normalized.get("country")).lower()
+    if not country:
+        return False
+    return country not in CHINA_COUNTRY_ALIASES
+
+
+def _local_transport_rate_per_minute(tier: str, is_international: bool = False) -> float:
+    if is_international:
+        return INTERNATIONAL_LOCAL_TRANSPORT_RATE_PER_MINUTE
     key = _normalize_text(tier).lower()
     return float(LOCAL_TRANSPORT_RATE_BY_TIER.get(key, LOCAL_TRANSPORT_RATE_BY_TIER["medium"]))
 
 
-def _estimate_local_transfer_cost(duration_h: float, tier: Any) -> float:
+def _estimate_local_transfer_cost(duration_h: float, tier: Any, is_international: bool = False) -> float:
     minutes = max(0, int(round(_safe_float(duration_h, 0.0) * 60)))
     if minutes <= 0:
         return 0.0
-    return round(minutes * _local_transport_rate_per_minute(_normalize_text(tier)), 2)
+    return round(minutes * _local_transport_rate_per_minute(_normalize_text(tier), is_international=is_international), 2)
 
 
 def _collect_city_candidates(
@@ -1165,7 +1181,9 @@ def _append_commute_before_place(
     from_name = _normalize_text(previous.get("name")) or "previous stop"
     city = _normalize_text(day_plan.get("city"))
     local_tier = _normalize_text(day_plan.get("local_transport_tier")) or "medium"
-    cost = _estimate_local_transfer_cost(commute_h, local_tier)
+    is_international = bool(day_plan.get("local_transport_is_international"))
+    rate = _local_transport_rate_per_minute(local_tier, is_international=is_international)
+    cost = _estimate_local_transfer_cost(commute_h, local_tier, is_international=is_international)
     _append_event(
         day_plan=day_plan,
         event_type="transfer",
@@ -1178,7 +1196,7 @@ def _append_commute_before_place(
             "to": _normalize_text(to_name),
             "duration_source": source,
             "distance_km": distance_km,
-            "pricing_rule": f"{local_tier}_tier_{_local_transport_rate_per_minute(local_tier):g}_cny_per_minute",
+            "pricing_rule": f"{'international_default' if is_international else local_tier + '_tier'}_{rate:g}_cny_per_minute",
             "duration_minutes": int(round(commute_h * 60)),
         },
     )
@@ -1872,7 +1890,8 @@ def _ensure_hotel_day_boundary_transfers(day_plan: Dict[str, Any]) -> None:
 
     local_tier = _normalize_text(day_plan.get("local_transport_tier")) or "medium"
     commute_h = HOTEL_DAY_BOUNDARY_TRANSFER_MINUTES / 60.0
-    commute_cost = _estimate_local_transfer_cost(commute_h, local_tier)
+    is_international = bool(day_plan.get("local_transport_is_international"))
+    commute_cost = _estimate_local_transfer_cost(commute_h, local_tier, is_international=is_international)
 
     first_event = place_events[0]
     first_start = _event_start_minutes(first_event)
@@ -1978,7 +1997,8 @@ def _estimate_generic_transfer(day_plan: Dict[str, Any], from_event: Dict[str, A
     if commute_h <= 0:
         commute_h = DEFAULT_INTER_EVENT_TRANSFER_MINUTES / 60.0
     local_tier = _normalize_text(day_plan.get("local_transport_tier")) or "medium"
-    cost = _estimate_local_transfer_cost(commute_h, local_tier)
+    is_international = bool(day_plan.get("local_transport_is_international"))
+    cost = _estimate_local_transfer_cost(commute_h, local_tier, is_international=is_international)
     return commute_h, cost
 
 
@@ -2044,7 +2064,8 @@ def _ensure_adjacent_event_transfers(day_plan: Dict[str, Any]) -> None:
         transfer_end = min(next_start, current_end + transfer_minutes)
         transfer_h = round(max(1, transfer_end - current_end) / 60.0, 2)
         local_tier = _normalize_text(day_plan.get("local_transport_tier")) or "medium"
-        transfer_cost = _estimate_local_transfer_cost(transfer_h, local_tier)
+        is_international = bool(day_plan.get("local_transport_is_international"))
+        transfer_cost = _estimate_local_transfer_cost(transfer_h, local_tier, is_international=is_international)
         if transfer_cost <= 0:
             transfer_cost = estimated_cost
         transfer_event = {
@@ -2453,7 +2474,8 @@ def _enforce_unique_poi_visits(daily_plans: List[Dict[str, Any]]) -> List[Dict[s
 
     local_tier = _normalize_text(day_plan.get("local_transport_tier")) or "medium"
     commute_h = CHECKIN_TRANSFER_MINUTES / 60.0
-    cost = _estimate_local_transfer_cost(commute_h, local_tier)
+    is_international = bool(day_plan.get("local_transport_is_international"))
+    cost = _estimate_local_transfer_cost(commute_h, local_tier, is_international=is_international)
     for checkin in checkins:
         checkin_start = _event_start_minutes(checkin)
         if checkin_start is None:

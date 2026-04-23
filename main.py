@@ -10,12 +10,14 @@ import sys
 import threading
 import time
 import webbrowser
+from datetime import timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
 from urllib.parse import unquote, urlparse
 
 from router import get_router_backend_status, run_budget_pipeline
+from travel_time import get_today_date
 from travel_requirement_parser_llm_agent import _call_llm
 from travel_requirement_parser_llm_agent import travel_requirement_parser_llm_agent
 
@@ -35,7 +37,19 @@ def _compact_json(value: Any, limit: int = 2500) -> str:
     return text[:limit] + "...(truncated)"
 
 
+def _example_departure_date() -> str:
+    return (get_today_date() + timedelta(days=7)).isoformat()
+
+
+def _example_date_range() -> tuple[str, str]:
+    start = get_today_date() + timedelta(days=14)
+    end = start + timedelta(days=5 - 1)
+    return start.isoformat(), end.isoformat()
+
+
 def _fallback_guidance(result: dict) -> str:
+    example_departure_date = _example_departure_date()
+    example_start_date, example_end_date = _example_date_range()
     if result.get("stage") == "budget_feasibility":
         trip = result.get("trip_summary") or {}
         budget = (trip.get("budget") or {}).get("total")
@@ -95,11 +109,11 @@ def _fallback_guidance(result: dict) -> str:
                 "The departure date is missing. If this trip is starting tomorrow, "
                 "please reply with \"starting tomorrow\".\n\n"
                 "If not, please provide the exact departure date in YYYY-MM-DD format.\n\n"
-                "For example: 2026-06-01."
+                f"For example: {example_departure_date}."
             )
         return (
             f"Please provide {missing_text}.\n\n"
-            "For example: 2026-06-10 to 2026-06-15, 2 people, 15000 CNY."
+            f"For example: {example_start_date} to {example_end_date}, 2 people, 15000 CNY."
         )
     return (
         "Please provide your departure city, destination, travel dates or trip length, traveler count, and budget."
@@ -107,7 +121,7 @@ def _fallback_guidance(result: dict) -> str:
 
 
 def _build_guidance_prompt(user_request: str, result: dict) -> str:
-    default_example_date = "2026-06-01"
+    default_example_date = _example_departure_date()
     return f"""
 You are a friendly travel planning intake assistant.
 
@@ -123,7 +137,7 @@ Rules:
 5. Ask focused guiding questions only when required information is missing or unreasonable. Do not ask the user to confirm information that is already present.
 6. Do not ask confirmation questions such as "Is this trip starting tomorrow?" or "Do you mean...?" unless the request is genuinely ambiguous and cannot proceed safely.
 7. When one exact field is missing, ask directly for that field in one sentence, without restating the whole request unless absolutely necessary.
-8. If you give an example departure date, use 2026-06-01 by default. Do not give past dates.
+8. If you give an example departure date, use {default_example_date} by default. Do not give past dates.
 9. Do not produce a rewritten full request template unless the user explicitly asks for help rewriting.
 10. If the user is continuing a previous request or only added one missing detail, ask only for the next missing detail and keep the reply short.
 11. Cover these required downstream information points when relevant:

@@ -149,11 +149,17 @@ def _build_prompt(user_request: str) -> str:
     This upgraded version supports richer multi-label preference extraction while
     still preserving backward-compatible legacy fields.
     """
+    today = get_today_date()
+    tomorrow = today + timedelta(days=1)
     return f"""
 You are a travel requirement extraction agent.
 
 Your task is to extract structured travel requirements from the user's request
 and return ONLY one valid JSON object.
+
+Reference date for all relative date expressions:
+- today = {today.isoformat()}
+- tomorrow = {tomorrow.isoformat()}
 
 Strict rules:
 1. Return JSON only.
@@ -168,7 +174,7 @@ Strict rules:
 10. "num_people" must be an integer if possible.
 11. "duration_days" must be an integer if possible.
 12. Only fill "travel_dates.start" and "travel_dates.end" when the date is explicit enough.
-13. If the user gives month/day expressions without a year, resolve them to the current calendar year by default.
+13. If the user gives month/day expressions without a year, resolve them to the current calendar year by default using today = {today.isoformat()}.
 14. If a missing year must be resolved, do not roll the date into next year just because the month/day has already passed.
 15. If exact dates still cannot be safely determined, set "start" and "end" to null and keep the original phrase in "travel_dates.text".
 16. Do not invent any information not explicitly mentioned by the user, except for resolving a missing year in travel dates to the current calendar year.
@@ -181,6 +187,7 @@ Strict rules:
 21. Do not convert a specific named attraction into only a style label. Keep both if applicable.
 22. preferences.must_visit_attractions must be a JSON array of strings.
 23. Only include attractions explicitly mentioned by the user. Do not guess.
+24. For relative date expressions such as "today", "tomorrow", "starting tomorrow", and "leaving tomorrow", you must use the reference date above, not your own internal date.
 
 Allowed values:
 
@@ -766,6 +773,26 @@ def _request_contains_explicit_year(text: Optional[str]) -> bool:
     return bool(re.search(r"\b(19|20)\d{2}\b", text))
 
 
+def _extract_relative_start_date_from_text(text: Optional[str]) -> Optional[str]:
+    if not text:
+        return None
+
+    lowered = text.lower()
+    today = get_today_date()
+    relative_patterns = [
+        (r"\b(?:starting|start|leaving|leave|departing|depart|from)\s+tomorrow\b", 1),
+        (r"\btomorrow\b", 1),
+        (r"\b(?:starting|start|leaving|leave|departing|depart)\s+today\b", 0),
+        (r"\btoday\b", 0),
+    ]
+
+    for pattern, offset_days in relative_patterns:
+        if re.search(pattern, lowered):
+            return (today + timedelta(days=offset_days)).strftime("%Y-%m-%d")
+
+    return None
+
+
 def _resolve_date_to_default_year(date_str: Optional[str], today: Optional[datetime] = None) -> Optional[str]:
     """
     If date_str is a full date inferred from a yearless request,
@@ -812,6 +839,11 @@ def _normalize_travel_dates(
     start = default_dates["start"]
     end = default_dates["end"]
     text = default_dates["text"] or ""
+    relative_start = _extract_relative_start_date_from_text(user_request or text)
+
+    if relative_start:
+        default_dates["start"] = relative_start
+        start = default_dates["start"]
 
     start_has_full_year = _looks_like_full_date(start)
     end_has_full_year = _looks_like_full_date(end)
@@ -827,8 +859,9 @@ def _normalize_travel_dates(
     if end_has_full_year:
         default_dates["end"] = _resolve_date_to_default_year(end)
 
-    if bool(default_dates["start"]) != bool(default_dates["end"]):
-        default_dates["start"] = None
+    # Keep a valid start date even if the end date is missing.
+    # Downstream logic can derive the end date from duration_days.
+    if default_dates["end"] and not default_dates["start"]:
         default_dates["end"] = None
     elif default_dates["start"] and default_dates["end"]:
         start_dt = _parse_date(default_dates["start"])
