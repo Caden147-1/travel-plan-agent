@@ -62,6 +62,31 @@ CURRENCY_TO_CNY = {
     "SGD": 5.3,
 }
 
+PLACE_STOPWORDS = {
+    "for",
+    "with",
+    "within",
+    "under",
+    "around",
+    "about",
+    "starting",
+    "leaving",
+    "departing",
+    "tomorrow",
+    "today",
+    "next",
+    "this",
+    "people",
+    "person",
+    "traveler",
+    "travellers",
+    "travelers",
+    "budget",
+    "trip",
+    "days",
+    "day",
+}
+
 
 def get_llm_backend_status() -> dict:
     """
@@ -376,6 +401,29 @@ User request:
 """.strip()
 
 
+def _prepare_user_request(user_request: str) -> str:
+    """
+    Collapse the frontend's multi-turn merge prompt into the actual user content.
+    This keeps Agent1 focused on the trip details instead of the wrapper instructions.
+    """
+    text = (user_request or "").strip()
+    if not text:
+        return ""
+
+    lines = [line.strip() for line in text.splitlines() if line.strip()]
+    numbered_messages = []
+
+    for line in lines:
+        match = re.match(r"^\d+\.\s+(.*)$", line)
+        if match:
+            numbered_messages.append(match.group(1).strip())
+
+    if numbered_messages:
+        return " ".join(message for message in numbered_messages if message).strip()
+
+    return text
+
+
 def _call_llm(prompt: str) -> str:
     """
     Call the DashScope compatible chat completion API.
@@ -536,6 +584,98 @@ def _normalize_budget_for_planning(
             ),
         })
     return normalized
+
+
+def _extract_place_fragment(fragment: Optional[str]) -> Optional[str]:
+    if not fragment:
+        return None
+
+    cleaned = re.sub(r"^[\s,.;:()\-]+|[\s,.;:()\-]+$", "", fragment.strip())
+    cleaned = re.split(
+        r"(?i)\b(?:for|with|within|under|around|about|starting|leaving|departing|tomorrow|today|budget|days?|people|travellers?|travelers?)\b",
+        cleaned,
+        maxsplit=1,
+    )[0].strip(" ,.;:-")
+
+    if not cleaned:
+        return None
+
+    lowered = cleaned.lower()
+    if lowered in PLACE_STOPWORDS:
+        return None
+
+    return " ".join(part for part in cleaned.split() if part).strip() or None
+
+
+def _extract_origin_destination_from_text(user_request: str) -> Dict[str, Any]:
+    text = _prepare_user_request(user_request)
+    if not text:
+        return {"origin": None, "destination": []}
+
+    origin = None
+    destination: List[str] = []
+
+    patterns = [
+        re.compile(
+            r"(?i)\b(?:travel|trip|go|going|plan|planning|visit|vacation|holiday)\s+from\s+(?P<origin>.+?)\s+to\s+(?P<destination>.+?)(?:[,.]|$)"
+        ),
+        re.compile(
+            r"(?i)\bfrom\s+(?P<origin>.+?)\s+to\s+(?P<destination>.+?)(?:[,.]|$)"
+        ),
+        re.compile(
+            r"(?i)\b(?:plan|planning|want|wanna|need|help me plan)\b.*?\b(?P<destination>[a-z][a-z\s.'-]*?)\s+trip\s+from\s+(?P<origin>.+?)(?:[,.]|$)"
+        ),
+        re.compile(
+            r"(?i)\btrip\s+to\s+(?P<destination>.+?)\s+from\s+(?P<origin>.+?)(?:[,.]|$)"
+        ),
+    ]
+
+    for pattern in patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+
+        extracted_origin = _extract_place_fragment(match.groupdict().get("origin"))
+        extracted_destination = _extract_place_fragment(match.groupdict().get("destination"))
+
+        if extracted_origin and not origin:
+            origin = extracted_origin
+        if extracted_destination:
+            destination = [extracted_destination]
+        if origin or destination:
+            break
+
+    return {
+        "origin": origin,
+        "destination": destination,
+    }
+
+
+def _merge_missing_fields_from_text(result: Dict[str, Any], user_request: str) -> Dict[str, Any]:
+    """
+    Second-pass fallback: if Agent1 misses core route/date details, recover them from raw text.
+    """
+    merged = json.loads(json.dumps(result))
+    prepared_request = _prepare_user_request(user_request)
+    route_fallback = _extract_origin_destination_from_text(prepared_request)
+
+    if not merged.get("origin") and route_fallback.get("origin"):
+        merged["origin"] = route_fallback["origin"]
+
+    if not merged.get("destination") and route_fallback.get("destination"):
+        merged["destination"] = route_fallback["destination"]
+
+    travel_dates = merged.get("travel_dates") or {}
+    if not travel_dates.get("start"):
+        relative_start = _extract_relative_start_date_from_text(prepared_request)
+        if relative_start:
+            travel_dates["start"] = relative_start
+            merged["travel_dates"] = travel_dates
+
+    merged["missing_fields"] = _detect_missing_fields(merged)
+    merged["is_ready_for_planning"] = len(merged["missing_fields"]["critical"]) == 0
+    merged["parse_status"] = "success" if merged["is_ready_for_planning"] else "partial"
+    return merged
 
 
 def _extract_number(value: Any) -> Optional[int]:
@@ -991,6 +1131,7 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
     Normalize the parsed LLM result into a stable schema.
     """
     result = _default_result()
+    prepared_request = _prepare_user_request(user_request)
 
     result["origin"] = _normalize_string(parsed.get("origin"))
     result["destination"] = _normalize_destination(parsed.get("destination"))
@@ -1002,12 +1143,12 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
 
     result["travel_dates"] = _normalize_travel_dates(
         parsed.get("travel_dates"),
-        user_request=user_request
+        user_request=prepared_request
     )
 
     budget = parsed.get("budget", {})
     if isinstance(budget, dict):
-        result["budget"].update(_normalize_budget_for_planning(budget, user_request))
+        result["budget"].update(_normalize_budget_for_planning(budget, prepared_request))
 
     result["preferences"] = _normalize_preferences(
         parsed.get("preferences") or {}
@@ -1035,7 +1176,7 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
     result["is_ready_for_planning"] = len(result["missing_fields"]["critical"]) == 0
     result["parse_status"] = "success" if result["is_ready_for_planning"] else "partial"
 
-    return result
+    return _merge_missing_fields_from_text(result, prepared_request)
 
 
 def travel_requirement_parser_llm_agent(user_request: str) -> Dict[str, Any]:
@@ -1045,19 +1186,22 @@ def travel_requirement_parser_llm_agent(user_request: str) -> Dict[str, Any]:
     """
     result = _default_result()
     result["meta"]["llm_called"] = True
+    prepared_request = _prepare_user_request(user_request)
 
     try:
-        prompt = _build_prompt(user_request)
+        prompt = _build_prompt(prepared_request)
         raw_text = _call_llm(prompt)
 
         parsed = _extract_json_from_text(raw_text)
-        normalized = _normalize_result(parsed, user_request=user_request)
-        normalized["user_request"] = user_request
+        normalized = _normalize_result(parsed, user_request=prepared_request)
+        normalized["user_request"] = prepared_request
 
         enriched = run_city_planning_agent(
             normalized,
             db_path=str(DEFAULT_DB_PATH)
         )
+
+        enriched = _merge_missing_fields_from_text(enriched, prepared_request)
 
         enriched["missing_fields"] = _detect_missing_fields(enriched)
         enriched["is_ready_for_planning"] = len(enriched["missing_fields"]["critical"]) == 0

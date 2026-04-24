@@ -6,6 +6,7 @@ import os
 import re
 import time
 from datetime import datetime
+from pathlib import Path
 
 from travel_requirement_parser_llm_agent import (
     get_llm_backend_status,
@@ -30,6 +31,12 @@ from city_consumption_tier_agent import (
 from agent3_real import Agent3Selection
 from itinerary_agent import run_itinerary_agent
 from travel_report_generator import write_travel_report
+
+
+ROUTER_PROCESS_STARTED_AT = datetime.now().isoformat(timespec="seconds")
+ROUTER_CODE_VERSION = datetime.fromtimestamp(
+    Path(__file__).resolve().stat().st_mtime
+).isoformat(timespec="seconds")
 
 
 def _parse_iso_date(value: str | None):
@@ -579,6 +586,17 @@ def _finalize_success_output(final_output: dict, user_request: str, auto_open_re
         _log_stage("agent4_itinerary", started)
 
     itinerary = final_output.get("itinerary") or {}
+    if not itinerary.get("success", False):
+        final_output["success"] = False
+        final_output["stage"] = itinerary.get("stage", "agent4_itinerary_planning")
+        final_output["error"] = itinerary.get("error", "Agent4 itinerary planning failed.")
+        final_output.setdefault("warnings", [])
+        final_output["runtime"] = {
+            "router_process_started_at": ROUTER_PROCESS_STARTED_AT,
+            "router_code_version": ROUTER_CODE_VERSION,
+        }
+        return final_output
+
     itinerary_summary = itinerary.get("itinerary_summary") or {}
     if itinerary_summary.get("budget_feasible") is False:
         cost_rollup = itinerary.get("cost_rollup") or {}
@@ -609,6 +627,10 @@ def _finalize_success_output(final_output: dict, user_request: str, auto_open_re
     finally:
         _log_stage("html_report", started)
 
+    final_output["runtime"] = {
+        "router_process_started_at": ROUTER_PROCESS_STARTED_AT,
+        "router_code_version": ROUTER_CODE_VERSION,
+    }
     return final_output
 
 
@@ -856,6 +878,10 @@ def get_router_backend_status() -> dict:
     searchapi_ready = bool(os.getenv("SEARCHAPI_API_KEY"))
 
     return {
+        "runtime": {
+            "router_process_started_at": ROUTER_PROCESS_STARTED_AT,
+            "router_code_version": ROUTER_CODE_VERSION,
+        },
         "agent1_llm": get_llm_backend_status(),
         "agent2_llm": get_budget_agent_backend_status(),
         "agent3": {

@@ -12,6 +12,14 @@ POI_VISIT_HOURS = 1.5
 MEAL_HOURS = 1.0
 FLIGHT_BUFFER_HOURS = 2.0
 REDEYE_TIME_FACTOR = 0.5
+DEFAULT_DAY_START = "09:00"
+DEFAULT_DAY_END = "20:30"
+NORMAL_BREAKFAST_START = "09:00"
+NORMAL_BREAKFAST_END = "10:30"
+NORMAL_LUNCH_START = "12:00"
+NORMAL_LUNCH_END = "14:00"
+NORMAL_DINNER_START = "18:00"
+NORMAL_DINNER_END = "20:00"
 LOCAL_TRANSPORT_RATE_BY_TIER = {"low": 1.0, "medium": 2.0, "high": 8.0}
 MID_DISTANCE_CAR_COST = {"low": 300, "medium": 400, "high": 500}
 MAX_DRIVE_HOURS_PER_LEG = 5.0
@@ -89,7 +97,12 @@ def _build_flight_day_constraints(selected_all_flight_legs: List[Dict[str, Any]]
                         arrival_date = (dep_dt + timedelta(days=1)).strftime("%Y-%m-%d")
                         day_constraints["skip_city_schedule"] = "true"
                         day_constraints["skip_city_local_transport"] = "true"
-                constraints.setdefault(arrival_date, {})["schedule_start"] = _add_minutes_to_time(arrival, 30) or arrival
+                arrival_constraints = constraints.setdefault(arrival_date, {})
+                recovery_start = _add_minutes_to_time(arrival, 30) or arrival
+                arrival_constraints["schedule_start"] = _max_time_value(
+                    recovery_start,
+                    DEFAULT_DAY_START,
+                ) or recovery_start
         elif leg_type == "inbound":
             departure = _format_time_value(flight.get("departure_time"))
             if departure:
@@ -122,6 +135,7 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
     restaurants = normalized.get("selected_restaurants", [])
 
     city_hotel_map: Dict[str, Optional[Dict[str, Any]]] = {}
+    city_hotel_clusters_map: Dict[str, List[Dict[str, Any]]] = {}
     city_candidates_map: Dict[str, Dict[str, List[Dict[str, Any]]]] = {}
 
     must_visit_names = normalized.get("must_visit_attractions", [])
@@ -142,6 +156,7 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
             radius_km=HOTEL_CLUSTER_RADIUS_KM,
             max_route_km=HOTEL_CLUSTER_MAX_ROUTE_KM,
         )
+        city_hotel_clusters_map[city] = city_hotel_clusters
         primary_hotel = _select_primary_hotel_for_city(city=city, hotel_clusters=city_hotel_clusters)
         city_hotel_map[city] = primary_hotel
 
@@ -166,23 +181,58 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
     restaurant_last_used_day_index: Dict[str, int] = {}
     restaurant_cooldown_days = 2
     used_poi_keys: set = set()
+    used_restaurant_keys: set = set()
+    previous_hotel_by_city: Dict[str, str] = {}
 
     for day_index, slot in enumerate(daily_slots, start=1):
         city = _normalize_text(slot.get("city"))
-        hotel = city_hotel_map.get(city)
+        selected_cluster = _select_daily_hotel_cluster(
+            city=city,
+            hotel_clusters=city_hotel_clusters_map.get(city, []),
+            used_poi_keys=used_poi_keys,
+            used_restaurant_keys=used_restaurant_keys,
+            previous_hotel_name=previous_hotel_by_city.get(city, ""),
+        )
+        hotel = (
+            selected_cluster.get("hotel")
+            if isinstance(selected_cluster, dict) and isinstance(selected_cluster.get("hotel"), dict)
+            else city_hotel_map.get(city)
+        )
         day_plan = _init_day_plan(slot=slot, hotel=hotel)
         day_plan["local_transport_tier"] = local_transport_tier
         day_plan["local_transport_rate_per_minute"] = local_transport_rate
         day_plan["local_transport_is_international"] = _is_international_trip(normalized)
         day_plan.update(flight_day_constraints.get(_normalize_text(slot.get("date")), {}))
+        if isinstance(hotel, dict):
+            previous_hotel_by_city[city] = _normalize_text(hotel.get("name"))
 
         day_budget = city_budget_map.get(city, {})
-        city_candidates = city_candidates_map.get(city, {"pois": [], "restaurants": [], "radius_meta": {}})
+        if isinstance(selected_cluster, dict):
+            city_candidates = {
+                "pois": selected_cluster.get("pois", []) or [],
+                "restaurants": selected_cluster.get("restaurants", []) or [],
+                "radius_meta": {
+                    "poi_limit_km": HOTEL_ACTIVITY_RADIUS_KM,
+                    "meal_limit_km": HOTEL_ACTIVITY_RADIUS_KM,
+                    "meal_fallback_used": False,
+                    "poi_in_radius_count": len(selected_cluster.get("pois", []) or []),
+                    "meal_in_10km_count": len(selected_cluster.get("restaurants", []) or []),
+                    "meal_in_15km_count": len(selected_cluster.get("restaurants", []) or []),
+                    "hotel_missing_for_radius_filter": False,
+                    "hotel_switched_for_variety": _normalize_text(previous_hotel_by_city.get(city)) != _normalize_text((hotel or {}).get("name")),
+                },
+            }
+        else:
+            city_candidates = city_candidates_map.get(city, {"pois": [], "restaurants": [], "radius_meta": {}})
         radius_meta = city_candidates.get("radius_meta", {}) if isinstance(city_candidates, dict) else {}
         if isinstance(radius_meta, dict):
             if bool(radius_meta.get("hotel_missing_for_radius_filter")):
                 day_plan.setdefault("warnings", []).append(
                     "Hotel coordinate missing; cannot strictly enforce 10km activity radius."
+                )
+            elif bool(radius_meta.get("hotel_switched_for_variety")):
+                day_plan.setdefault("warnings", []).append(
+                    "Switched hotel area to unlock new nearby attractions and restaurants."
                 )
             elif bool(radius_meta.get("meal_fallback_used")):
                 day_plan.setdefault("warnings", []).append(
@@ -214,6 +264,7 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
                 restaurant_last_used_day_index=restaurant_last_used_day_index,
                 restaurant_cooldown_days=restaurant_cooldown_days,
                 used_poi_keys=used_poi_keys,
+                used_restaurant_keys=used_restaurant_keys,
             )
         else:
             day_plan.setdefault("warnings", []).append(
@@ -229,12 +280,22 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         selected_all_flight_legs=normalized.get("selected_all_flight_legs", []),
     )
     daily_plans = _enforce_unique_poi_visits(daily_plans)
+    daily_plans = _refill_missing_pois_after_cleanup(
+        daily_plans=daily_plans,
+        city_candidates_map=city_candidates_map,
+    )
     for day in daily_plans:
         _ensure_checkin_before_first_activity(day)
         _shift_flexible_events_after_hotel_windows(day)
         _ensure_hotel_day_boundary_transfers(day)
         _enforce_meal_time_windows(day)
         _shift_flexible_events_after_hotel_windows(day)
+        _sanitize_transfer_timeline(day)
+        _ensure_adjacent_event_transfers(day)
+        _resolve_timeline_overlaps(day)
+        _compress_flexible_timeline(day)
+        _ensure_hotel_day_boundary_transfers(day)
+        _sanitize_transfer_timeline(day)
         _ensure_adjacent_event_transfers(day)
         _resolve_timeline_overlaps(day)
         _sort_and_recompute_day(day)
@@ -248,6 +309,12 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         _ensure_hotel_day_boundary_transfers(day)
         _enforce_meal_time_windows(day)
         _shift_flexible_events_after_hotel_windows(day)
+        _sanitize_transfer_timeline(day)
+        _ensure_adjacent_event_transfers(day)
+        _resolve_timeline_overlaps(day)
+        _compress_flexible_timeline(day)
+        _ensure_hotel_day_boundary_transfers(day)
+        _sanitize_transfer_timeline(day)
         _ensure_adjacent_event_transfers(day)
         _resolve_timeline_overlaps(day)
         _sort_and_recompute_day(day)
@@ -478,6 +545,50 @@ def _select_primary_hotel_for_city(
     if isinstance(hotel, dict):
         return hotel
     return None
+
+
+def _select_daily_hotel_cluster(
+    city: str,
+    hotel_clusters: List[Dict[str, Any]],
+    used_poi_keys: set,
+    used_restaurant_keys: set,
+    previous_hotel_name: str = "",
+) -> Optional[Dict[str, Any]]:
+    if not hotel_clusters:
+        return None
+
+    ranked: List[Tuple[Tuple[int, int, int, float, float], Dict[str, Any]]] = []
+    city_key = _normalize_text(city)
+    for cluster in hotel_clusters:
+        hotel = cluster.get("hotel") or {}
+        hotel_name = _normalize_text(hotel.get("name"))
+        pois = cluster.get("pois", []) or []
+        restaurants = cluster.get("restaurants", []) or []
+
+        remaining_pois = 0
+        for poi in pois:
+            key = _poi_dedupe_key(poi, city=city_key)
+            if not key or key not in used_poi_keys:
+                remaining_pois += 1
+
+        remaining_restaurants = 0
+        for restaurant in restaurants:
+            key = _restaurant_dedupe_key(restaurant, city=city_key)
+            if not key or key not in used_restaurant_keys:
+                remaining_restaurants += 1
+
+        same_as_previous_penalty = 1 if previous_hotel_name and hotel_name == previous_hotel_name else 0
+        score = (
+            remaining_pois + remaining_restaurants,
+            remaining_pois,
+            remaining_restaurants,
+            _safe_float(hotel.get("rating"), 0.0),
+            _safe_float(hotel.get("stars"), 0.0),
+        )
+        ranked.append(((-same_as_previous_penalty, *score), cluster))
+
+    ranked.sort(key=lambda item: item[0], reverse=True)
+    return ranked[0][1] if ranked else hotel_clusters[0]
 
 
 def _is_redeye_flight(flight: Dict[str, Any]) -> bool:
@@ -842,6 +953,8 @@ def _init_day_plan(slot: Dict[str, Any], hotel: Optional[Dict[str, Any]]) -> Dic
         "days_in_city": int(_safe_float(slot.get("days_in_city"), 0)),
         "check_in": _normalize_text(slot.get("check_in")),
         "check_out": _normalize_text(slot.get("check_out")),
+        "schedule_start": DEFAULT_DAY_START,
+        "schedule_end": DEFAULT_DAY_END,
         "hotel": {
             "name": _normalize_text((hotel or {}).get("name")),
             "area": _normalize_text((hotel or {}).get("area")),
@@ -969,6 +1082,12 @@ def _meal_display_name(candidate: Dict[str, Any], city: str, index: int) -> str:
         return base
     city_name = city or "City"
     return f"Local Meal Option {index + 1} ({city_name})"
+
+
+def _fallback_meal_name(day_plan: Dict[str, Any], city: str, index: int) -> str:
+    city_name = city or "City"
+    day_marker = _normalize_text(day_plan.get("date")) or f"day-{max(1, int(_safe_float(day_plan.get('day_index_in_city'), 1)))}"
+    return f"Local Meal Option {index + 1} ({city_name}, {day_marker})"
 
 
 def _event_start_minutes(event: Dict[str, Any]) -> Optional[int]:
@@ -1308,6 +1427,8 @@ def _schedule_city_day(
     restaurant_last_used_day_index: Dict[str, int],
     restaurant_cooldown_days: int = 2,
     used_poi_keys: Optional[set] = None,
+    used_restaurant_keys: Optional[set] = None,
+    **_ignored: Any,
 ) -> Dict[str, Any]:
     pois = city_candidates.get("pois", []) or []
     restaurants = city_candidates.get("restaurants", []) or []
@@ -1338,8 +1459,15 @@ def _schedule_city_day(
 
     while len(selected_pois) < poi_quota:
         hotel = day_plan.get("hotel") or {}
+        fallback_index = len(selected_pois) + 1
+        day_marker = _normalize_text(day_plan.get("date")) or f"day-{max(1, int(_safe_float(day_plan.get('day_index_in_city'), 1)))}"
+        fallback_names = [
+            f"City walk near hotel in {_normalize_text(day_plan.get('city')) or 'city center'} ({day_marker})",
+            f"Local park stroll in {_normalize_text(day_plan.get('city')) or 'city center'} ({day_marker})",
+            f"Neighborhood sightseeing in {_normalize_text(day_plan.get('city')) or 'city center'} ({day_marker})",
+        ]
         selected_pois.append({
-            "name": f"City walk near hotel in {_normalize_text(day_plan.get('city')) or 'city center'}",
+            "name": fallback_names[min(fallback_index - 1, len(fallback_names) - 1)],
             "estimated_total_cost": 0.0,
             "lat": _safe_float(hotel.get("lat"), None) if isinstance(hotel, dict) else None,
             "lng": _safe_float(hotel.get("lng"), None) if isinstance(hotel, dict) else None,
@@ -1393,6 +1521,8 @@ def _schedule_city_day(
 
         if restaurant_key in used_today_restaurant_keys:
             continue
+        if used_restaurant_keys is not None and restaurant_key in used_restaurant_keys:
+            continue
 
         last_used_day = restaurant_last_used_day_index.get(restaurant_key)
         if (
@@ -1428,26 +1558,48 @@ def _schedule_city_day(
         )
         restaurant_last_used_day_index[restaurant_key] = current_day_index
         used_today_restaurant_keys.add(restaurant_key)
+        if used_restaurant_keys is not None:
+            used_restaurant_keys.add(restaurant_key)
         meal_added += 1
 
     while meal_added < DAILY_REQUIRED_MEALS and _safe_float(day_plan.get("used_hours"), 0.0) + MEAL_HOURS <= DAY_AVAILABLE_HOURS:
         if fallback_restaurants:
-            fallback = fallback_restaurants[fallback_cursor % len(fallback_restaurants)]
-            fallback_cursor += 1
-            meal_name = _meal_display_name(fallback, city_name, meal_added)
-            fallback_key = (
-                _restaurant_dedupe_key(fallback, city=city_name)
-                or f"{city_name.lower()}|fallback:{fallback_cursor}"
-            )
-            meal_cost = _safe_float(fallback.get("estimated_total_cost"), 0.0)
-            if meal_cost <= 0:
+            fallback = None
+            fallback_key = ""
+            for _ in range(len(fallback_restaurants)):
+                candidate = fallback_restaurants[fallback_cursor % len(fallback_restaurants)]
+                fallback_cursor += 1
+                candidate_key = (
+                    _restaurant_dedupe_key(candidate, city=city_name)
+                    or f"{city_name.lower()}|fallback:{fallback_cursor}"
+                )
+                if candidate_key not in used_today_restaurant_keys:
+                    if used_restaurant_keys is not None and candidate_key in used_restaurant_keys:
+                        continue
+                    fallback = candidate
+                    fallback_key = candidate_key
+                    break
+            if fallback is not None:
+                meal_name = _meal_display_name(fallback, city_name, meal_added)
+                meal_cost = _safe_float(fallback.get("estimated_total_cost"), 0.0)
+                if meal_cost <= 0:
+                    meal_cost = fallback_meal_cost
+                meta = {
+                    "city": city_name,
+                    "restaurant_key": fallback_key,
+                    "lat": _safe_float(fallback.get("lat"), None),
+                    "lng": _safe_float(fallback.get("lng"), None),
+                }
+            else:
+                meal_name = f"Local Meal Option {meal_added + 1} ({city_name or 'City'})"
                 meal_cost = fallback_meal_cost
-            meta = {
-                "city": city_name,
-                "restaurant_key": fallback_key,
-                "lat": _safe_float(fallback.get("lat"), None),
-                "lng": _safe_float(fallback.get("lng"), None),
-            }
+                hotel = day_plan.get("hotel") or {}
+                meta = {
+                    "city": city_name,
+                    "restaurant_key": f"{city_name.lower()}|virtual:{meal_added+1}",
+                    "lat": _safe_float(hotel.get("lat"), None) if isinstance(hotel, dict) else None,
+                    "lng": _safe_float(hotel.get("lng"), None) if isinstance(hotel, dict) else None,
+                }
         else:
             meal_name = f"Local Meal Option {meal_added + 1} ({city_name or 'City'})"
             meal_cost = fallback_meal_cost
@@ -1473,6 +1625,11 @@ def _schedule_city_day(
             cost_estimated=meal_cost,
             meta=meta,
         )
+        restaurant_key = _normalize_text(meta.get("restaurant_key"))
+        if restaurant_key:
+            used_today_restaurant_keys.add(restaurant_key)
+            if used_restaurant_keys is not None:
+                used_restaurant_keys.add(restaurant_key)
         meal_added += 1
 
     food_budget = _safe_float(city_budget.get("food_budget"), 0.0)
@@ -2116,9 +2273,113 @@ def _find_linked_transfer_index(events: List[Dict[str, Any]], meal_index: int) -
     if _normalize_text(prev_event.get("type")) != "transfer":
         return None
     meta = prev_event.get("meta") or {}
-    if isinstance(meta, dict) and _normalize_text(meta.get("to")) == _normalize_text(events[meal_index].get("name")):
-        return prev_index
+    if not isinstance(meta, dict):
+        return None
+    meal_name = _normalize_text(events[meal_index].get("name"))
+    if _normalize_text(meta.get("to")) != meal_name:
+        return None
+
+    previous_location_name = ""
+    for idx in range(prev_index - 1, -1, -1):
+        candidate = events[idx]
+        if _normalize_text(candidate.get("type")) == "transfer":
+            continue
+        if _is_location_event(candidate):
+            previous_location_name = _event_node_name(candidate)
+            break
+
+    transfer_from = _normalize_text(meta.get("from"))
+    if previous_location_name and transfer_from and transfer_from != previous_location_name:
+        return None
+
+    transfer_start = _event_start_minutes(prev_event)
+    transfer_end = _event_end_minutes(prev_event)
+    meal_start = _event_start_minutes(events[meal_index])
+    if (
+        transfer_start is None
+        or transfer_end is None
+        or meal_start is None
+        or transfer_end > meal_start
+        or transfer_end < transfer_start
+    ):
+        return None
+
+    return prev_index
     return None
+
+
+def _sanitize_transfer_timeline(day_plan: Dict[str, Any]) -> None:
+    events = day_plan.get("events", []) or []
+    if not isinstance(events, list):
+        return
+
+    cleaned: List[Dict[str, Any]] = []
+    removed_names: List[str] = []
+
+    for index, event in enumerate(events):
+        if _normalize_text(event.get("type")) != "transfer":
+            cleaned.append(event)
+            continue
+
+        meta = event.get("meta") or {}
+        reason = _normalize_text(meta.get("reason")) if isinstance(meta, dict) else ""
+        start = _event_start_minutes(event)
+        end = _event_end_minutes(event)
+
+        if start is None or end is None or end < start:
+            removed_names.append(_normalize_text(event.get("name")) or "transfer")
+            continue
+
+        if reason in {"hotel_checkin_navigation", "hotel_day_start", "hotel_day_end", "adjacent_event_transfer"}:
+            cleaned.append(event)
+            continue
+
+        prev_location = None
+        for prev_idx in range(index - 1, -1, -1):
+            candidate = events[prev_idx]
+            if _normalize_text(candidate.get("type")) == "transfer":
+                continue
+            if _is_location_event(candidate):
+                prev_location = candidate
+                break
+
+        next_location = None
+        for next_idx in range(index + 1, len(events)):
+            candidate = events[next_idx]
+            if _normalize_text(candidate.get("type")) == "transfer":
+                continue
+            if _is_location_event(candidate):
+                next_location = candidate
+                break
+
+        if not isinstance(meta, dict) or prev_location is None or next_location is None:
+            removed_names.append(_normalize_text(event.get("name")) or "transfer")
+            continue
+
+        expected_from = _event_node_name(prev_location)
+        expected_to = _event_node_name(next_location)
+        if (
+            _normalize_text(meta.get("from")) != expected_from
+            or _normalize_text(meta.get("to")) != expected_to
+        ):
+            removed_names.append(_normalize_text(event.get("name")) or "transfer")
+            continue
+
+        prev_end = _event_end_minutes(prev_location)
+        next_start = _event_start_minutes(next_location)
+        if prev_end is None or next_start is None or start < prev_end or end > next_start:
+            removed_names.append(_normalize_text(event.get("name")) or "transfer")
+            continue
+
+        cleaned.append(event)
+
+    if len(cleaned) != len(events):
+        day_plan["events"] = cleaned
+        if removed_names:
+            day_plan.setdefault("warnings", []).append(
+                "Removed stale transfer rows after timeline rebalance: " + ", ".join(removed_names)
+            )
+        _sort_and_recompute_day(day_plan)
 
 
 def _next_non_meal_event_end(events: List[Dict[str, Any]], end_index: int) -> int:
@@ -2170,9 +2431,9 @@ def _enforce_meal_time_windows(day_plan: Dict[str, Any]) -> None:
         return
 
     target_slots = [
-        ("08:00", "10:00", "breakfast"),
-        ("11:30", "14:00", "lunch"),
-        ("17:30", "20:00", "dinner"),
+        (NORMAL_BREAKFAST_START, NORMAL_BREAKFAST_END, "breakfast"),
+        (NORMAL_LUNCH_START, NORMAL_LUNCH_END, "lunch"),
+        (NORMAL_DINNER_START, NORMAL_DINNER_END, "dinner"),
     ]
     fixed_blocks: List[Tuple[int, int]] = []
     flight_blocks: List[Tuple[int, int]] = []
@@ -2430,6 +2691,50 @@ def _resolve_timeline_overlaps(day_plan: Dict[str, Any]) -> None:
     _sort_and_recompute_day(day_plan)
 
 
+def _compress_flexible_timeline(day_plan: Dict[str, Any]) -> None:
+    events = day_plan.get("events", [])
+    if not isinstance(events, list) or not events:
+        return
+
+    _sort_and_recompute_day(day_plan)
+    events = day_plan.get("events", [])
+    if not isinstance(events, list):
+        return
+
+    fixed_types = {"flight", "drive", "checkin", "checkout"}
+    cursor = _event_minutes_from_hhmm(day_plan.get("schedule_start")) or 8 * 60
+    changed = False
+
+    for event in events:
+        start = _event_start_minutes(event)
+        end = _event_end_minutes(event)
+        if start is None or end is None:
+            continue
+
+        event_type = _normalize_text(event.get("type"))
+        duration_minutes = max(1, int(round(max(0.0, _safe_float(event.get("duration_h"), 0.0)) * 60)))
+
+        if event_type in fixed_types:
+            cursor = max(cursor, end)
+            continue
+
+        target_start = max(0, cursor)
+        target_end = target_start + duration_minutes
+
+        if start != target_start or end != target_end:
+            event["start"] = f"{target_start // 60:02d}:{target_start % 60:02d}"
+            event["end"] = f"{target_end // 60:02d}:{target_end % 60:02d}"
+            changed = True
+
+        cursor = target_end
+
+    if changed:
+        day_plan.setdefault("warnings", []).append(
+            "Compressed flexible events to remove idle gaps from the daytime timeline."
+        )
+        _sort_and_recompute_day(day_plan)
+
+
 def _enforce_unique_poi_visits(daily_plans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     seen: set = set()
     for day in daily_plans:
@@ -2466,6 +2771,105 @@ def _enforce_unique_poi_visits(daily_plans: List[Dict[str, Any]]) -> List[Dict[s
                     + ", ".join(reversed(removed_names))
                 )
         _sort_and_recompute_day(day)
+    return daily_plans
+
+
+def _collect_scheduled_poi_keys(daily_plans: List[Dict[str, Any]]) -> set:
+    seen: set = set()
+    for day in daily_plans:
+        city = _normalize_text(day.get("city"))
+        for event in day.get("events", []) or []:
+            if _normalize_text(event.get("type")) != "poi":
+                continue
+            meta = event.get("meta") or {}
+            poi_like = {
+                "place_id": meta.get("place_id") if isinstance(meta, dict) else None,
+                "name": _normalize_text(meta.get("poi_name")) if isinstance(meta, dict) else _normalize_text(event.get("name")),
+                "address": _normalize_text(meta.get("address")) if isinstance(meta, dict) else "",
+            }
+            key = _poi_dedupe_key(poi_like, city=city)
+            if key:
+                seen.add(key)
+    return seen
+
+
+def _append_refill_poi(
+    day_plan: Dict[str, Any],
+    poi: Dict[str, Any],
+) -> bool:
+    meta = {
+        "city": _normalize_text(day_plan.get("city")),
+        "poi_name": _normalize_text(poi.get("name")),
+        "lat": _safe_float(poi.get("lat"), None),
+        "lng": _safe_float(poi.get("lng"), None),
+        "place_id": _normalize_text(poi.get("place_id")),
+        "address": _normalize_text(poi.get("address")),
+    }
+    previous = _last_place_event(day_plan)
+    commute_h = 0.0
+    if previous is not None:
+        commute_h, _, _ = _estimate_commute_hours_between_meta(_event_place_meta(previous), meta)
+    if _safe_float(day_plan.get("used_hours"), 0.0) + commute_h + POI_VISIT_HOURS > DAY_AVAILABLE_HOURS:
+        return False
+    _append_commute_before_place(day_plan, _normalize_text(poi.get("name")) or "POI", meta)
+    _append_event(
+        day_plan=day_plan,
+        event_type="poi",
+        name=_normalize_text(poi.get("name")) or "POI",
+        duration_h=POI_VISIT_HOURS,
+        cost_estimated=_safe_float(poi.get("estimated_total_cost"), 0.0),
+        meta=meta,
+    )
+    return True
+
+
+def _refill_missing_pois_after_cleanup(
+    daily_plans: List[Dict[str, Any]],
+    city_candidates_map: Dict[str, Dict[str, List[Dict[str, Any]]]],
+) -> List[Dict[str, Any]]:
+    used_poi_keys = _collect_scheduled_poi_keys(daily_plans)
+
+    for day in daily_plans:
+        target_quota = _target_poi_quota_for_day(day)
+        current_count = _count_poi_events(day)
+        if current_count >= target_quota:
+            continue
+
+        city = _normalize_text(day.get("city"))
+        candidates = (city_candidates_map.get(city) or {}).get("pois", []) or []
+        added_names: List[str] = []
+
+        for poi in candidates:
+            if _count_poi_events(day) >= target_quota:
+                break
+            key = _poi_dedupe_key(poi, city=city)
+            if key and key in used_poi_keys:
+                continue
+            if not _append_refill_poi(day, poi):
+                continue
+            if key:
+                used_poi_keys.add(key)
+            added_names.append(_normalize_text(poi.get("name")) or "POI")
+
+        while _count_poi_events(day) < target_quota:
+            day_marker = _normalize_text(day.get("date")) or f"day-{max(1, int(_safe_float(day.get('day_index_in_city'), 1)))}"
+            fallback_index = _count_poi_events(day) + 1
+            fallback_poi = {
+                "name": f"Self-guided sightseeing in {city or 'city center'} ({day_marker} #{fallback_index})",
+                "estimated_total_cost": 0.0,
+                "lat": _safe_float((day.get("hotel") or {}).get("lat"), None),
+                "lng": _safe_float((day.get("hotel") or {}).get("lng"), None),
+            }
+            if not _append_refill_poi(day, fallback_poi):
+                break
+            added_names.append(_normalize_text(fallback_poi.get("name")) or "POI")
+
+        if added_names:
+            day.setdefault("warnings", []).append(
+                "Refilled missing attraction slots after cleanup: " + ", ".join(added_names)
+            )
+        _sort_and_recompute_day(day)
+
     return daily_plans
 
     checkins = [event for event in day_plan.get("events", []) if _normalize_text(event.get("type")) == "checkin"]

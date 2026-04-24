@@ -200,6 +200,7 @@ class Agent3Selection:
 
         self.city_budget_plan, self.budget_source = self._extract_city_budget_plan()
         self.city_date_ranges = self._build_city_date_ranges()
+        self.total_budget_plan = self.raw_input.get("budget_plan", {}) or {}
 
         self.rooms_needed = max(1, math.ceil(self.num_people / 2))
 
@@ -2827,6 +2828,18 @@ class Agent3Selection:
             enriched.append(copied)
         return enriched
 
+    def _fallback_attractions_budget_for_city(self, city_days: int) -> float:
+        if self.budget_pressure_mode:
+            return 0.0
+        total_buffer = self._safe_float(self.total_budget_plan.get("buffer"), 0.0)
+        if total_buffer <= 0:
+            return 0.0
+        total_days = max(1, sum(max(1, self._safe_int(item.get("days"), 1)) for item in self.city_budget_plan))
+        discovery_pool = max(0.0, total_buffer * 0.6)
+        city_share = discovery_pool * (max(1, city_days) / total_days)
+        floor_budget = 120.0 * max(1, city_days)
+        return round(max(floor_budget, city_share), 2)
+
     def _select_combo_close_to_budget(
         self,
         items: List[Dict[str, Any]],
@@ -3457,44 +3470,38 @@ class Agent3Selection:
         if not flights:
             return [], "no_candidates"
 
-        if self.budget_pressure_mode:
-            ranked = sorted(
-                flights,
-                key=lambda x: (
-                    self._safe_float(x.get("price_total"), 999999.0)
-                    if self._safe_float(x.get("price_total"), 0.0) > 0
-                    else 999999.0,
-                    -self._safe_float(x.get("score"), 0.0),
-                ),
-            )
-        else:
-            ranked = sorted(
-                flights,
-                key=lambda x: (x.get("score", 0), -self._safe_float(x.get("price_total"), 0.0)),
-                reverse=True
-            )
+        ranked = []
+        for flight in flights:
+            item = dict(flight)
+            item["generalized_cost"] = self._flight_generalized_cost(item, budget)
+            ranked.append(item)
+
+        ranked = sorted(
+            ranked,
+            key=lambda x: (
+                self._safe_float(x.get("generalized_cost"), 999999.0),
+                abs(self._safe_float(x.get("price_total"), 0.0) - budget) if budget > 0 else self._safe_float(x.get("price_total"), 0.0),
+                -self._safe_float(x.get("score"), 0.0),
+            ),
+        )
 
         strict = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget]
         if strict:
-            return strict[:max_items], "within_budget"
+            return [self._finalize_selected_flight_reason(f, budget) for f in strict[:max_items]], "within_budget_generalized_cost"
 
         slightly_over = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget * tolerance]
         if slightly_over:
-            return slightly_over[:max_items], "slightly_over_budget"
+            return [self._finalize_selected_flight_reason(f, budget) for f in slightly_over[:max_items]], "slightly_over_budget_generalized_cost"
 
         relaxed = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget * relaxed_tolerance]
         if relaxed:
-            return relaxed[:max_items], "relaxed_over_budget"
+            return [self._finalize_selected_flight_reason(f, budget) for f in relaxed[:max_items]], "relaxed_over_budget_generalized_cost"
 
         priced = [f for f in ranked if self._safe_float(f.get("price_total"), 0.0) > 0]
         if priced:
-            if self.budget_pressure_mode:
-                closest = sorted(priced, key=lambda x: self._safe_float(x.get("price_total"), 0.0))
-            else:
-                closest = sorted(priced, key=lambda x: abs(self._safe_float(x.get("price_total"), 0.0) - budget))
-            return closest[:max_items], "closest_to_budget"
+            return [self._finalize_selected_flight_reason(f, budget) for f in priced[:max_items]], "closest_generalized_cost"
 
-        return ranked[:max_items], "price_unavailable"
+        return [self._finalize_selected_flight_reason(f, budget) for f in ranked[:max_items]], "price_unavailable"
 
     def select_with_budget(
         self,
@@ -3700,6 +3707,23 @@ class Agent3Selection:
         if self.budget_pressure_mode:
             return [], "not_found_within_hard_budget", warnings
 
+        if ranked:
+            lowest_cost_ranked = sorted(
+                ranked,
+                key=lambda x: (
+                    self._safe_float(x.get(cost_key), 999999.0)
+                    if self._safe_float(x.get(cost_key), 0.0) > 0
+                    else 999999.0,
+                    -self._safe_float(x.get("score"), 0.0),
+                ),
+            )
+            fallback = [item for item in lowest_cost_ranked[:max_items] if self._safe_float(item.get(cost_key), 0.0) > 0]
+            if fallback:
+                warnings.append(
+                    "Attractions fallback: no POIs fit the strict city attraction budget, so the lowest-cost ranked POIs were kept to avoid an attraction-free plan."
+                )
+                return fallback, "fallback_lowest_cost_ranked", warnings
+
         return ranked[:max_items], "not_found_within_tolerance", warnings
 
     def select_hotels_with_minimum(
@@ -3818,30 +3842,45 @@ class Agent3Selection:
         leg = self._normalize_text(leg_type).lower()
 
         if leg == "outbound":
-            if arr is None:
+            if dep is None and arr is None:
                 return 0.0
-            if arr <= 12 * 60:
-                return 1.3
-            if arr <= 15 * 60:
-                return 0.9
-            if arr <= 17 * 60 + 30:
-                return 0.35
-            if arr >= 20 * 60:
-                return -0.8
-            return -0.25
+            score = 0.0
+            if dep is not None:
+                if 7 * 60 <= dep <= 10 * 60 + 30:
+                    score += 0.7
+                elif dep <= 12 * 60:
+                    score += 0.4
+                elif dep >= 17 * 60:
+                    score -= 0.8
+            if arr is not None:
+                if arr <= 11 * 60:
+                    score += 1.6
+                elif arr <= 14 * 60:
+                    score += 1.0
+                elif arr <= 16 * 60:
+                    score += 0.35
+                elif arr <= 18 * 60:
+                    score -= 0.35
+                elif arr <= 20 * 60:
+                    score -= 1.2
+                else:
+                    score -= 2.0
+            return score
 
         if leg == "inbound":
             if dep is None:
                 return 0.0
-            if 16 * 60 <= dep <= 20 * 60:
-                return 1.0
-            if 13 * 60 <= dep < 16 * 60:
-                return 0.45
-            if dep < 11 * 60:
-                return -0.65
-            if dep > 21 * 60:
-                return -0.25
-            return 0.15
+            if 18 * 60 <= dep <= 22 * 60:
+                return 1.2
+            if 15 * 60 <= dep < 18 * 60:
+                return 0.7
+            if 12 * 60 <= dep < 15 * 60:
+                return 0.25
+            if dep < 10 * 60:
+                return -1.1
+            if dep > 22 * 60:
+                return -0.1
+            return 0.1
 
         if dep is None:
             return 0.0
@@ -3853,8 +3892,89 @@ class Agent3Selection:
             return -0.45
         return 0.0
 
+    def _flight_value_of_time_cny_per_hour(self) -> float:
+        if self.budget_pressure_mode or self.flight_pref == "cheap" or self.flight_type == "budget":
+            return 70.0
+        if self.flight_pref == "comfort":
+            return 220.0
+        if self.flight_pref == "direct":
+            return 180.0
+        if self.flight_priority == "high":
+            return 170.0
+        return 130.0
+
+    def _flight_stop_penalty_cny(self, stops: int) -> float:
+        if stops <= 0:
+            return 0.0
+        return 180.0 + max(0, stops - 1) * 120.0
+
+    def _flight_timing_penalty_cny(self, flight: Dict[str, Any], leg_type: str) -> float:
+        timing_score = self._flight_timing_score(flight, leg_type)
+        leg = self._normalize_text(leg_type).lower()
+        arr = self._time_to_minutes(flight.get("arrival_time"))
+        dep = self._time_to_minutes(flight.get("departure_time"))
+
+        if timing_score >= 0:
+            reward = -60.0 * timing_score
+        else:
+            reward = abs(timing_score) * (220.0 if leg == "outbound" else 140.0)
+
+        if leg == "outbound" and arr is not None:
+            if arr >= 21 * 60:
+                reward += 900.0
+            elif arr >= 19 * 60:
+                reward += 520.0
+            elif arr >= 17 * 60:
+                reward += 220.0
+
+        if leg == "inbound" and dep is not None:
+            if dep < 9 * 60:
+                reward += 360.0
+            elif dep < 11 * 60:
+                reward += 180.0
+
+        return reward
+
+    def _flight_effective_hours(self, flight: Dict[str, Any]) -> float:
+        comparable_h = self._safe_float(flight.get("flight_total_comparable_hours"), 0.0)
+        if comparable_h > 0:
+            return comparable_h
+        duration_minutes = self._safe_float(flight.get("duration_minutes") or flight.get("total_duration"), 0.0)
+        return max(0.0, duration_minutes / 60.0)
+
+    def _flight_generalized_cost(self, flight: Dict[str, Any], budget: float) -> float:
+        price = self._safe_float(flight.get("price_total"), 0.0)
+        leg_type = self._normalize_text(flight.get("leg_type")) or "leg"
+        effective_hours = self._flight_effective_hours(flight)
+        stops = self._safe_int(flight.get("stops"), 0)
+        time_cost = effective_hours * self._flight_value_of_time_cny_per_hour()
+        stop_penalty = self._flight_stop_penalty_cny(stops)
+        timing_penalty = self._flight_timing_penalty_cny(flight, leg_type)
+        budget_utilization_penalty = 0.0
+        if budget > 0 and price < budget:
+            budget_utilization_penalty = max(0.0, 1.0 - price / budget) * 40.0
+        return round(price + time_cost + stop_penalty + timing_penalty + budget_utilization_penalty, 2)
+
+    def _finalize_selected_flight_reason(self, flight: Dict[str, Any], budget: float) -> Dict[str, Any]:
+        item = dict(flight)
+        generalized_cost = self._flight_generalized_cost(item, budget)
+        detail = (
+            f"generalized_cost={generalized_cost}; "
+            f"effective_hours={round(self._flight_effective_hours(item), 2)}; "
+            f"value_of_time={round(self._flight_value_of_time_cny_per_hour(), 2)} CNY/h; "
+            f"stop_penalty={round(self._flight_stop_penalty_cny(self._safe_int(item.get('stops'), 0)), 2)}; "
+            f"timing_penalty={round(self._flight_timing_penalty_cny(item, self._normalize_text(item.get('leg_type')) or 'leg'), 2)}; "
+            f"budget={round(budget, 2)}; "
+            f"price={round(self._safe_float(item.get('price_total'), 0.0), 2)}"
+        )
+        reason = self._normalize_text(item.get("why_selected"))
+        item["generalized_cost"] = generalized_cost
+        item["why_selected"] = f"{reason}; {detail}" if reason else detail
+        return item
+
     def _score_flight(self, flight: Dict[str, Any], leg_type: str) -> Dict[str, Any]:
         item = dict(flight)
+        item["leg_type"] = leg_type
 
         direct_bonus = 1.2 if self._safe_int(item.get("stops"), 0) == 0 else 0.0
         comfort_bonus = 0.8 if (
@@ -4351,6 +4471,8 @@ class Agent3Selection:
             hotel_budget = self._safe_float(city_item.get("hotel_budget"), 0.0)
             food_budget = self._safe_float(city_item.get("food_budget"), 0.0)
             attractions_budget = self._safe_float(city_item.get("attractions_budget"), 0.0)
+            if attractions_budget <= 0:
+                attractions_budget = self._fallback_attractions_budget_for_city(city_days)
 
             limits = self._candidate_limits_by_days(city_days)
 

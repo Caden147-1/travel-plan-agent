@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 import webbrowser
-from datetime import timedelta
+from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from typing import Any, Dict, Optional
@@ -28,6 +28,8 @@ REPORTS_DIR = BASE_DIR / "travel_reports"
 API_HOST = os.getenv("TRAVEL_API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("TRAVEL_API_PORT", "8000"))
 FRONTEND_PORT = int(os.getenv("TRAVEL_FRONTEND_PORT", "3000"))
+API_PROCESS_STARTED_AT = get_today_date().isoformat() + " " + time.strftime("%H:%M:%S")
+API_CODE_VERSION = datetime.fromtimestamp(Path(__file__).resolve().stat().st_mtime).isoformat(timespec="seconds")
 
 
 def _compact_json(value: Any, limit: int = 2500) -> str:
@@ -104,6 +106,11 @@ def _fallback_guidance(result: dict) -> str:
     }
     missing_text = ", ".join(labels.get(item, item) for item in missing)
     if missing_text:
+        if missing == ["origin"]:
+            return (
+                "Please provide the departure city.\n\n"
+                "For example: from Shanghai."
+            )
         if missing == ["travel_dates.start"] and (parsed.get("duration_days") or (parsed.get("travel_dates") or {}).get("text")):
             return (
                 "The departure date is missing. If this trip is starting tomorrow, "
@@ -351,7 +358,14 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             return
 
         if parsed.path == "/api/status":
-            _json_response(self, 200, {"success": True, "status": get_router_backend_status()})
+            _json_response(self, 200, {
+                "success": True,
+                "status": get_router_backend_status(),
+                "runtime": {
+                    "api_process_started_at": API_PROCESS_STARTED_AT,
+                    "api_code_version": API_CODE_VERSION,
+                },
+            })
             return
 
         if parsed.path.startswith("/reports/"):
@@ -397,6 +411,11 @@ class TravelApiHandler(BaseHTTPRequestHandler):
                 "itinerary_summary": (result.get("itinerary") or {}).get("itinerary_summary", {}),
                 "report": result.get("report", {}),
                 "report_url": report_url,
+                "runtime": {
+                    "api_process_started_at": API_PROCESS_STARTED_AT,
+                    "api_code_version": API_CODE_VERSION,
+                    "router_runtime": result.get("runtime", {}),
+                },
             }
             failure_status = 422 if response["stage"] in {"agent1_parse", "agent1_validation", "budget_feasibility"} else 500
             _json_response(self, 200 if success else failure_status, response)
