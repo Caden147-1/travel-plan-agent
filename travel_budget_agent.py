@@ -1980,7 +1980,9 @@ def _apply_budget_feasibility_guard(
     city_count = max(1, len(_get_effective_cities(parsed_request)))
 
     transport_min = int(weighted_cost_profile.get("transport_base_per_person", 0) * max(1, num_people))
-    if guarded.get("flight_type") == "direct":
+    if guarded.get("flight_type") == "first_class":
+        transport_min = int(round(transport_min * 1.25))
+    elif guarded.get("flight_type") == "direct":
         transport_min = int(round(transport_min * 1.08))
     elif guarded.get("flight_type") == "comfort":
         transport_min = int(round(transport_min * 1.12))
@@ -2015,7 +2017,7 @@ def _apply_budget_feasibility_guard(
 # Cost-Level Fusion
 # =========================================================
 
-COST_LEVEL_ORDER = ["low", "medium", "medium_high", "high"]
+COST_LEVEL_ORDER = ["low", "medium", "medium_high", "high", "ultra_high"]
 
 
 def _cost_level_to_index(level: Optional[str]) -> int:
@@ -2055,7 +2057,9 @@ def _merge_cost_level(
     if normalized_prefs.get("wants_fine_dining") == "yes":
         delta += 1
 
-    if normalized_prefs["flight_type"] == "direct":
+    if normalized_prefs["flight_type"] == "first_class":
+        delta += 2
+    elif normalized_prefs["flight_type"] == "direct":
         delta += 1
     elif normalized_prefs["flight_type"] == "comfort":
         delta += 1
@@ -2075,6 +2079,8 @@ def _merge_cost_level(
 
     if per_person_per_day < 500:
         delta -= 1
+    elif per_person_per_day > 3500:
+        delta += 2
     elif per_person_per_day > 1800:
         delta += 1
 
@@ -2167,7 +2173,13 @@ def _build_baseline_ratio(
         "buffer": 0.08
     }
 
-    if normalized_prefs["flight_type"] == "direct":
+    if normalized_prefs["flight_type"] == "first_class":
+        ratio["transport"] += 0.08
+        ratio["buffer"] -= 0.02
+        ratio["food"] -= 0.02
+        ratio["attractions"] -= 0.02
+        ratio["hotel"] -= 0.02
+    elif normalized_prefs["flight_type"] == "direct":
         ratio["transport"] += 0.04
         ratio["buffer"] -= 0.01
         ratio["food"] -= 0.01
@@ -2294,7 +2306,9 @@ def _estimate_transport_cost(
 
     base = _safe_float(cost_profile["transport_base_per_person"]) * num_people
 
-    if normalized_prefs["flight_type"] == "direct":
+    if normalized_prefs["flight_type"] == "first_class":
+        base *= 1.35
+    elif normalized_prefs["flight_type"] == "direct":
         base *= 1.15
     elif normalized_prefs["flight_type"] == "comfort":
         base *= 1.10
@@ -2433,7 +2447,7 @@ def _apply_budget_pressure_downgrades(
         return guarded, adjustments
 
     downgrade_steps = [
-        ("flight_type", {"direct": "standard", "comfort": "standard", "standard": "budget"}),
+        ("flight_type", {"first_class": "comfort", "direct": "standard", "comfort": "standard", "standard": "budget"}),
         ("hotel_level_detail", {"luxury": "standard", "premium": "standard"}),
         ("hotel_level", {"premium": "standard", "standard": "budget"}),
         ("food_level", {"premium": "standard", "standard": "budget"}),
@@ -2506,7 +2520,9 @@ def _build_compression_priority(normalized_prefs: Dict[str, str]) -> Dict[str, f
     if normalized_prefs.get("wants_fine_dining") == "yes":
         priority["food"] = min(priority["food"], 0.28)
 
-    if normalized_prefs["flight_type"] == "direct":
+    if normalized_prefs["flight_type"] == "first_class":
+        priority["transport"] = 0.12
+    elif normalized_prefs["flight_type"] == "direct":
         priority["transport"] = 0.18
     elif normalized_prefs["flight_type"] == "comfort":
         priority["transport"] = 0.22
@@ -2540,7 +2556,7 @@ def _fit_estimated_cost_to_budget(
         food_keep = max(food_keep, 0.78)
 
     min_keep_ratio = {
-        "transport": 0.75 if normalized_prefs["flight_type"] in {"direct", "comfort"} else 0.65,
+        "transport": 0.82 if normalized_prefs["flight_type"] == "first_class" else (0.75 if normalized_prefs["flight_type"] in {"direct", "comfort"} else 0.65),
         "hotel": hotel_keep,
         "food": food_keep,
         "attractions": 0.80 if normalized_prefs["attraction_intensity"] == "heavy" else 0.50,
@@ -2577,6 +2593,118 @@ def _fit_estimated_cost_to_budget(
     status = "over_budget" if current_total > total_budget else "adjusted_to_budget"
     return adjusted, status, adjustments
 
+
+def _estimate_core_trio_total(
+    parsed_request: Dict[str, Any],
+    cost_profile: Dict[str, Any],
+    normalized_prefs: Dict[str, str],
+    season_factor: float,
+) -> int:
+    transport = _estimate_transport_cost(parsed_request, cost_profile, normalized_prefs, season_factor)
+    hotel = _estimate_hotel_cost(parsed_request, cost_profile, normalized_prefs, season_factor)
+    food = _estimate_food_cost(parsed_request, cost_profile, normalized_prefs, season_factor)
+    return transport + hotel + food
+
+
+def _next_core_upgrade_candidates(normalized_prefs: Dict[str, str]) -> List[Tuple[str, Dict[str, str], str]]:
+    current = dict(normalized_prefs)
+    candidates: List[Tuple[str, Dict[str, str], str]] = []
+
+    flight_type = current.get("flight_type", "standard")
+    next_flight = {
+        "budget": "standard",
+        "standard": "comfort",
+        "comfort": "first_class",
+        "direct": "first_class",
+    }.get(flight_type)
+    if next_flight:
+        upgraded = dict(current)
+        upgraded["flight_type"] = next_flight
+        candidates.append(("flight", upgraded, f"Upgraded flight execution from {flight_type} to {next_flight}"))
+
+    hotel_detail = current.get("hotel_level_detail", current.get("hotel_level", "standard"))
+    if hotel_detail == "budget":
+        upgraded = dict(current)
+        upgraded["hotel_level"] = "standard"
+        upgraded["hotel_level_detail"] = "standard"
+        candidates.append(("hotel", upgraded, "Upgraded hotel execution from budget to standard"))
+    elif hotel_detail == "standard":
+        upgraded = dict(current)
+        upgraded["hotel_level"] = "premium"
+        upgraded["hotel_level_detail"] = "premium"
+        candidates.append(("hotel", upgraded, "Upgraded hotel execution from standard to premium"))
+    elif hotel_detail == "premium":
+        upgraded = dict(current)
+        upgraded["hotel_level"] = "premium"
+        upgraded["hotel_level_detail"] = "luxury"
+        candidates.append(("hotel", upgraded, "Upgraded hotel execution from premium to luxury"))
+
+    food_level = current.get("food_level", "standard")
+    wants_fine_dining = current.get("wants_fine_dining", "no")
+    if food_level == "budget":
+        upgraded = dict(current)
+        upgraded["food_level"] = "standard"
+        candidates.append(("food", upgraded, "Upgraded dining execution from budget to standard"))
+    elif food_level == "standard":
+        upgraded = dict(current)
+        upgraded["food_level"] = "premium"
+        candidates.append(("food", upgraded, "Upgraded dining execution from standard to premium"))
+    elif food_level == "premium" and wants_fine_dining != "yes":
+        upgraded = dict(current)
+        upgraded["wants_fine_dining"] = "yes"
+        candidates.append(("food", upgraded, "Enabled fine-dining upgrades because the budget remains very loose"))
+
+    return candidates
+
+
+def _upgrade_core_preferences_toward_target(
+    parsed_request: Dict[str, Any],
+    cost_profile: Dict[str, Any],
+    normalized_prefs: Dict[str, str],
+    season_factor: float,
+    total_budget: int,
+    target_core_ratio: float = 0.60,
+) -> Tuple[Dict[str, str], int, List[str]]:
+    upgraded = dict(normalized_prefs)
+    adjustments: List[str] = []
+    target_total = int(total_budget * target_core_ratio)
+    current_total = _estimate_core_trio_total(parsed_request, cost_profile, upgraded, season_factor)
+
+    if total_budget <= 0 or current_total >= target_total:
+        return upgraded, current_total, adjustments
+
+    while current_total < target_total:
+        best_candidate: Optional[Tuple[Dict[str, str], int, str]] = None
+        smallest_overshoot: Optional[Tuple[Dict[str, str], int, str]] = None
+
+        for _, candidate_prefs, candidate_reason in _next_core_upgrade_candidates(upgraded):
+            candidate_total = _estimate_core_trio_total(parsed_request, cost_profile, candidate_prefs, season_factor)
+            if candidate_total <= current_total:
+                continue
+            if candidate_total <= target_total:
+                if best_candidate is None or candidate_total > best_candidate[1]:
+                    best_candidate = (candidate_prefs, candidate_total, candidate_reason)
+            else:
+                if smallest_overshoot is None or candidate_total < smallest_overshoot[1]:
+                    smallest_overshoot = (candidate_prefs, candidate_total, candidate_reason)
+
+        chosen = best_candidate or smallest_overshoot
+        if chosen is None:
+            break
+
+        upgraded, current_total, reason = chosen
+        adjustments.append(reason)
+
+        if best_candidate is None:
+            break
+
+    if adjustments:
+        adjustments.append(
+            f"Core trio upgrade rule applied: flight + hotel + food was gradually upgraded until it reached about {int(target_core_ratio * 100)}% of the total budget or hit the highest supported tiers."
+        )
+
+    return upgraded, current_total, adjustments
+
 # =========================================================
 # Recommended Spend + Optional Upgrades
 # =========================================================
@@ -2590,12 +2718,15 @@ def _allocate_by_ratio(
 
 
 def _split_under_budget_plan(
+    parsed_request: Dict[str, Any],
+    cost_profile: Dict[str, Any],
     adjusted_plan: Dict[str, int],
     total_budget: int,
     normalized_prefs: Dict[str, str],
+    season_factor: float,
     final_ratio: Optional[Dict[str, float]] = None,
     allow_optional_upgrades: bool = True
-) -> Tuple[Dict[str, int], Dict[str, int], int, List[str]]:
+) -> Tuple[Dict[str, int], Dict[str, int], int, List[str], Dict[str, str]]:
     adjustments: List[str] = []
 
     adjusted_total = sum(adjusted_plan.values())
@@ -2612,7 +2743,7 @@ def _split_under_budget_plan(
         adjustments.append(
             "Estimated base spending already reached or exceeded the total budget, so the final plan was normalized directly to the full budget."
         )
-        return recommended, optional, 0, adjustments
+        return recommended, optional, 0, adjustments, dict(normalized_prefs)
 
     recommended = {
         "transport": max(0, int(adjusted_plan.get("transport", 0))),
@@ -2621,6 +2752,35 @@ def _split_under_budget_plan(
         "attractions": max(0, int(adjusted_plan.get("attractions", 0))),
         "buffer": max(0, int(adjusted_plan.get("buffer", 0))),
     }
+
+    effective_prefs = dict(normalized_prefs)
+    effective_prefs, _, core_upgrade_adjustments = _upgrade_core_preferences_toward_target(
+        parsed_request=parsed_request,
+        cost_profile=cost_profile,
+        normalized_prefs=effective_prefs,
+        season_factor=season_factor,
+        total_budget=total_budget,
+    )
+    adjustments.extend(core_upgrade_adjustments)
+
+    if core_upgrade_adjustments:
+        recommended["transport"] = _estimate_transport_cost(parsed_request, cost_profile, effective_prefs, season_factor)
+        recommended["hotel"] = _estimate_hotel_cost(parsed_request, cost_profile, effective_prefs, season_factor)
+        recommended["food"] = _estimate_food_cost(parsed_request, cost_profile, effective_prefs, season_factor)
+        adjusted_total = sum(recommended.values())
+        if adjusted_total >= total_budget:
+            recommended = _normalize_plan_to_total(recommended, total_budget)
+            optional = {
+                "transport": 0,
+                "hotel": 0,
+                "food": 0,
+                "attractions": 0,
+                "buffer": 0
+            }
+            adjustments.append(
+                "Core trio upgrades used up the available budget, so the plan was normalized directly to the total budget after raising flight, hotel, and food tiers."
+            )
+            return recommended, optional, 0, adjustments, effective_prefs
 
     remaining = max(0, total_budget - adjusted_total)
 
@@ -2637,7 +2797,7 @@ def _split_under_budget_plan(
             adjustments.append(
                 "Budget cap mode is active, so remaining money was kept as buffer instead of being spent on optional upgrades."
             )
-        return recommended, optional, 0, adjustments
+        return recommended, optional, 0, adjustments, effective_prefs
 
     upgrade_ratio = {
         "transport": 0.14,
@@ -2647,58 +2807,63 @@ def _split_under_budget_plan(
         "buffer": 0.03
     }
 
-    if normalized_prefs["hotel_level"] == "premium":
+    if effective_prefs["hotel_level"] == "premium":
         upgrade_ratio["hotel"] += 0.10
         upgrade_ratio["buffer"] -= 0.05
         upgrade_ratio["transport"] -= 0.02
         upgrade_ratio["food"] -= 0.03
-    elif normalized_prefs["hotel_level"] == "budget":
+    elif effective_prefs["hotel_level"] == "budget":
         upgrade_ratio["hotel"] -= 0.12
         upgrade_ratio["buffer"] += 0.08
         upgrade_ratio["attractions"] += 0.04
 
-    if normalized_prefs.get("hotel_level_detail") == "luxury":
+    if effective_prefs.get("hotel_level_detail") == "luxury":
         upgrade_ratio["hotel"] += 0.06
         upgrade_ratio["buffer"] -= 0.03
         upgrade_ratio["food"] -= 0.02
         upgrade_ratio["transport"] -= 0.01
 
-    if normalized_prefs["food_level"] == "premium":
+    if effective_prefs["food_level"] == "premium":
         upgrade_ratio["food"] += 0.08
         upgrade_ratio["buffer"] -= 0.04
         upgrade_ratio["transport"] -= 0.02
         upgrade_ratio["attractions"] -= 0.02
-    elif normalized_prefs["food_level"] == "budget":
+    elif effective_prefs["food_level"] == "budget":
         upgrade_ratio["food"] -= 0.08
         upgrade_ratio["buffer"] += 0.05
         upgrade_ratio["attractions"] += 0.03
 
-    if normalized_prefs.get("wants_fine_dining") == "yes":
+    if effective_prefs.get("wants_fine_dining") == "yes":
         upgrade_ratio["food"] += 0.05
         upgrade_ratio["buffer"] -= 0.03
         upgrade_ratio["transport"] -= 0.01
 
-    if normalized_prefs["attraction_intensity"] == "heavy":
+    if effective_prefs["attraction_intensity"] == "heavy":
         upgrade_ratio["attractions"] += 0.10
         upgrade_ratio["buffer"] -= 0.05
         upgrade_ratio["hotel"] -= 0.03
         upgrade_ratio["transport"] -= 0.02
-    elif normalized_prefs["attraction_intensity"] == "light":
+    elif effective_prefs["attraction_intensity"] == "light":
         upgrade_ratio["attractions"] -= 0.05
         upgrade_ratio["buffer"] += 0.03
         upgrade_ratio["hotel"] += 0.01
         upgrade_ratio["food"] += 0.01
 
-    if normalized_prefs["flight_type"] == "direct":
+    if effective_prefs["flight_type"] == "first_class":
+        upgrade_ratio["transport"] += 0.10
+        upgrade_ratio["buffer"] -= 0.04
+        upgrade_ratio["hotel"] -= 0.03
+        upgrade_ratio["food"] -= 0.02
+    elif effective_prefs["flight_type"] == "direct":
         upgrade_ratio["transport"] += 0.06
         upgrade_ratio["buffer"] -= 0.03
         upgrade_ratio["hotel"] -= 0.02
         upgrade_ratio["food"] -= 0.01
-    elif normalized_prefs["flight_type"] == "comfort":
+    elif effective_prefs["flight_type"] == "comfort":
         upgrade_ratio["transport"] += 0.04
         upgrade_ratio["buffer"] -= 0.02
         upgrade_ratio["hotel"] -= 0.01
-    elif normalized_prefs["flight_type"] == "budget":
+    elif effective_prefs["flight_type"] == "budget":
         upgrade_ratio["transport"] -= 0.03
         upgrade_ratio["buffer"] += 0.02
 
@@ -2740,7 +2905,7 @@ def _split_under_budget_plan(
     adjustments.append(
         "The forced full-budget upgrade allocation was blended with the final merged category ratio to stay consistent with Agent2's planning logic."
     )
-    return recommended, optional, 0, adjustments
+    return recommended, optional, 0, adjustments, effective_prefs
 
 # =========================================================
 # City-level intelligent budget allocation
@@ -2973,10 +3138,13 @@ def travel_budget_agent(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
             normalized_prefs=normalized_prefs
         )
 
-        estimated_cost_final, optional_upgrades, unallocated_budget, expansion_adjustments = _split_under_budget_plan(
+        estimated_cost_final, optional_upgrades, unallocated_budget, expansion_adjustments, normalized_prefs = _split_under_budget_plan(
+            parsed_request=parsed_request,
+            cost_profile=weighted_cost_profile,
             adjusted_plan=adjusted_plan,
             total_budget=total_budget,
             normalized_prefs=normalized_prefs,
+            season_factor=season_factor,
             final_ratio=final_ratio,
             allow_optional_upgrades=not _is_budget_cap_mode(parsed_request)
         )

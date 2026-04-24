@@ -121,6 +121,9 @@ class Agent3Selection:
             self.hotel_features.append("central")
         if self.hotel_pref == "clean" and "clean" not in self.hotel_features:
             self.hotel_features.append("clean")
+        self.requested_hotel_level_rich = self.hotel_level_rich
+        self.requested_food_pref = self.food_pref
+        self.requested_food_preferences = list(self.food_preferences)
 
         # Agent1 planning signals
         self.flight_priority = self._normalize_text(
@@ -154,18 +157,21 @@ class Agent3Selection:
         self.food_level = self._normalize_text(
             self.normalized_preferences.get("food_level")
         ).lower() or "standard"
+        self.wants_fine_dining_target = (
+            self._normalize_text(self.normalized_preferences.get("wants_fine_dining")).lower() == "yes"
+        )
         self.attraction_intensity = self._normalize_text(
             self.normalized_preferences.get("attraction_intensity")
         ).lower() or "medium"
         self.flight_type = self._normalize_text(
             self.normalized_preferences.get("flight_type")
         ).lower() or "standard"
+        self.hotel_target_level = self._normalize_text(
+            self.normalized_preferences.get("hotel_level_detail")
+            or self.normalized_preferences.get("hotel_level")
+        ).lower() or self.hotel_level or self.requested_hotel_level_rich or "standard"
 
-        if not self.hotel_level_rich:
-            self.hotel_level_rich = self.hotel_level
-        if not self.food_preferences and self.food_level == "premium":
-            self.food_preferences = ["fine_dining"]
-        elif not self.food_preferences and self.food_level in {"standard", "budget"}:
+        if not self.food_preferences:
             self.food_preferences = [self.food_pref or "mixed"] if (self.food_pref or "mixed") else ["mixed"]
         if not self.attraction_styles:
             self.attraction_styles = [self.attraction_style or "mixed"]
@@ -1732,7 +1738,7 @@ class Agent3Selection:
     # query builders
     # =========================================================
     def _build_hotel_query(self, city: str) -> str:
-        level = self.hotel_level_rich or self.hotel_level or self.hotel_pref or "standard"
+        level = self._target_hotel_level()
         features = set(self.hotel_features)
 
         if level == "budget":
@@ -2467,10 +2473,15 @@ class Agent3Selection:
     # =========================================================
     # flights
     # =========================================================
+    def _searchapi_travel_class_candidates(self) -> List[str]:
+        if self.flight_type == "first_class":
+            return ["first", "business", "economy"]
+        if self.flight_type == "comfort" or self.flight_pref == "comfort":
+            return ["business", "economy"]
+        return ["economy"]
+
     def _searchapi_travel_class(self) -> str:
-        if self.flight_pref == "comfort":
-            return "business"
-        return "economy"
+        return self._searchapi_travel_class_candidates()[0]
 
     def _searchapi_stops(self, strict_direct: bool = True) -> str:
         if self.flight_pref == "direct" and strict_direct:
@@ -2613,6 +2624,7 @@ class Agent3Selection:
         adults: int = 1,
         max_results: int = 10,
         strict_direct: bool = True,
+        travel_class_override: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         url = "https://www.searchapi.io/api/v1/search"
         params: Dict[str, Any] = {
@@ -2623,7 +2635,7 @@ class Agent3Selection:
             "flight_type": flight_type,
             "currency": self.currency,
             "adults": max(1, self._safe_int(adults, 1)),
-            "travel_class": self._searchapi_travel_class(),
+            "travel_class": travel_class_override or self._searchapi_travel_class(),
             "stops": self._searchapi_stops(strict_direct=strict_direct),
             "sort_by": "price",
             "api_key": SEARCHAPI_API_KEY,
@@ -2655,6 +2667,7 @@ class Agent3Selection:
                     flight_type=flight_type
                 )
                 normalized_item["direct_query_used"] = strict_direct
+                normalized_item["requested_travel_class"] = params["travel_class"]
 
                 dedup_key = (
                     normalized_item.get("airline"),
@@ -2882,6 +2895,16 @@ class Agent3Selection:
         text = self._normalize_text(text).lower()
         return any(keyword in text for keyword in keywords if keyword)
 
+    def _requested_hotel_level(self) -> str:
+        level = (self.requested_hotel_level_rich or self.hotel_pref or "standard").lower()
+        if level in {"central", "clean"}:
+            return "standard"
+        return level or "standard"
+
+    def _target_hotel_level(self) -> str:
+        level = (self.hotel_target_level or self.hotel_level or self._requested_hotel_level()).lower()
+        return level or "standard"
+
     def _hotel_matches_central(self, hotel: Dict[str, Any]) -> bool:
         searchable = " ".join([
             self._normalize_text(hotel.get("name")),
@@ -2894,7 +2917,7 @@ class Agent3Selection:
         return rating >= self.hotel_clean_rating_threshold
 
     def _hotel_matches_level(self, hotel: Dict[str, Any]) -> bool:
-        level = (self.hotel_level_rich or self.hotel_level or self.hotel_pref or "standard").lower()
+        level = self._requested_hotel_level()
         stars = self._safe_float(hotel.get("stars"), 0.0)
         rating = self._safe_float(hotel.get("rating"), 0.0)
         total = self._safe_float(hotel.get("estimated_total_cost"), 0.0)
@@ -2913,7 +2936,7 @@ class Agent3Selection:
     def _hotel_hard_filter_reasons(self, hotel: Dict[str, Any]) -> List[str]:
         reasons: List[str] = []
         if not self._hotel_matches_level(hotel):
-            reasons.append(f"hotel_level:{self.hotel_level_rich or self.hotel_level or self.hotel_pref or 'standard'}")
+            reasons.append(f"hotel_level:{self._requested_hotel_level()}")
 
         if "central" in self.hotel_features or self.hotel_pref == "central":
             if not self._hotel_matches_central(hotel):
@@ -2952,7 +2975,7 @@ class Agent3Selection:
             budget_ref = self._safe_float(item.get("city_budget_reference"), 0.0)
             central_match = self._hotel_matches_central(item)
             clean_match = self._hotel_matches_clean(item)
-            level = (self.hotel_level_rich or self.hotel_level or self.hotel_pref or "standard").lower()
+            level = self._requested_hotel_level()
 
             # Hard keep: never allow obviously poor or wildly over-budget fallback hotels.
             if rating < 4.0 and stars < 3.5:
@@ -3026,9 +3049,6 @@ class Agent3Selection:
         if not self._restaurant_matches_user_preferences(restaurant):
             reasons.append("food_preferences")
 
-        if not self._restaurant_matches_food_level(restaurant):
-            reasons.append(f"food_level:{self.food_level}")
-
         return reasons
 
     def _apply_restaurant_hard_filters(self, restaurants: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
@@ -3037,7 +3057,6 @@ class Agent3Selection:
 
         strict_pass: List[Dict[str, Any]] = []
         user_pref_pass: List[Dict[str, Any]] = []
-        food_level_pass: List[Dict[str, Any]] = []
         fallback_all: List[Dict[str, Any]] = []
 
         for restaurant in restaurants:
@@ -3049,8 +3068,6 @@ class Agent3Selection:
             failure_reasons: List[str] = []
             if not user_pref_ok:
                 failure_reasons.append("food_preferences")
-            if not food_level_ok:
-                failure_reasons.append(f"food_level:{self.food_level}")
 
             item["hard_filter_failures"] = failure_reasons
             item["user_preference_match"] = user_pref_ok
@@ -3058,25 +3075,18 @@ class Agent3Selection:
 
             fallback_all.append(item)
 
-            if user_pref_ok and food_level_ok:
+            if user_pref_ok:
                 strict_pass.append(item)
-            elif user_pref_ok:
-                item["fallback_mode"] = True
-                item["restaurant_fallback_reason"] = "kept_user_preference_relaxed_food_level"
-                user_pref_pass.append(item)
-            elif food_level_ok:
+            else:
                 item["fallback_mode"] = True
                 item["restaurant_fallback_reason"] = "kept_food_level_relaxed_user_preference"
-                food_level_pass.append(item)
+                user_pref_pass.append(item)
 
         if strict_pass:
             return strict_pass, "applied_strict"
 
         if user_pref_pass:
             return user_pref_pass, "applied_fallback_user_preference_first"
-
-        if food_level_pass:
-            return food_level_pass, "applied_fallback_food_level_only"
 
         for item in fallback_all:
             item["fallback_mode"] = True
@@ -3126,13 +3136,10 @@ class Agent3Selection:
     def _flight_hard_filter_reasons(self, flight: Dict[str, Any]) -> List[str]:
         reasons: List[str] = []
         pref = self._normalize_text(self.flight_pref).lower()
-        travel_class = self._normalize_text(flight.get("travel_class")).lower()
         stops = self._safe_int(flight.get("stops"), 0)
 
         if pref == "direct" and stops != 0:
             reasons.append("direct")
-        if pref == "comfort" and travel_class != "business":
-            reasons.append("comfort")
         return reasons
 
     def _apply_flight_hard_filters(self, flights: List[Dict[str, Any]]) -> Tuple[List[Dict[str, Any]], str]:
@@ -3199,7 +3206,7 @@ class Agent3Selection:
         ref = self._safe_float(hotel.get("city_budget_reference"), 0.0)
         total = self._safe_float(hotel.get("estimated_total_cost"), 0.0)
 
-        level = self.hotel_level_rich or self.hotel_level or self.hotel_pref or "standard"
+        level = self._target_hotel_level()
         if level == "luxury":
             if stars >= 4.7:
                 score += 1.2
@@ -3257,7 +3264,7 @@ class Agent3Selection:
 
             reasons = []
             if pref_score > 0:
-                reasons.append(f"matches hotel preference '{self.hotel_level_rich or self.hotel_pref or self.hotel_level or 'standard'}'")
+                reasons.append(f"matches hotel target '{self._target_hotel_level()}'")
             if "central" in self.hotel_features:
                 reasons.append("considers central location preference")
             if "clean" in self.hotel_features:
@@ -3306,6 +3313,17 @@ class Agent3Selection:
             elif mode == "mixed":
                 score += 0.3
 
+        if self.food_level == "premium" and price_multiplier >= 1.35:
+            score += 0.45
+        elif self.food_level == "budget" and price_multiplier <= 1.0:
+            score += 0.3
+
+        if self.wants_fine_dining_target:
+            if price_multiplier >= 1.35:
+                score += 0.4
+            if matched_mode == "fine_dining":
+                score += 0.2
+
         return score
 
     def _rank_restaurants(self, restaurants: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -3336,6 +3354,10 @@ class Agent3Selection:
 
             if self._safe_float(item.get("local_food_match_score"), 0.0) > 0:
                 reasons.append("matches local food preference")
+            if self.food_level == "premium" and item.get("food_level_match"):
+                reasons.append("matches upgraded dining tier target")
+            if self.wants_fine_dining_target and self._normalize_text(item.get("matched_food_mode")).lower() == "fine_dining":
+                reasons.append("matches fine-dining upgrade target")
             if item.get("budget_fit"):
                 reasons.append("fits city food budget")
             if rating > 0:
@@ -3895,6 +3917,8 @@ class Agent3Selection:
     def _flight_value_of_time_cny_per_hour(self) -> float:
         if self.budget_pressure_mode or self.flight_pref == "cheap" or self.flight_type == "budget":
             return 70.0
+        if self.flight_type == "first_class":
+            return 300.0
         if self.flight_pref == "comfort":
             return 220.0
         if self.flight_pref == "direct":
@@ -3958,6 +3982,11 @@ class Agent3Selection:
     def _finalize_selected_flight_reason(self, flight: Dict[str, Any], budget: float) -> Dict[str, Any]:
         item = dict(flight)
         generalized_cost = self._flight_generalized_cost(item, budget)
+        requested_travel_class = self._normalize_text(item.get("requested_travel_class")).lower()
+        actual_travel_class = self._normalize_text(item.get("travel_class")).lower()
+        class_fallback_note = ""
+        if requested_travel_class and actual_travel_class and requested_travel_class != actual_travel_class:
+            class_fallback_note = f"; class_fallback=requested_{requested_travel_class}_selected_{actual_travel_class}"
         detail = (
             f"generalized_cost={generalized_cost}; "
             f"effective_hours={round(self._flight_effective_hours(item), 2)}; "
@@ -3966,6 +3995,7 @@ class Agent3Selection:
             f"timing_penalty={round(self._flight_timing_penalty_cny(item, self._normalize_text(item.get('leg_type')) or 'leg'), 2)}; "
             f"budget={round(budget, 2)}; "
             f"price={round(self._safe_float(item.get('price_total'), 0.0), 2)}"
+            f"{class_fallback_note}"
         )
         reason = self._normalize_text(item.get("why_selected"))
         item["generalized_cost"] = generalized_cost
@@ -3977,9 +4007,13 @@ class Agent3Selection:
         item["leg_type"] = leg_type
 
         direct_bonus = 1.2 if self._safe_int(item.get("stops"), 0) == 0 else 0.0
+        first_class_bonus = 1.2 if (
+            self.flight_type == "first_class"
+            and self._normalize_text(item.get("travel_class")).lower() in {"first", "first class"}
+        ) else 0.0
         comfort_bonus = 0.8 if (
             self.flight_pref == "comfort"
-            and self._normalize_text(item.get("travel_class")).lower() == "business"
+            and self._normalize_text(item.get("travel_class")).lower() in {"business", "first", "first class"}
         ) else 0.0
         cheap_bonus = 0.5 if self.flight_pref == "cheap" else 0.0
 
@@ -3990,7 +4024,7 @@ class Agent3Selection:
         timing_score = self._flight_timing_score(item, leg_type)
         timing_weight = 0.55 if self.flight_pref == "cheap" or self.flight_priority == "save_money" else 1.0
 
-        score = direct_bonus + comfort_bonus + cheap_bonus + rating_like + timing_score * timing_weight
+        score = direct_bonus + first_class_bonus + comfort_bonus + cheap_bonus + rating_like + timing_score * timing_weight
         item["score"] = round(score, 4)
 
         item["why_selected"] = (
@@ -4260,6 +4294,36 @@ class Agent3Selection:
         strict_all: List[Dict[str, Any]] = []
         relaxed_all: List[Dict[str, Any]] = []
         tried_pairs: List[str] = []
+        tried_classes: List[str] = []
+
+        def fetch_with_class_fallback(
+            departure_id: str,
+            arrival_id: str,
+            strict_direct: bool,
+        ) -> List[Dict[str, Any]]:
+            collected: List[Dict[str, Any]] = []
+            seen_classes: set[str] = set()
+
+            for travel_class in self._searchapi_travel_class_candidates():
+                if travel_class in seen_classes:
+                    continue
+                seen_classes.add(travel_class)
+                tried_classes.append(f"{departure_id}->{arrival_id}:{travel_class}:{'direct' if strict_direct else 'any'}")
+                flights = self.search_flights_searchapi(
+                    departure_id=departure_id,
+                    arrival_id=arrival_id,
+                    outbound_date=outbound_date,
+                    flight_type="one_way",
+                    adults=self.num_people,
+                    max_results=8,
+                    strict_direct=strict_direct,
+                    travel_class_override=travel_class,
+                )
+                if flights:
+                    collected = flights
+                    break
+
+            return collected
 
         try:
             # Query factual flight candidates first, then rank the combined set.
@@ -4272,13 +4336,9 @@ class Agent3Selection:
 
                     tried_pairs.append(f"{departure_id}->{arrival_id}")
 
-                    strict = self.search_flights_searchapi(
+                    strict = fetch_with_class_fallback(
                         departure_id=departure_id,
                         arrival_id=arrival_id,
-                        outbound_date=outbound_date,
-                        flight_type="one_way",
-                        adults=self.num_people,
-                        max_results=8,
                         strict_direct=True,
                     )
 
@@ -4302,13 +4362,9 @@ class Agent3Selection:
 
                     relaxed_pairs.append(f"{departure_id}->{arrival_id}")
 
-                    relaxed = self.search_flights_searchapi(
+                    relaxed = fetch_with_class_fallback(
                         departure_id=departure_id,
                         arrival_id=arrival_id,
-                        outbound_date=outbound_date,
-                        flight_type="one_way",
-                        adults=self.num_people,
-                        max_results=8,
                         strict_direct=False,
                     )
 
@@ -4328,6 +4384,7 @@ class Agent3Selection:
                 f"live_flight_search("
                 f"direct_pairs={','.join(tried_pairs)};"
                 f"any_stop_pairs={','.join(relaxed_pairs)};"
+                f"class_fallbacks={','.join(tried_classes)};"
                 f"direct_candidates={len(strict_all)};"
                 f"all_candidates={len(combined)}"
                 f")|{comparison_status}",

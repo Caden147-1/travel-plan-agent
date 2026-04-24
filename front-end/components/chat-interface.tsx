@@ -14,6 +14,7 @@ interface Message {
 }
 
 interface PlanResponse {
+  request_id?: string
   success: boolean
   error?: string
   guidance?: string
@@ -40,6 +41,7 @@ interface PlanResponse {
 }
 
 interface GuidanceResponse {
+  request_id?: string
   success: boolean
   ready?: boolean
   guidance?: string
@@ -49,6 +51,7 @@ interface GuidanceResponse {
 interface HistoryItem {
   id: string
   request: string
+  requestId?: string
   messages?: Message[]
   summary?: string
   reportUrl?: string
@@ -58,8 +61,13 @@ interface HistoryItem {
   error?: string
 }
 
+type DraftMap = Record<string, string>
+type PendingSinceMap = Record<string, number>
+
 const apiBase = process.env.NEXT_PUBLIC_TRAVEL_API_BASE || "http://127.0.0.1:8000"
 const historyStorageKey = "travelai-plan-history"
+const draftStorageKey = "travelai-plan-drafts"
+const unsavedDraftKey = "__new__"
 
 const suggestedPrompts = [
   "I want to travel from Beijing to Chengdu from 6.19 to 6.21 with a budget of 6000 CNY. I love local food.",
@@ -82,8 +90,9 @@ const thinkingSteps = [
 export function ChatInterface() {
   const [messages, setMessages] = useState<Message[]>([])
   const [input, setInput] = useState("")
-  const [isLoading, setIsLoading] = useState(false)
-  const [loadingHistoryId, setLoadingHistoryId] = useState<string | null>(null)
+  const [loadingByHistoryId, setLoadingByHistoryId] = useState<Record<string, boolean>>({})
+  const [drafts, setDrafts] = useState<DraftMap>({})
+  const [pendingSinceByHistoryId, setPendingSinceByHistoryId] = useState<PendingSinceMap>({})
   const [thinkingStepIndex, setThinkingStepIndex] = useState(0)
   const [thinkingElapsedSeconds, setThinkingElapsedSeconds] = useState(0)
   const [history, setHistory] = useState<HistoryItem[]>([])
@@ -93,29 +102,36 @@ export function ChatInterface() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const activeHistoryIdRef = useRef<string | null>(null)
-  const abortControllerRef = useRef<AbortController | null>(null)
-  const loadingHistoryIdRef = useRef<string | null>(null)
+  const abortControllersRef = useRef<Record<string, AbortController>>({})
+
+  const currentDraftKey = activeHistoryId ?? unsavedDraftKey
+  const activeHistoryItem = activeHistoryId ? history.find((item) => item.id === activeHistoryId) : null
+  const activeConversationId = activeHistoryId ?? null
+  const isActiveLoading = Boolean(activeConversationId && loadingByHistoryId[activeConversationId])
+  const showActiveLoading = Boolean(activeHistoryItem?.status === "pending" && activeConversationId && loadingByHistoryId[activeConversationId])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
-  }, [messages, isLoading, thinkingStepIndex])
+  }, [messages, showActiveLoading, thinkingStepIndex])
 
   useEffect(() => {
-    if (!isLoading) {
+    if (!showActiveLoading || !activeConversationId) {
       setThinkingStepIndex(0)
       setThinkingElapsedSeconds(0)
       return
     }
 
-    const startedAt = Date.now()
-    const interval = window.setInterval(() => {
+    const startedAt = pendingSinceByHistoryId[activeConversationId] || Date.now()
+    const updateThinkingState = () => {
       const elapsedSeconds = Math.floor((Date.now() - startedAt) / 1000)
       setThinkingElapsedSeconds(elapsedSeconds)
       setThinkingStepIndex(getThinkingStepIndex(elapsedSeconds))
-    }, 500)
+    }
 
+    updateThinkingState()
+    const interval = window.setInterval(updateThinkingState, 500)
     return () => window.clearInterval(interval)
-  }, [isLoading])
+  }, [activeConversationId, pendingSinceByHistoryId, showActiveLoading])
 
   useEffect(() => {
     if (!textareaRef.current) return
@@ -136,14 +152,26 @@ export function ChatInterface() {
     }
   }, [])
 
+  useEffect(() => {
+    try {
+      const savedDrafts = window.localStorage.getItem(draftStorageKey)
+      if (!savedDrafts) return
+      const parsedDrafts = JSON.parse(savedDrafts) as DraftMap
+      if (parsedDrafts && typeof parsedDrafts === "object") {
+        setDrafts(parsedDrafts)
+      }
+    } catch {
+      setDrafts({})
+    }
+  }, [])
+
+  useEffect(() => {
+    setInput(drafts[currentDraftKey] || "")
+  }, [currentDraftKey, drafts])
+
   function setActiveConversation(id: string | null) {
     activeHistoryIdRef.current = id
     setActiveHistoryId(id)
-  }
-
-  function setLoadingConversation(id: string | null) {
-    loadingHistoryIdRef.current = id
-    setLoadingHistoryId(id)
   }
 
   function saveHistory(updater: (previous: HistoryItem[]) => HistoryItem[]) {
@@ -154,24 +182,53 @@ export function ChatInterface() {
     })
   }
 
+  function updateDraft(key: string, value: string) {
+    setDrafts((previous) => {
+      const nextDrafts = { ...previous, [key]: value }
+      window.localStorage.setItem(draftStorageKey, JSON.stringify(nextDrafts))
+      return nextDrafts
+    })
+  }
+
+  function clearDraft(key: string) {
+    setDrafts((previous) => {
+      if (!(key in previous)) return previous
+      const nextDrafts = { ...previous }
+      delete nextDrafts[key]
+      window.localStorage.setItem(draftStorageKey, JSON.stringify(nextDrafts))
+      return nextDrafts
+    })
+  }
+
+  function setConversationLoading(historyId: string, isLoading: boolean) {
+    setLoadingByHistoryId((previous) => {
+      const next = { ...previous }
+      if (isLoading) next[historyId] = true
+      else delete next[historyId]
+      return next
+    })
+    setPendingSinceByHistoryId((previous) => {
+      const next = { ...previous }
+      if (isLoading) next[historyId] = previous[historyId] || Date.now()
+      else delete next[historyId]
+      return next
+    })
+  }
+
   async function handleSubmit(e: FormEvent | KeyboardEvent) {
     e.preventDefault()
-    if (isLoading) {
+    if (isActiveLoading && activeConversationId) {
       handleStopThinking()
       return
     }
 
     const request = input.trim()
     if (!request) return
-    setInput("")
 
+    const previousDraftKey = currentDraftKey
     const historyId = activeHistoryIdRef.current || crypto.randomUUID()
     const existingHistory = history.find((item) => item.id === historyId)
-    const previousMessages = existingHistory?.messages?.length
-      ? existingHistory.messages
-      : messages.length
-        ? messages
-        : []
+    const previousMessages = existingHistory?.messages?.length ? existingHistory.messages : []
     const userMessage: Message = {
       id: crypto.randomUUID(),
       role: "user",
@@ -182,6 +239,8 @@ export function ChatInterface() {
     const requestValidationError = validateRequest(plannerRequest)
 
     setActiveConversation(historyId)
+    clearDraft(previousDraftKey)
+    setInput("")
     setMessages(submittedMessages)
     saveHistory((previous) => {
       const now = new Date().toISOString()
@@ -198,16 +257,15 @@ export function ChatInterface() {
       }
       return [nextItem, ...previous.filter((item) => item.id !== historyId)]
     })
-    setIsLoading(true)
-    setLoadingConversation(historyId)
+    setConversationLoading(historyId, true)
     setThinkingStepIndex(0)
     setThinkingElapsedSeconds(0)
     const abortController = new AbortController()
-    abortControllerRef.current = abortController
+    abortControllersRef.current[historyId] = abortController
 
     try {
       if (requestValidationError) {
-        const guidance = buildFallbackGuidance(requestValidationError)
+        const guidance = buildFallbackGuidance(plannerRequest, requestValidationError)
         const nextMessages: Message[] = [
           ...submittedMessages,
           {
@@ -221,6 +279,7 @@ export function ChatInterface() {
             item.id === historyId
               ? {
                   ...item,
+                  requestId: item.requestId || `local-${historyId.slice(0, 8)}`,
                   messages: nextMessages,
                   summary: guidance,
                   status: "error",
@@ -230,9 +289,7 @@ export function ChatInterface() {
               : item,
           ),
         )
-        if (activeHistoryIdRef.current === historyId) {
-          setMessages(nextMessages)
-        }
+        if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
         return
       }
 
@@ -249,7 +306,7 @@ export function ChatInterface() {
       }
 
       if (!guidanceData.ready) {
-        const guidance = guidanceData.guidance || buildFallbackGuidance()
+        const guidance = guidanceData.guidance || buildFallbackGuidance(plannerRequest)
         const nextMessages: Message[] = [
           ...submittedMessages,
           {
@@ -263,6 +320,7 @@ export function ChatInterface() {
             item.id === historyId
               ? {
                   ...item,
+                  requestId: guidanceData.request_id || item.requestId,
                   messages: nextMessages,
                   summary: guidance,
                   status: "error",
@@ -272,9 +330,7 @@ export function ChatInterface() {
               : item,
           ),
         )
-        if (activeHistoryIdRef.current === historyId) {
-          setMessages(nextMessages)
-        }
+        if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
         return
       }
 
@@ -287,7 +343,7 @@ export function ChatInterface() {
       const data = (await response.json()) as PlanResponse
 
       if (!response.ok || !data.success) {
-        const guidance = data.guidance || buildFallbackGuidance(data.error)
+        const guidance = data.guidance || buildFallbackGuidance(plannerRequest, data.error)
         const nextMessages: Message[] = [
           ...submittedMessages,
           {
@@ -301,6 +357,7 @@ export function ChatInterface() {
             item.id === historyId
               ? {
                   ...item,
+                  requestId: data.request_id || item.requestId,
                   messages: nextMessages,
                   summary: guidance,
                   status: "error",
@@ -310,9 +367,7 @@ export function ChatInterface() {
               : item,
           ),
         )
-        if (activeHistoryIdRef.current === historyId) {
-          setMessages(nextMessages)
-        }
+        if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
         return
       }
 
@@ -331,6 +386,7 @@ export function ChatInterface() {
           item.id === historyId
             ? {
                 ...item,
+                requestId: data.request_id || item.requestId,
                 messages: nextMessages,
                 summary,
                 reportUrl: data.report_url,
@@ -340,9 +396,7 @@ export function ChatInterface() {
             : item,
         ),
       )
-      if (activeHistoryIdRef.current === historyId) {
-        setMessages(nextMessages)
-      }
+      if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
     } catch (error) {
       if (error instanceof DOMException && error.name === "AbortError") {
         const cancelledSummary = "Stopped. You can revise the request and send it again when you are ready."
@@ -359,6 +413,7 @@ export function ChatInterface() {
             item.id === historyId
               ? {
                   ...item,
+                  requestId: item.requestId || `local-${historyId.slice(0, 8)}`,
                   messages: nextMessages,
                   summary: cancelledSummary,
                   status: "cancelled",
@@ -368,9 +423,7 @@ export function ChatInterface() {
               : item,
           ),
         )
-        if (activeHistoryIdRef.current === historyId) {
-          setMessages(nextMessages)
-        }
+        if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
         return
       }
 
@@ -389,6 +442,7 @@ export function ChatInterface() {
           item.id === historyId
             ? {
                 ...item,
+                requestId: item.requestId || `local-${historyId.slice(0, 8)}`,
                 messages: nextMessages,
                 summary: errorSummary,
                 status: "error",
@@ -398,29 +452,22 @@ export function ChatInterface() {
             : item,
         ),
       )
-      if (activeHistoryIdRef.current === historyId) {
-        setMessages(nextMessages)
-      }
+      if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
     } finally {
-      if (loadingHistoryIdRef.current === historyId) {
-        abortControllerRef.current = null
-        setLoadingConversation(null)
-        setIsLoading(false)
-      }
+      delete abortControllersRef.current[historyId]
+      setConversationLoading(historyId, false)
     }
   }
 
   function handleStopThinking() {
-    const historyId = loadingHistoryIdRef.current
-    if (!historyId) return
-    abortControllerRef.current?.abort()
+    if (!activeConversationId) return
+    abortControllersRef.current[activeConversationId]?.abort()
   }
 
   function handleHistoryClick(item: HistoryItem) {
     setActiveConversation(item.id)
     if (item.messages?.length) {
       setMessages(item.messages)
-      setInput("")
       textareaRef.current?.focus()
       return
     }
@@ -449,12 +496,17 @@ export function ChatInterface() {
     }
 
     setMessages(nextMessages)
-    setInput("")
     textareaRef.current?.focus()
   }
 
   function handleHistoryDelete(id: string) {
     saveHistory((previous) => previous.filter((item) => item.id !== id))
+    clearDraft(id)
+    if (abortControllersRef.current[id]) {
+      abortControllersRef.current[id].abort()
+      delete abortControllersRef.current[id]
+    }
+    setConversationLoading(id, false)
     if (activeHistoryIdRef.current === id) {
       setMessages([])
       setInput("")
@@ -463,23 +515,20 @@ export function ChatInterface() {
   }
 
   function handlePromptClick(prompt: string) {
-    setInput(prompt)
+    updateDraft(currentDraftKey, prompt)
     textareaRef.current?.focus()
   }
 
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      if (isLoading) {
+      if (isActiveLoading) {
         handleStopThinking()
         return
       }
       void handleSubmit(e)
     }
   }
-
-  const activeHistoryItem = activeHistoryId ? history.find((item) => item.id === activeHistoryId) : null
-  const showActiveLoading = activeHistoryItem?.status === "pending" && activeHistoryId === loadingHistoryId
 
   return (
     <div className="flex h-screen bg-background">
@@ -495,8 +544,8 @@ export function ChatInterface() {
             className="w-full justify-start gap-2 bg-sidebar-accent hover:bg-sidebar-accent/80 border-sidebar-border text-sidebar-foreground"
             onClick={() => {
               setMessages([])
-              setInput("")
               setActiveConversation(null)
+              textareaRef.current?.focus()
             }}
           >
             <Plus className="h-4 w-4" />
@@ -633,7 +682,7 @@ export function ChatInterface() {
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => setInput(e.target.value)}
+                onChange={(e) => updateDraft(currentDraftKey, e.target.value)}
                 onKeyDown={handleKeyDown}
                 placeholder="Describe your trip..."
                 className="flex-1 bg-transparent resize-none outline-none text-sm px-2 py-2 max-h-[180px] min-h-[40px]"
@@ -642,12 +691,12 @@ export function ChatInterface() {
               <Button
                 type="submit"
                 size="icon"
-                disabled={!input.trim() && !isLoading}
+                disabled={!input.trim() && !isActiveLoading}
                 className="flex-shrink-0 h-10 w-10 rounded-lg"
-                aria-label={isLoading ? "Stop thinking" : "Send message"}
-                title={isLoading ? "Stop" : "Send"}
+                aria-label={isActiveLoading ? "Stop thinking" : "Send message"}
+                title={isActiveLoading ? "Stop" : "Send"}
               >
-                {isLoading ? <X className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                {isActiveLoading ? <X className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </Button>
             </div>
             <p className="text-xs text-center text-muted-foreground mt-2">
@@ -906,10 +955,31 @@ function validateRequest(request: string): string | null {
   return null
 }
 
-function buildFallbackGuidance(error?: string): string {
+function inferSuggestionLead(request: string): string {
+  const text = request.toLowerCase()
+  const hints: string[] = []
+
+  if (/(budget|budget-friendly|affordable|cheap|预算|省钱)/i.test(text)) {
+    hints.push("I can help keep it budget-friendly by balancing transport, hotel area, and food choices.")
+  }
+  if (/(clean hotel|clean hotels|clean|central hotel|central hotels|central)/i.test(text)) {
+    hints.push("I can prioritize clean, well-rated hotels in convenient central areas.")
+  }
+  if (/(local restaurant|local restaurants|local food|restaurant|restaurants|food|美食|当地)/i.test(text)) {
+    hints.push("I can also lean toward local restaurants instead of tourist-focused spots.")
+  }
+
+  if (hints.length === 0) {
+    return "I can help turn this into a practical travel request and suggest good tradeoffs as we narrow it down."
+  }
+
+  return hints.slice(0, 2).join(" ")
+}
+
+function buildFallbackGuidance(request = "", error?: string): string {
   const exampleRange = getExampleDateRange()
   return [
-    "I can help turn this into a complete travel request.",
+    inferSuggestionLead(request),
     "",
     error ? `What happened: ${error}` : null,
     "To continue, tell me your departure city, destination city or country, travel dates or trip length, number of travelers, total budget and currency, and any hotel, food, transport, attraction, or pace preferences.",

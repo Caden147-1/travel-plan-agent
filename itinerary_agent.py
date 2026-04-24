@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import threading
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional, Tuple
 
@@ -20,8 +21,8 @@ NORMAL_LUNCH_START = "12:00"
 NORMAL_LUNCH_END = "14:00"
 NORMAL_DINNER_START = "18:00"
 NORMAL_DINNER_END = "20:00"
-LOCAL_TRANSPORT_RATE_BY_TIER = {"low": 1.0, "medium": 2.0, "high": 8.0}
-MID_DISTANCE_CAR_COST = {"low": 300, "medium": 400, "high": 500}
+LOCAL_TRANSPORT_RATE_BY_TIER = {"low": 1.0, "medium": 2.0, "high": 8.0, "ultra": 30.0}
+MID_DISTANCE_CAR_COST = {"low": 300, "medium": 400, "high": 500, "ultra": 800}
 MAX_DRIVE_HOURS_PER_LEG = 5.0
 HOTEL_CLUSTER_RADIUS_KM = 5.0
 HOTEL_CLUSTER_MAX_ROUTE_KM = 10.0
@@ -31,6 +32,8 @@ HEIGIT_API_KEY = os.getenv("HEIGIT_API_KEY", "")
 HEIGIT_BASE_URL = os.getenv("HEIGIT_BASE_URL", "https://api.openrouteservice.org")
 _CITY_COORD_CACHE: Dict[str, Dict[str, float]] = {}
 _ROUTE_METRICS_CACHE: Dict[str, Dict[str, float]] = {}
+_CITY_COORD_CACHE_LOCK = threading.Lock()
+_ROUTE_METRICS_CACHE_LOCK = threading.Lock()
 
 PLACE_EVENT_TYPES = {"poi", "meal", "checkin", "checkout"}
 FIXED_TIME_EVENT_TYPES = {"flight", "drive"}
@@ -664,8 +667,9 @@ def _route_metrics_heigit_coords(origin: Dict[str, float], destination: Dict[str
         f"{origin.get('lat'):.6f},{origin.get('lng'):.6f}->"
         f"{destination.get('lat'):.6f},{destination.get('lng'):.6f}"
     )
-    if key in _ROUTE_METRICS_CACHE:
-        cached = _ROUTE_METRICS_CACHE[key]
+    with _ROUTE_METRICS_CACHE_LOCK:
+        cached = _ROUTE_METRICS_CACHE.get(key)
+    if cached is not None:
         return dict(cached) if cached else None
 
     url = f"{HEIGIT_BASE_URL.rstrip('/')}/v2/directions/driving-car"
@@ -680,27 +684,32 @@ def _route_metrics_heigit_coords(origin: Dict[str, float], destination: Dict[str
     try:
         resp = requests.post(url, headers=headers, json=payload, timeout=20)
         if resp.status_code != 200:
-            _ROUTE_METRICS_CACHE[key] = {}
+            with _ROUTE_METRICS_CACHE_LOCK:
+                _ROUTE_METRICS_CACHE[key] = {}
             return None
         data = resp.json() if resp.text else {}
         routes = data.get("routes", []) if isinstance(data, dict) else []
         if not routes:
-            _ROUTE_METRICS_CACHE[key] = {}
+            with _ROUTE_METRICS_CACHE_LOCK:
+                _ROUTE_METRICS_CACHE[key] = {}
             return None
         summary = routes[0].get("summary", {}) if isinstance(routes[0], dict) else {}
         duration_sec = _safe_float(summary.get("duration"), 0.0)
         distance_m = _safe_float(summary.get("distance"), 0.0)
         if duration_sec <= 0 or distance_m <= 0:
-            _ROUTE_METRICS_CACHE[key] = {}
+            with _ROUTE_METRICS_CACHE_LOCK:
+                _ROUTE_METRICS_CACHE[key] = {}
             return None
         result = {
             "duration_h": round(duration_sec / 3600.0, 2),
             "distance_km": round(distance_m / 1000.0, 2),
         }
-        _ROUTE_METRICS_CACHE[key] = result
+        with _ROUTE_METRICS_CACHE_LOCK:
+            _ROUTE_METRICS_CACHE[key] = result
         return dict(result)
     except Exception:
-        _ROUTE_METRICS_CACHE[key] = {}
+        with _ROUTE_METRICS_CACHE_LOCK:
+            _ROUTE_METRICS_CACHE[key] = {}
         return None
 
 
@@ -730,13 +739,15 @@ def _geocode_city_heigit(city: str) -> Optional[Dict[str, float]]:
     city_key = _normalize_text(city).lower()
     if not city_key:
         return None
-    if city_key in _CITY_COORD_CACHE:
-        cached = _CITY_COORD_CACHE[city_key]
+    with _CITY_COORD_CACHE_LOCK:
+        cached = _CITY_COORD_CACHE.get(city_key)
+    if cached is not None:
         if cached:
             return cached
         return None
     if not HEIGIT_API_KEY:
-        _CITY_COORD_CACHE[city_key] = {}
+        with _CITY_COORD_CACHE_LOCK:
+            _CITY_COORD_CACHE[city_key] = {}
         return None
 
     url = f"{HEIGIT_BASE_URL.rstrip('/')}/geocode/search"
@@ -749,28 +760,34 @@ def _geocode_city_heigit(city: str) -> Optional[Dict[str, float]]:
     try:
         resp = requests.get(url, params=params, timeout=15)
         if resp.status_code != 200:
-            _CITY_COORD_CACHE[city_key] = {}
+            with _CITY_COORD_CACHE_LOCK:
+                _CITY_COORD_CACHE[city_key] = {}
             return None
         data = resp.json() if resp.text else {}
         features = data.get("features", []) if isinstance(data, dict) else []
         if not features:
-            _CITY_COORD_CACHE[city_key] = {}
+            with _CITY_COORD_CACHE_LOCK:
+                _CITY_COORD_CACHE[city_key] = {}
             return None
         geometry = features[0].get("geometry", {}) if isinstance(features[0], dict) else {}
         coords = geometry.get("coordinates", []) if isinstance(geometry, dict) else []
         if not isinstance(coords, list) or len(coords) < 2:
-            _CITY_COORD_CACHE[city_key] = {}
+            with _CITY_COORD_CACHE_LOCK:
+                _CITY_COORD_CACHE[city_key] = {}
             return None
         lng = _safe_float(coords[0], 0.0)
         lat = _safe_float(coords[1], 0.0)
         if lat == 0.0 and lng == 0.0:
-            _CITY_COORD_CACHE[city_key] = {}
+            with _CITY_COORD_CACHE_LOCK:
+                _CITY_COORD_CACHE[city_key] = {}
             return None
         result = {"lat": lat, "lng": lng}
-        _CITY_COORD_CACHE[city_key] = result
+        with _CITY_COORD_CACHE_LOCK:
+            _CITY_COORD_CACHE[city_key] = result
         return result
     except Exception:
-        _CITY_COORD_CACHE[city_key] = {}
+        with _CITY_COORD_CACHE_LOCK:
+            _CITY_COORD_CACHE[city_key] = {}
         return None
 
 
@@ -798,6 +815,8 @@ def _estimate_mid_distance_transport_cost(city_tier: str) -> int:
 
 def _local_transport_tier_from_cost_level(cost_level: Any) -> str:
     level = _normalize_text(cost_level).lower()
+    if level in {"ultra_high", "ultra_luxury", "top", "vip"}:
+        return "ultra"
     if level in {"high", "luxury"}:
         return "high"
     if level in {"medium", "medium_high"}:
@@ -813,9 +832,11 @@ def _is_international_trip(normalized: Dict[str, Any]) -> bool:
 
 
 def _local_transport_rate_per_minute(tier: str, is_international: bool = False) -> float:
+    key = _normalize_text(tier).lower()
+    if key == "ultra":
+        return float(LOCAL_TRANSPORT_RATE_BY_TIER["ultra"])
     if is_international:
         return INTERNATIONAL_LOCAL_TRANSPORT_RATE_PER_MINUTE
-    key = _normalize_text(tier).lower()
     return float(LOCAL_TRANSPORT_RATE_BY_TIER.get(key, LOCAL_TRANSPORT_RATE_BY_TIER["medium"]))
 
 
@@ -1088,6 +1109,19 @@ def _fallback_meal_name(day_plan: Dict[str, Any], city: str, index: int) -> str:
     city_name = city or "City"
     day_marker = _normalize_text(day_plan.get("date")) or f"day-{max(1, int(_safe_float(day_plan.get('day_index_in_city'), 1)))}"
     return f"Local Meal Option {index + 1} ({city_name}, {day_marker})"
+
+
+def _meal_event_cost(candidate: Dict[str, Any], fallback_meal_cost: float) -> float:
+    estimated_total = _safe_float(candidate.get("estimated_total_cost"), 0.0)
+    recommended_visits = max(1.0, _safe_float(candidate.get("recommended_visits"), 1.0))
+    if estimated_total > 0:
+        return round(max(LOW_QUALITY_MEAL_COST_FLOOR, estimated_total / recommended_visits), 2)
+
+    estimated_meal_per_person = _safe_float(candidate.get("estimated_meal_per_person"), 0.0)
+    if estimated_meal_per_person > 0:
+        return round(max(LOW_QUALITY_MEAL_COST_FLOOR, estimated_meal_per_person), 2)
+
+    return round(max(LOW_QUALITY_MEAL_COST_FLOOR, fallback_meal_cost), 2)
 
 
 def _event_start_minutes(event: Dict[str, Any]) -> Optional[int]:
@@ -1521,9 +1555,6 @@ def _schedule_city_day(
 
         if restaurant_key in used_today_restaurant_keys:
             continue
-        if used_restaurant_keys is not None and restaurant_key in used_restaurant_keys:
-            continue
-
         last_used_day = restaurant_last_used_day_index.get(restaurant_key)
         if (
             last_used_day is not None
@@ -1534,6 +1565,7 @@ def _schedule_city_day(
         meta = {
             "city": _normalize_text(day_plan.get("city")),
             "restaurant_key": restaurant_key,
+            "restaurant_name": _normalize_text(r.get("name")),
             "lat": _safe_float(r.get("lat"), None),
             "lng": _safe_float(r.get("lng"), None),
         }
@@ -1544,9 +1576,7 @@ def _schedule_city_day(
         if _safe_float(day_plan.get("used_hours"), 0.0) + commute_h + MEAL_HOURS > DAY_AVAILABLE_HOURS:
             break
         meal_name = _meal_display_name(r, city_name, meal_added)
-        meal_cost = _safe_float(r.get("estimated_total_cost"), 0.0)
-        if meal_cost <= 0:
-            meal_cost = fallback_meal_cost
+        meal_cost = _meal_event_cost(r, fallback_meal_cost)
         _append_commute_before_place(day_plan, meal_name, meta)
         _append_event(
             day_plan=day_plan,
@@ -1558,8 +1588,6 @@ def _schedule_city_day(
         )
         restaurant_last_used_day_index[restaurant_key] = current_day_index
         used_today_restaurant_keys.add(restaurant_key)
-        if used_restaurant_keys is not None:
-            used_restaurant_keys.add(restaurant_key)
         meal_added += 1
 
     while meal_added < DAILY_REQUIRED_MEALS and _safe_float(day_plan.get("used_hours"), 0.0) + MEAL_HOURS <= DAY_AVAILABLE_HOURS:
@@ -1574,39 +1602,44 @@ def _schedule_city_day(
                     or f"{city_name.lower()}|fallback:{fallback_cursor}"
                 )
                 if candidate_key not in used_today_restaurant_keys:
-                    if used_restaurant_keys is not None and candidate_key in used_restaurant_keys:
+                    last_used_day = restaurant_last_used_day_index.get(candidate_key)
+                    if (
+                        last_used_day is not None
+                        and (current_day_index - last_used_day) < max(1, restaurant_cooldown_days)
+                    ):
                         continue
                     fallback = candidate
                     fallback_key = candidate_key
                     break
             if fallback is not None:
                 meal_name = _meal_display_name(fallback, city_name, meal_added)
-                meal_cost = _safe_float(fallback.get("estimated_total_cost"), 0.0)
-                if meal_cost <= 0:
-                    meal_cost = fallback_meal_cost
+                meal_cost = _meal_event_cost(fallback, fallback_meal_cost)
                 meta = {
                     "city": city_name,
                     "restaurant_key": fallback_key,
+                    "restaurant_name": _normalize_text(fallback.get("name")),
                     "lat": _safe_float(fallback.get("lat"), None),
                     "lng": _safe_float(fallback.get("lng"), None),
                 }
             else:
-                meal_name = f"Local Meal Option {meal_added + 1} ({city_name or 'City'})"
+                meal_name = _fallback_meal_name(day_plan, city_name, meal_added)
                 meal_cost = fallback_meal_cost
                 hotel = day_plan.get("hotel") or {}
                 meta = {
                     "city": city_name,
                     "restaurant_key": f"{city_name.lower()}|virtual:{meal_added+1}",
+                    "restaurant_name": meal_name,
                     "lat": _safe_float(hotel.get("lat"), None) if isinstance(hotel, dict) else None,
                     "lng": _safe_float(hotel.get("lng"), None) if isinstance(hotel, dict) else None,
                 }
         else:
-            meal_name = f"Local Meal Option {meal_added + 1} ({city_name or 'City'})"
+            meal_name = _fallback_meal_name(day_plan, city_name, meal_added)
             meal_cost = fallback_meal_cost
             hotel = day_plan.get("hotel") or {}
             meta = {
                 "city": city_name,
                 "restaurant_key": f"{city_name.lower()}|virtual:{meal_added+1}",
+                "restaurant_name": meal_name,
                 "lat": _safe_float(hotel.get("lat"), None) if isinstance(hotel, dict) else None,
                 "lng": _safe_float(hotel.get("lng"), None) if isinstance(hotel, dict) else None,
             }
@@ -1628,8 +1661,7 @@ def _schedule_city_day(
         restaurant_key = _normalize_text(meta.get("restaurant_key"))
         if restaurant_key:
             used_today_restaurant_keys.add(restaurant_key)
-            if used_restaurant_keys is not None:
-                used_restaurant_keys.add(restaurant_key)
+            restaurant_last_used_day_index[restaurant_key] = current_day_index
         meal_added += 1
 
     food_budget = _safe_float(city_budget.get("food_budget"), 0.0)

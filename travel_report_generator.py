@@ -5,6 +5,7 @@ import json
 import math
 import os
 import re
+import uuid
 import webbrowser
 from functools import lru_cache
 from datetime import datetime, timedelta
@@ -1155,8 +1156,9 @@ def write_travel_report(
 
     trip = router_output.get("trip_summary") or {}
     destination = "_".join(_text(x) for x in trip.get("destination", []) or [] if _text(x))
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    filename = f"{stamp}_{_slug(destination)}.html"
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S_%f")
+    unique_suffix = uuid.uuid4().hex[:8]
+    filename = f"{stamp}_{_slug(destination)}_{unique_suffix}.html"
     path = output_root / filename
     html_text = render_travel_report_html(router_output, user_request)
     path.write_text(html_text, encoding="utf-8")

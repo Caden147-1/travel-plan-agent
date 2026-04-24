@@ -9,6 +9,7 @@ import subprocess
 import sys
 import threading
 import time
+import uuid
 import webbrowser
 from datetime import datetime, timedelta
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -49,7 +50,29 @@ def _example_date_range() -> tuple[str, str]:
     return start.isoformat(), end.isoformat()
 
 
-def _fallback_guidance(result: dict) -> str:
+def _build_preference_hint(user_request: str, parsed: dict) -> str:
+    text = (user_request or "").lower()
+    hints: list[str] = []
+
+    if any(token in text for token in ["budget", "budget-friendly", "affordable", "cheap", "省钱", "预算"]):
+        hints.append("I can help keep it budget-friendly by favoring better-value flights, stays, and dining choices.")
+    if any(token in text for token in ["clean hotel", "clean hotels", "clean", "central hotel", "central hotels", "central"]):
+        hints.append("I can prioritize clean, well-rated hotels in convenient central areas.")
+    if any(token in text for token in ["local restaurant", "local restaurants", "local food", "food", "restaurant", "restaurants", "美食", "当地"]):
+        hints.append("I can also lean toward local restaurants instead of tourist-focused places.")
+
+    destination = parsed.get("destination")
+    if not hints and destination:
+        destination_text = ", ".join(destination) if isinstance(destination, list) else str(destination)
+        hints.append(f"I can help shape this into a practical {destination_text} trip with budget, hotel, food, and pace suggestions.")
+
+    if not hints:
+        hints.append("I can help turn this into a practical trip plan and suggest good tradeoffs on budget, stay location, and pace.")
+
+    return " ".join(hints[:2])
+
+
+def _fallback_guidance(user_request: str, result: dict) -> str:
     example_departure_date = _example_departure_date()
     example_start_date, example_end_date = _example_date_range()
     if result.get("stage") == "budget_feasibility":
@@ -96,6 +119,7 @@ def _fallback_guidance(result: dict) -> str:
         )
 
     parsed = result.get("parsed_request") or {}
+    hint = _build_preference_hint(user_request, parsed)
     missing = (parsed.get("missing_fields") or {}).get("critical") or []
     labels = {
         "origin": "departure city",
@@ -108,21 +132,25 @@ def _fallback_guidance(result: dict) -> str:
     if missing_text:
         if missing == ["origin"]:
             return (
+                f"{hint}\n\n"
                 "Please provide the departure city.\n\n"
                 "For example: from Shanghai."
             )
         if missing == ["travel_dates.start"] and (parsed.get("duration_days") or (parsed.get("travel_dates") or {}).get("text")):
             return (
+                f"{hint}\n\n"
                 "The departure date is missing. If this trip is starting tomorrow, "
                 "please reply with \"starting tomorrow\".\n\n"
                 "If not, please provide the exact departure date in YYYY-MM-DD format.\n\n"
                 f"For example: {example_departure_date}."
             )
         return (
+            f"{hint}\n\n"
             f"Please provide {missing_text}.\n\n"
             f"For example: {example_start_date} to {example_end_date}, 2 people, 15000 CNY."
         )
     return (
+        f"{hint}\n\n"
         "Please provide your departure city, destination, travel dates or trip length, traveler count, and budget."
     )
 
@@ -156,6 +184,8 @@ Rules:
    - useful preferences such as hotel level/location, food, transport, attractions, pace
 12. Keep it concise, under 80 words when only one field is missing, otherwise under 140 words.
 13. If the failure stage is "budget_feasibility", treat the user's budget as a hard cap. Say the system already tried cheaper flights, budget hotels, lower-cost meals, and fewer paid activities when applicable. Do not suggest accepting an over-budget plan. Ask the user to either increase the budget, shorten the trip, remove paid activities, or relax destination/date constraints.
+14. When the user already gave meaningful preferences or intent, briefly offer 1 to 2 helpful planning suggestions before asking for missing details.
+15. Do not respond with only an example. The user should feel you are actively helping shape the trip.
 
 User request:
 {user_request}
@@ -166,17 +196,11 @@ Planner failure result:
 
 
 def _build_guidance(user_request: str, result: dict) -> str:
-    parsed = result.get("parsed_request") or {}
-    missing = (parsed.get("missing_fields") or {}).get("critical") or []
-    if missing:
-        return _fallback_guidance(result)
-    if result.get("stage") == "budget_feasibility":
-        return _fallback_guidance(result)
     try:
         guidance = _call_llm(_build_guidance_prompt(user_request, result)).strip()
-        return guidance or _fallback_guidance(result)
+        return guidance or _fallback_guidance(user_request, result)
     except Exception:
-        return _fallback_guidance(result)
+        return _fallback_guidance(user_request, result)
 
 
 def _run_intake_check(user_request: str) -> Dict[str, Any]:
@@ -312,6 +336,10 @@ def _json_response(handler: BaseHTTPRequestHandler, status: int, payload: Dict[s
     handler.wfile.write(body)
 
 
+def _new_request_id() -> str:
+    return uuid.uuid4().hex[:12]
+
+
 def _report_url_from_result(result: Dict[str, Any]) -> Optional[str]:
     report = result.get("report") or {}
     if not isinstance(report, dict) or not report.get("success"):
@@ -376,8 +404,9 @@ class TravelApiHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         parsed = urlparse(self.path)
+        request_id = _new_request_id()
         if parsed.path not in {"/api/plan", "/api/guidance"}:
-            _json_response(self, 404, {"success": False, "error": "Unknown endpoint."})
+            _json_response(self, 404, {"success": False, "error": "Unknown endpoint.", "request_id": request_id})
             return
 
         length = int(self.headers.get("Content-Length") or 0)
@@ -385,16 +414,21 @@ class TravelApiHandler(BaseHTTPRequestHandler):
         try:
             payload = json.loads(raw.decode("utf-8"))
         except Exception:
-            _json_response(self, 400, {"success": False, "error": "Invalid JSON body."})
+            _json_response(self, 400, {"success": False, "error": "Invalid JSON body.", "request_id": request_id})
             return
 
         user_request = str(payload.get("message") or payload.get("request") or "").strip()
         if not user_request:
-            _json_response(self, 400, {"success": False, "error": "Message is required."})
+            _json_response(self, 400, {"success": False, "error": "Message is required.", "request_id": request_id})
             return
 
+        sys.stdout.write(f"[api] [{request_id}] {parsed.path} started\n")
+
         if parsed.path == "/api/guidance":
-            _json_response(self, 200, _run_intake_check(user_request))
+            guidance_response = _run_intake_check(user_request)
+            guidance_response["request_id"] = request_id
+            _json_response(self, 200, guidance_response)
+            sys.stdout.write(f"[api] [{request_id}] {parsed.path} finished\n")
             return
 
         try:
@@ -402,6 +436,7 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             report_url = _report_url_from_result(result)
             success = bool(result.get("success"))
             response = {
+                "request_id": request_id,
                 "success": success,
                 "stage": result.get("stage"),
                 "error": result.get("error"),
@@ -419,8 +454,12 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             }
             failure_status = 422 if response["stage"] in {"agent1_parse", "agent1_validation", "budget_feasibility"} else 500
             _json_response(self, 200 if success else failure_status, response)
+            sys.stdout.write(
+                f"[api] [{request_id}] {parsed.path} finished success={success} stage={response.get('stage')}\n"
+            )
         except Exception as exc:
-            _json_response(self, 500, {"success": False, "error": str(exc)})
+            sys.stdout.write(f"[api] [{request_id}] {parsed.path} failed error={exc}\n")
+            _json_response(self, 500, {"success": False, "error": str(exc), "request_id": request_id})
 
     def _serve_report(self, report_path: str) -> None:
         safe_name = unquote(report_path).replace("\\", "/").lstrip("/")
