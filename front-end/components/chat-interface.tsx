@@ -71,7 +71,7 @@ const unsavedDraftKey = "__new__"
 
 const suggestedPrompts = [
   "I want to travel from Beijing to Chengdu from 6.19 to 6.21 with a budget of 6000 CNY. I love local food.",
-  "Plan a 5 day Tokyo trip from Shanghai for 2 people with a 15000 CNY budget.",
+  "Plan a 5 day Tokyo trip from Singapore for 2 people with a 200000 CNY budget.",
   "Help me plan a budget-friendly Paris trip with clean central hotels and local restaurants.",
   "I want a 4 day Chengdu food trip with pandas, Jinli, and relaxed sightseeing.",
 ]
@@ -167,7 +167,7 @@ export function ChatInterface() {
 
   useEffect(() => {
     setInput(drafts[currentDraftKey] || "")
-  }, [currentDraftKey, drafts])
+  }, [currentDraftKey])
 
   function setActiveConversation(id: string | null) {
     activeHistoryIdRef.current = id
@@ -515,6 +515,7 @@ export function ChatInterface() {
   }
 
   function handlePromptClick(prompt: string) {
+    setInput(prompt)
     updateDraft(currentDraftKey, prompt)
     textareaRef.current?.focus()
   }
@@ -682,7 +683,11 @@ export function ChatInterface() {
               <textarea
                 ref={textareaRef}
                 value={input}
-                onChange={(e) => updateDraft(currentDraftKey, e.target.value)}
+                onChange={(e) => {
+                  const nextValue = e.target.value
+                  setInput(nextValue)
+                  updateDraft(currentDraftKey, nextValue)
+                }}
                 onKeyDown={handleKeyDown}
                 placeholder="Describe your trip..."
                 className="flex-1 bg-transparent resize-none outline-none text-sm px-2 py-2 max-h-[180px] min-h-[40px]"

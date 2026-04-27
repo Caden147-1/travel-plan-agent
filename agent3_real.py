@@ -166,6 +166,22 @@ class Agent3Selection:
         self.flight_type = self._normalize_text(
             self.normalized_preferences.get("flight_type")
         ).lower() or "standard"
+        self.requested_flight_cabin = self._normalize_travel_class_token(
+            self.normalized_preferences.get("requested_flight_cabin")
+            or self.raw_preferences.get("flight_cabin")
+        )
+        self.flight_cabin_locked = (
+            self._normalize_text(self.normalized_preferences.get("flight_cabin_locked")).lower() == "yes"
+            or bool(self.requested_flight_cabin)
+        )
+        if self.requested_flight_cabin and self.flight_type in {"", "standard", "direct", "comfort", "budget"}:
+            cabin_to_flight_type = {
+                "first_class": "first_class",
+                "business": "business_class",
+                "economy": "economy_class",
+            }
+            self.flight_type = cabin_to_flight_type.get(self.requested_flight_cabin, self.flight_type)
+
         self.hotel_target_level = self._normalize_text(
             self.normalized_preferences.get("hotel_level_detail")
             or self.normalized_preferences.get("hotel_level")
@@ -239,14 +255,15 @@ class Agent3Selection:
         ]
         self.strict_preference_filtering = True
         if self.budget_pressure_mode:
-            self.flight_pref = "cheap"
-            self.flight_priority = "low"
+            if not self.flight_cabin_locked:
+                self.flight_pref = "cheap"
+                self.flight_priority = "low"
+                self.flight_type = "budget"
             self.hotel_pref = "budget"
             self.hotel_level = "budget"
             self.hotel_level_rich = "budget"
             self.food_level = "budget"
             self.attraction_intensity = "light"
-            self.flight_type = "budget"
             self.flight_budget_tolerance = 1.05
             self.flight_relaxed_budget_tolerance = 1.10
             self.hotel_budget_tolerance = 1.05
@@ -312,6 +329,31 @@ class Agent3Selection:
                 results.append(text)
                 seen.add(text.lower())
         return results
+
+    def _normalize_travel_class_token(self, value: Any) -> str:
+        """Normalize API/user cabin labels to SearchAPI travel_class values."""
+        text = self._normalize_text(value).lower()
+        if not text:
+            return ""
+        text = text.replace("-", " ").replace("_", " ")
+        text = re.sub(r"\s+", " ", text).strip()
+
+        if text in {"first", "first class", "firstclass", "1st class", "1stclass", "头等舱", "头等"}:
+            return "first_class"
+        if text in {"business", "business class", "businessclass", "biz class", "商务舱", "商务"}:
+            return "business"
+        if text in {"economy", "economy class", "economyclass", "coach", "coach class", "premium economy", "经济舱", "经济"}:
+            return "economy"
+        return text.replace(" ", "_")
+
+    def _travel_class_matches_requested(self, actual: Any, requested: Any) -> bool:
+        requested_norm = self._normalize_travel_class_token(requested)
+        if not requested_norm:
+            return True
+        actual_norm = self._normalize_travel_class_token(actual)
+        if not actual_norm:
+            return True
+        return actual_norm == requested_norm
 
     def _extract_num_people(self) -> int:
         value = self.raw_input.get("num_people") or self.parsed_request.get("num_people") or 1
@@ -742,6 +784,8 @@ class Agent3Selection:
                 "preference": self.flight_pref,
                 "priority": self.flight_priority,
                 "type": self.flight_type,
+                "requested_cabin": self.requested_flight_cabin,
+                "cabin_locked": self.flight_cabin_locked,
                 "budget_tolerance": self.flight_budget_tolerance,
                 "relaxed_budget_tolerance": self.flight_relaxed_budget_tolerance,
             },
@@ -2474,10 +2518,16 @@ class Agent3Selection:
     # flights
     # =========================================================
     def _searchapi_travel_class_candidates(self) -> List[str]:
+        if self.flight_cabin_locked and self.requested_flight_cabin:
+            return [self.requested_flight_cabin]
         if self.flight_type == "first_class":
-            return ["first", "business", "economy"]
-        if self.flight_type == "comfort" or self.flight_pref == "comfort":
+            return ["first_class", "business", "economy"]
+        if self.flight_type == "business_class":
             return ["business", "economy"]
+        if self.flight_type == "economy_class":
+            return ["economy"]
+        if self.flight_type == "comfort" or self.flight_pref == "comfort":
+            return ["economy", "business"]
         return ["economy"]
 
     def _searchapi_travel_class(self) -> str:
@@ -2553,7 +2603,8 @@ class Agent3Selection:
         self,
         item: Dict[str, Any],
         root: Dict[str, Any],
-        flight_type: str
+        flight_type: str,
+        requested_travel_class: Optional[str] = None
     ) -> Dict[str, Any]:
         flights = item.get("flights", []) or []
         first_flight = flights[0] if flights else {}
@@ -2603,7 +2654,7 @@ class Agent3Selection:
             "arrival_airport": self._normalize_text(arrival_airport.get("name")),
             "arrival_airport_code": arrival_code,
             "arrival_time": self._normalize_text(arrival_airport.get("time")),
-            "travel_class": travel_class or self._searchapi_travel_class(),
+            "travel_class": travel_class or requested_travel_class or self._searchapi_travel_class(),
             "stops": stops,
             "total_duration": total_duration,
             "duration_minutes": total_duration,
@@ -2664,10 +2715,20 @@ class Agent3Selection:
                 normalized_item = self._normalize_searchapi_flight(
                     item=item,
                     root=root,
-                    flight_type=flight_type
+                    flight_type=flight_type,
+                    requested_travel_class=params["travel_class"]
                 )
                 normalized_item["direct_query_used"] = strict_direct
                 normalized_item["requested_travel_class"] = params["travel_class"]
+
+                if not normalized_item.get("travel_class"):
+                    normalized_item["travel_class"] = params["travel_class"]
+
+                if self.flight_cabin_locked and not self._travel_class_matches_requested(
+                    normalized_item.get("travel_class"),
+                    params["travel_class"]
+                ):
+                    continue
 
                 dedup_key = (
                     normalized_item.get("airline"),
@@ -3506,24 +3567,38 @@ class Agent3Selection:
                 -self._safe_float(x.get("score"), 0.0),
             ),
         )
+        ranked, red_eye_policy_note = self._apply_red_eye_threshold_preference(ranked, budget)
+
+        def finalize(items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+            finalized = [self._finalize_selected_flight_reason(f, budget) for f in items[:max_items]]
+            enriched = [self._attach_flight_selection_note(f, ranked, budget) for f in finalized]
+            if red_eye_policy_note:
+                for item in enriched:
+                    existing = self._normalize_text(item.get("selection_note"))
+                    item["selection_note"] = (
+                        f"{existing} {red_eye_policy_note}.".strip()
+                        if existing
+                        else red_eye_policy_note
+                    )
+            return enriched
 
         strict = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget]
         if strict:
-            return [self._finalize_selected_flight_reason(f, budget) for f in strict[:max_items]], "within_budget_generalized_cost"
+            return finalize(strict), "within_budget_generalized_cost"
 
         slightly_over = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget * tolerance]
         if slightly_over:
-            return [self._finalize_selected_flight_reason(f, budget) for f in slightly_over[:max_items]], "slightly_over_budget_generalized_cost"
+            return finalize(slightly_over), "slightly_over_budget_generalized_cost"
 
         relaxed = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget * relaxed_tolerance]
         if relaxed:
-            return [self._finalize_selected_flight_reason(f, budget) for f in relaxed[:max_items]], "relaxed_over_budget_generalized_cost"
+            return finalize(relaxed), "relaxed_over_budget_generalized_cost"
 
         priced = [f for f in ranked if self._safe_float(f.get("price_total"), 0.0) > 0]
         if priced:
-            return [self._finalize_selected_flight_reason(f, budget) for f in priced[:max_items]], "closest_generalized_cost"
+            return finalize(priced), "closest_generalized_cost"
 
-        return [self._finalize_selected_flight_reason(f, budget) for f in ranked[:max_items]], "price_unavailable"
+        return finalize(ranked), "price_unavailable"
 
     def select_with_budget(
         self,
@@ -3919,6 +3994,10 @@ class Agent3Selection:
             return 70.0
         if self.flight_type == "first_class":
             return 300.0
+        if self.flight_type == "business_class":
+            return 240.0
+        if self.flight_type == "economy_class":
+            return 130.0
         if self.flight_pref == "comfort":
             return 220.0
         if self.flight_pref == "direct":
@@ -3932,11 +4011,151 @@ class Agent3Selection:
             return 0.0
         return 180.0 + max(0, stops - 1) * 120.0
 
+    def _travel_class_rank(self, value: Any) -> int:
+        normalized = self._normalize_travel_class_token(value)
+        ranks = {
+            "economy": 1,
+            "premium_economy": 2,
+            "business": 3,
+            "first_class": 4,
+        }
+        return ranks.get(normalized, 0)
+
+    def _flight_time_preference_multiplier(self) -> float:
+        if self.budget_pressure_mode:
+            return 1.0
+
+        transport_budget = max(0.0, self._safe_float(self.transport_budget, 0.0))
+        total_budget = max(0.0, self._safe_float(self.total_budget, 0.0))
+        if transport_budget >= 12000 or total_budget >= 30000:
+            return 3.2
+        if transport_budget >= 8000 or total_budget >= 20000:
+            return 2.4
+        if transport_budget >= 5000 or total_budget >= 12000:
+            return 1.7
+        return 1.0
+
+    def _flight_schedule_issue_labels(self, flight: Dict[str, Any], leg_type: str) -> List[str]:
+        labels: List[str] = []
+        leg = self._normalize_text(leg_type).lower()
+        dep = self._time_to_minutes(flight.get("departure_time"))
+        arr = self._time_to_minutes(flight.get("arrival_time"))
+
+        if dep is not None:
+            if dep < 6 * 60:
+                labels.append("red-eye departure")
+            elif dep < 8 * 60:
+                labels.append("very early departure")
+            elif dep >= 23 * 60:
+                labels.append("late-night departure")
+
+        if arr is not None:
+            if leg == "outbound":
+                if arr < 6 * 60:
+                    labels.append("pre-dawn arrival")
+                elif arr < 8 * 60:
+                    labels.append("early-morning arrival")
+                elif arr >= 21 * 60:
+                    labels.append("late-night arrival")
+                elif arr >= 19 * 60:
+                    labels.append("late arrival")
+            elif arr < 6 * 60:
+                labels.append("pre-dawn arrival")
+
+        deduped: List[str] = []
+        seen = set()
+        for label in labels:
+            if label not in seen:
+                seen.add(label)
+                deduped.append(label)
+        return deduped
+
+    def _is_red_eye_or_abnormal_flight(self, flight: Dict[str, Any], leg_type: str) -> bool:
+        labels = self._flight_schedule_issue_labels(flight, leg_type)
+        return any(
+            label in {
+                "red-eye departure",
+                "pre-dawn arrival",
+                "early-morning arrival",
+                "very early departure",
+                "late-night departure",
+                "late-night arrival",
+            }
+            for label in labels
+        )
+
+    def _red_eye_override_threshold_cny(self) -> float:
+        transport_budget = max(0.0, self._safe_float(self.transport_budget, 0.0))
+        total_budget = max(0.0, self._safe_float(self.total_budget, 0.0))
+        if transport_budget >= 12000 or total_budget >= 30000:
+            return 6000.0
+        if transport_budget >= 8000 or total_budget >= 20000:
+            return 4000.0
+        if transport_budget >= 5000 or total_budget >= 12000:
+            return 2500.0
+        return 0.0
+
+    def _apply_red_eye_threshold_preference(
+        self,
+        ranked: List[Dict[str, Any]],
+        budget: float,
+    ) -> Tuple[List[Dict[str, Any]], Optional[str]]:
+        if self.budget_pressure_mode:
+            return ranked, None
+
+        threshold = self._red_eye_override_threshold_cny()
+        if threshold <= 0:
+            return ranked, None
+
+        normal_candidates = [
+            item for item in ranked
+            if not self._is_red_eye_or_abnormal_flight(item, self._normalize_text(item.get("leg_type")) or "leg")
+        ]
+        red_eye_candidates = [
+            item for item in ranked
+            if self._is_red_eye_or_abnormal_flight(item, self._normalize_text(item.get("leg_type")) or "leg")
+        ]
+        if not normal_candidates or not red_eye_candidates:
+            return ranked, None
+
+        best_normal = min(
+            normal_candidates,
+            key=lambda candidate: self._safe_float(candidate.get("generalized_cost"), 999999.0),
+        )
+        allowed_red_eye: List[Dict[str, Any]] = []
+        blocked_count = 0
+
+        for candidate in red_eye_candidates:
+            normal_price = self._safe_float(best_normal.get("price_total"), 0.0)
+            red_eye_price = self._safe_float(candidate.get("price_total"), 0.0)
+            if normal_price <= 0 or red_eye_price <= 0:
+                blocked_count += 1
+                continue
+            if normal_price - red_eye_price >= threshold:
+                allowed_red_eye.append(candidate)
+            else:
+                blocked_count += 1
+
+        if blocked_count <= 0:
+            return ranked, None
+
+        filtered = normal_candidates + allowed_red_eye
+        filtered = sorted(
+            filtered,
+            key=lambda x: (
+                self._safe_float(x.get("generalized_cost"), 999999.0),
+                abs(self._safe_float(x.get("price_total"), 0.0) - budget) if budget > 0 else self._safe_float(x.get("price_total"), 0.0),
+                -self._safe_float(x.get("score"), 0.0),
+            ),
+        )
+        return filtered, f"red-eye flights were blocked unless they saved at least {threshold:.0f} {self.currency}"
+
     def _flight_timing_penalty_cny(self, flight: Dict[str, Any], leg_type: str) -> float:
         timing_score = self._flight_timing_score(flight, leg_type)
         leg = self._normalize_text(leg_type).lower()
         arr = self._time_to_minutes(flight.get("arrival_time"))
         dep = self._time_to_minutes(flight.get("departure_time"))
+        time_pref_multiplier = self._flight_time_preference_multiplier()
 
         if timing_score >= 0:
             reward = -60.0 * timing_score
@@ -3950,14 +4169,77 @@ class Agent3Selection:
                 reward += 520.0
             elif arr >= 17 * 60:
                 reward += 220.0
+            if arr < 6 * 60:
+                reward += 1600.0 * time_pref_multiplier
+            elif arr < 8 * 60:
+                reward += 850.0 * time_pref_multiplier
+
+        if leg == "outbound" and dep is not None:
+            if dep < 6 * 60:
+                reward += 1200.0 * time_pref_multiplier
+            elif dep < 8 * 60:
+                reward += 520.0 * time_pref_multiplier
 
         if leg == "inbound" and dep is not None:
             if dep < 9 * 60:
-                reward += 360.0
+                reward += 700.0 * time_pref_multiplier
             elif dep < 11 * 60:
-                reward += 180.0
+                reward += 320.0 * max(1.0, time_pref_multiplier * 0.8)
+            elif dep >= 23 * 60:
+                reward += 520.0 * time_pref_multiplier
+
+        if leg != "inbound" and dep is not None and dep >= 23 * 60:
+            reward += 900.0 * time_pref_multiplier
+
+        if leg != "outbound" and arr is not None and arr < 6 * 60:
+            reward += 780.0 * time_pref_multiplier
 
         return reward
+
+    def _attach_flight_selection_note(
+        self,
+        selected: Dict[str, Any],
+        ranked_candidates: List[Dict[str, Any]],
+        budget: float,
+    ) -> Dict[str, Any]:
+        item = dict(selected)
+        selected_rank = self._travel_class_rank(item.get("travel_class"))
+        if selected_rank <= 0 or self.flight_cabin_locked:
+            return item
+
+        higher_class_candidates = [
+            candidate for candidate in ranked_candidates
+            if self._travel_class_rank(candidate.get("travel_class")) > selected_rank
+            and self._safe_float(candidate.get("price_total"), 0.0) > 0
+        ]
+        if not higher_class_candidates:
+            return item
+
+        best_upgrade = min(
+            higher_class_candidates,
+            key=lambda candidate: self._safe_float(candidate.get("generalized_cost"), 999999.0),
+        )
+        selected_gc = self._safe_float(item.get("generalized_cost"), 999999.0)
+        upgrade_gc = self._safe_float(best_upgrade.get("generalized_cost"), 999999.0)
+        selected_price = self._safe_float(item.get("price_total"), 0.0)
+        upgrade_price = self._safe_float(best_upgrade.get("price_total"), 0.0)
+        selected_leg_type = self._normalize_text(item.get("leg_type")) or "leg"
+        selected_timing_penalty = self._flight_timing_penalty_cny(item, selected_leg_type)
+        upgrade_timing_penalty = self._flight_timing_penalty_cny(best_upgrade, selected_leg_type)
+        upgrade_issues = self._flight_schedule_issue_labels(best_upgrade, selected_leg_type)
+        upgrade_class_label = self._normalize_travel_class_token(best_upgrade.get("travel_class")).replace("_", " ") or "higher cabin"
+        budget_can_cover_upgrade = budget > 0 and upgrade_price <= budget * max(tolerance := self.flight_relaxed_budget_tolerance, 1.0)
+
+        if budget_can_cover_upgrade and (
+            upgrade_gc - selected_gc >= 800.0 or upgrade_timing_penalty - selected_timing_penalty >= 600.0
+        ):
+            issue_text = ", ".join(upgrade_issues[:2]) if upgrade_issues else "worse flight timing"
+            price_gap = max(0.0, round(upgrade_price - selected_price, 2))
+            item["selection_note"] = (
+                f"Budget could cover {upgrade_class_label}, but it was not chosen because those options had {issue_text}; "
+                f"upgrade cost difference about {price_gap:.0f} {item.get('currency') or self.currency}."
+            )
+        return item
 
     def _flight_effective_hours(self, flight: Dict[str, Any]) -> float:
         comparable_h = self._safe_float(flight.get("flight_total_comparable_hours"), 0.0)
@@ -4007,13 +4289,22 @@ class Agent3Selection:
         item["leg_type"] = leg_type
 
         direct_bonus = 1.2 if self._safe_int(item.get("stops"), 0) == 0 else 0.0
+        actual_travel_class = self._normalize_text(item.get("travel_class")).lower()
+        actual_travel_class = actual_travel_class.replace("-", "_").replace(" ", "_")
+
         first_class_bonus = 1.2 if (
             self.flight_type == "first_class"
-            and self._normalize_text(item.get("travel_class")).lower() in {"first", "first class"}
+            and actual_travel_class in {"first_class", "first"}
         ) else 0.0
+
+        business_class_bonus = 1.0 if (
+            self.flight_type == "business_class"
+            and actual_travel_class in {"business", "business_class"}
+        ) else 0.0
+
         comfort_bonus = 0.8 if (
             self.flight_pref == "comfort"
-            and self._normalize_text(item.get("travel_class")).lower() in {"business", "first", "first class"}
+            and actual_travel_class in {"business", "business_class", "first_class", "first"}
         ) else 0.0
         cheap_bonus = 0.5 if self.flight_pref == "cheap" else 0.0
 
@@ -4024,7 +4315,7 @@ class Agent3Selection:
         timing_score = self._flight_timing_score(item, leg_type)
         timing_weight = 0.55 if self.flight_pref == "cheap" or self.flight_priority == "save_money" else 1.0
 
-        score = direct_bonus + first_class_bonus + comfort_bonus + cheap_bonus + rating_like + timing_score * timing_weight
+        score = direct_bonus + first_class_bonus + business_class_bonus + comfort_bonus + cheap_bonus + rating_like + timing_score * timing_weight
         item["score"] = round(score, 4)
 
         item["why_selected"] = (
@@ -4184,6 +4475,86 @@ class Agent3Selection:
             },
         }
 
+    def _estimate_fallback_flight_duration_minutes(self, from_iata: Optional[str], to_iata: Optional[str]) -> int:
+        distance_km = self.calculate_airport_distance_km(from_iata, to_iata) or 1800.0
+        cruise_minutes = (distance_km / 780.0) * 60.0
+        total_minutes = int(round(cruise_minutes + 70.0))
+        return max(90, min(total_minutes, 14 * 60))
+
+    def _estimate_fallback_flight_total_price(self, from_iata: Optional[str], to_iata: Optional[str], travel_class: str) -> float:
+        distance_km = self.calculate_airport_distance_km(from_iata, to_iata) or 1800.0
+        per_person = 420.0 + distance_km * 0.5
+        normalized_class = self._normalize_travel_class_token(travel_class)
+        if normalized_class == "business":
+            per_person *= 2.4
+        elif normalized_class == "first_class":
+            per_person *= 4.0
+        total_price = per_person * max(1, self.num_people)
+        return round(total_price, 2)
+
+    def _parse_time_str_to_datetime(self, value: str) -> datetime:
+        parsed = datetime.strptime(value, "%H:%M")
+        return datetime(2000, 1, 1, parsed.hour, parsed.minute)
+
+    def _build_estimated_fallback_flights(self, leg: Dict[str, Any], reason: str) -> List[Dict[str, Any]]:
+        from_iata = self._normalize_text(leg.get("from_airport")).upper()
+        to_iata = self._normalize_text(leg.get("to_airport")).upper()
+        from_city = self._normalize_text(leg.get("from_city")) or from_iata or "Origin"
+        to_city = self._normalize_text(leg.get("to_city")) or to_iata or "Destination"
+        leg_type = self._normalize_text(leg.get("leg_type")) or "leg"
+        duration_minutes = self._estimate_fallback_flight_duration_minutes(from_iata, to_iata)
+
+        if leg_type == "inbound":
+            base_departures = ["14:30", "17:00"]
+        elif leg_type == "outbound":
+            base_departures = ["09:30", "12:30"]
+        else:
+            base_departures = ["10:30", "14:00"]
+
+        if self.flight_cabin_locked and self.requested_flight_cabin:
+            class_candidates = [self.requested_flight_cabin]
+        else:
+            class_candidates = ["economy"]
+            if self.flight_type in {"comfort", "business_class", "first_class"} or self.flight_pref == "comfort":
+                class_candidates.append("business")
+
+        fallback_flights: List[Dict[str, Any]] = []
+        seen_keys = set()
+        for departure_time in base_departures:
+            for travel_class in class_candidates:
+                arrival_dt = self._parse_time_str_to_datetime(departure_time) + timedelta(minutes=duration_minutes)
+                arrival_time = arrival_dt.strftime("%H:%M")
+                item = {
+                    "airline": "Estimated Flight Option",
+                    "departure_airport": from_iata or f"{from_city} Airport",
+                    "departure_airport_code": from_iata,
+                    "departure_time": departure_time,
+                    "arrival_airport": to_iata or f"{to_city} Airport",
+                    "arrival_airport_code": to_iata,
+                    "arrival_time": arrival_time,
+                    "travel_class": travel_class,
+                    "stops": 0,
+                    "total_duration": duration_minutes,
+                    "duration_minutes": duration_minutes,
+                    "price_total": self._estimate_fallback_flight_total_price(from_iata, to_iata, travel_class),
+                    "currency": self.currency,
+                    "provider": "estimated_fallback_model",
+                    "flight_type": "one_way",
+                    "leg_type": leg_type,
+                    "is_estimated_fallback": True,
+                    "selection_note": (
+                        "Live search did not return a suitable ticket after progressively relaxing preferences, "
+                        "so a daytime fallback flight was generated to keep the itinerary complete."
+                    ),
+                    "why_selected": f"estimated fallback generated because {reason}",
+                }
+                dedupe_key = (departure_time, arrival_time, travel_class)
+                if dedupe_key in seen_keys:
+                    continue
+                seen_keys.add(dedupe_key)
+                fallback_flights.append(self._score_flight(item, leg_type))
+        return fallback_flights
+
     def _format_selected_flight_output(self, flight: Dict[str, Any]) -> Dict[str, Any]:
         return {
             "airline": flight.get("airline"),
@@ -4210,6 +4581,7 @@ class Agent3Selection:
             "travel_class": flight.get("travel_class"),
             "provider": flight.get("provider") or "searchapi_google_flights",
             "why_selected": flight.get("why_selected"),
+            "selection_note": flight.get("selection_note"),
             "is_estimated_fallback": bool(flight.get("is_estimated_fallback")),
             "ground_to_departure_airport_hours": flight.get("ground_to_departure_airport_hours"),
             "ground_from_arrival_airport_hours": flight.get("ground_from_arrival_airport_hours"),
@@ -4320,8 +4692,9 @@ class Agent3Selection:
                     travel_class_override=travel_class,
                 )
                 if flights:
-                    collected = flights
-                    break
+                    collected.extend(flights)
+                    if self.flight_cabin_locked:
+                        break
 
             return collected
 
@@ -4378,6 +4751,21 @@ class Agent3Selection:
                         relaxed_all.extend(scored)
 
             combined = self._dedupe_flight_candidates(strict_all + relaxed_all)
+            if not combined:
+                fallback_flights = self._build_estimated_fallback_flights(
+                    leg,
+                    "live search returned no candidates after trying direct, any-stop, and cabin relaxation",
+                )
+                if fallback_flights:
+                    return fallback_flights, (
+                        f"live_flight_search("
+                        f"direct_pairs={','.join(tried_pairs)};"
+                        f"any_stop_pairs={','.join(relaxed_pairs)};"
+                        f"class_fallbacks={','.join(tried_classes)};"
+                        f"direct_candidates={len(strict_all)};"
+                        f"all_candidates={len(combined)}"
+                        f")|estimated_daytime_fallback"
+                    )
             compared, comparison_status = self._filter_flights_by_drive_time_comparison(combined, leg)
             return (
                 compared,
@@ -4391,6 +4779,12 @@ class Agent3Selection:
             )
 
         except Exception:
+            fallback_flights = self._build_estimated_fallback_flights(
+                leg,
+                "live search request failed and fallback estimation was used",
+            )
+            if fallback_flights:
+                return fallback_flights, "flight_search_failed|estimated_daytime_fallback"
             return [], "flight_search_failed"
 
     # =========================================================

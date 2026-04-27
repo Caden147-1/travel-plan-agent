@@ -125,18 +125,16 @@ def _default_result() -> Dict[str, Any]:
             "currency": "CNY"
         },
         "preferences": {
-            # Backward-compatible legacy scalar fields
-            "flight": None,                 # direct / cheap / comfort
-            "hotel": None,                  # budget / standard / luxury / central / clean
-            "food": None,                   # local / fine_dining / street_food / mixed
-            "attraction_style": None,       # historical / nature / shopping / entertainment / art / mixed
-
-            # New richer fields
-            "hotel_level": None,            # budget / standard / premium / luxury
-            "hotel_features": [],           # clean / central
-            "food_preferences": [],         # local / fine_dining / street_food / mixed
-            "attraction_styles": [],        # historical / nature / shopping / entertainment / art / mixed
-            "must_visit_attractions": []    # explicit named attractions, e.g. Great Wall / Louvre Museum
+            "flight": None,
+            "flight_cabin": None,
+            "hotel": None,
+            "food": None,
+            "attraction_style": None,
+            "hotel_level": None,
+            "hotel_features": [],
+            "food_preferences": [],
+            "attraction_styles": [],
+            "must_visit_attractions": []
         },
         "planning_signals": {
             # Keep old keys for downstream compatibility
@@ -220,6 +218,12 @@ preferences.flight:
 - "direct"
 - "cheap"
 - "comfort"
+- null
+
+preferences.flight_cabin:
+- "economy"
+- "business"
+- "first"
 - null
 
 preferences.hotel (legacy scalar):
@@ -320,6 +324,10 @@ FLIGHTS
 - "direct flights would be nice but not necessary" -> preferences.flight = "direct", planning_signals.flight_priority = "medium"
 - "cheap flights" -> preferences.flight = "cheap"
 - "comfortable flight" / "better flight experience" -> preferences.flight = "comfort"
+- "economy class" / "economy cabin" / "coach class" / "经济舱" -> preferences.flight_cabin = "economy"
+- "business class" / "business cabin" / "business-class" / "商务舱" -> preferences.flight_cabin = "business"
+- "first class" / "first-class" / "first cabin" / "first-class flights" / "头等舱" -> preferences.flight_cabin = "first"
+- Cabin class must be stored in preferences.flight_cabin, not in preferences.flight.
 
 HOTELS
 - "budget hotel" -> preferences.hotel = "budget", preferences.hotel_level = "budget", planning_signals.hotel_level = "low"
@@ -378,6 +386,7 @@ Output schema:
   }},
   "preferences": {{
     "flight": null,
+    "flight_cabin": null,
     "hotel": null,
     "food": null,
     "attraction_style": null,
@@ -651,6 +660,65 @@ def _extract_origin_destination_from_text(user_request: str) -> Dict[str, Any]:
     }
 
 
+def _extract_flight_cabin_from_text(user_request: Optional[str]) -> Optional[str]:
+    """
+    Deterministic fallback for cabin-class expressions.
+    This protects the pipeline when the LLM misses flight_cabin or returns a variant.
+    """
+    if not user_request:
+        return None
+
+    text = user_request.lower()
+    text = text.replace("-", " ")
+    text = re.sub(r"\s+", " ", text)
+
+    first_patterns = [
+        r"\bfirst\s+class\b",
+        r"\bfirstclass\b",
+        r"\b1st\s+class\b",
+        r"\b1stclass\b",
+        r"\bfirst\s+cabin\b",
+        r"\bfirst\s+class\s+flights?\b",
+        r"\bfirst\s+class\s+seats?\b",
+        r"头等舱",
+        r"头等",
+    ]
+    business_patterns = [
+        r"\bbusiness\s+class\b",
+        r"\bbusinessclass\b",
+        r"\bbusiness\s+cabin\b",
+        r"\bbusiness\s+class\s+flights?\b",
+        r"\bbusiness\s+class\s+seats?\b",
+        r"\bbiz\s+class\b",
+        r"商务舱",
+        r"商务",
+    ]
+    economy_patterns = [
+        r"\beconomy\s+class\b",
+        r"\beconomyclass\b",
+        r"\beconomy\s+cabin\b",
+        r"\bcoach\s+class\b",
+        r"\bcoach\b",
+        r"\bpremium\s+economy\b",
+        r"经济舱",
+        r"经济",
+    ]
+
+    for pattern in first_patterns:
+        if re.search(pattern, text):
+            return "first"
+
+    for pattern in business_patterns:
+        if re.search(pattern, text):
+            return "business"
+
+    for pattern in economy_patterns:
+        if re.search(pattern, text):
+            return "economy"
+
+    return None
+
+
 def _merge_missing_fields_from_text(result: Dict[str, Any], user_request: str) -> Dict[str, Any]:
     """
     Second-pass fallback: if Agent1 misses core route/date details, recover them from raw text.
@@ -664,6 +732,13 @@ def _merge_missing_fields_from_text(result: Dict[str, Any], user_request: str) -
 
     if not merged.get("destination") and route_fallback.get("destination"):
         merged["destination"] = route_fallback["destination"]
+
+    preferences = merged.get("preferences") or {}
+    if not preferences.get("flight_cabin"):
+        detected_cabin = _extract_flight_cabin_from_text(prepared_request)
+        if detected_cabin:
+            preferences["flight_cabin"] = detected_cabin
+            merged["preferences"] = preferences
 
     travel_dates = merged.get("travel_dates") or {}
     if not travel_dates.get("start"):
@@ -774,6 +849,7 @@ def _map_hotel_level_to_legacy_hotel(hotel_level: Optional[str], hotel_features:
 def _normalize_preferences(value: Any) -> Dict[str, Any]:
     default_preferences = {
         "flight": None,
+        "flight_cabin": None,
         "hotel": None,
         "food": None,
         "attraction_style": None,
@@ -785,6 +861,7 @@ def _normalize_preferences(value: Any) -> Dict[str, Any]:
     }
 
     allowed_flight = {"direct", "cheap", "comfort"}
+    allowed_flight_cabin = {"economy", "business", "first"}
     allowed_legacy_hotel = {"budget", "standard", "luxury", "central", "clean"}
     allowed_food = {"local", "fine_dining", "street_food", "mixed"}
     allowed_attraction = {"historical", "nature", "shopping", "entertainment", "art", "mixed"}
@@ -797,6 +874,57 @@ def _normalize_preferences(value: Any) -> Dict[str, Any]:
     raw_flight = _normalize_string(value.get("flight"))
     raw_flight = raw_flight.lower() if raw_flight else None
     default_preferences["flight"] = raw_flight if raw_flight in allowed_flight else None
+
+    raw_flight_cabin = _normalize_string(value.get("flight_cabin"))
+    raw_flight_cabin = raw_flight_cabin.lower().strip() if raw_flight_cabin else None
+    raw_flight_cabin = raw_flight_cabin.replace("-", " ") if raw_flight_cabin else None
+    raw_flight_cabin = re.sub(r"\s+", " ", raw_flight_cabin) if raw_flight_cabin else None
+
+    flight_cabin_aliases = {
+        "economy": "economy",
+        "economy class": "economy",
+        "economy cabin": "economy",
+        "coach": "economy",
+        "coach class": "economy",
+        "premium economy": "economy",
+        "premium economy class": "economy",
+        "economic class": "economy",
+        "经济舱": "economy",
+
+        "business": "business",
+        "business class": "business",
+        "business_class": "business",
+        "businessclass": "business",
+        "business cabin": "business",
+        "business class flight": "business",
+        "business class flights": "business",
+        "business class seat": "business",
+        "business class seats": "business",
+        "biz class": "business",
+        "商务舱": "business",
+        "商务": "business",
+
+        "first": "first",
+        "first class": "first",
+        "first_class": "first",
+        "firstclass": "first",
+        "first cabin": "first",
+        "first class flight": "first",
+        "first class flights": "first",
+        "first class seat": "first",
+        "first class seats": "first",
+        "1st class": "first",
+        "1stclass": "first",
+        "头等舱": "first",
+        "头等": "first",
+    }
+
+    mapped_flight_cabin = flight_cabin_aliases.get(raw_flight_cabin)
+    default_preferences["flight_cabin"] = (
+        mapped_flight_cabin
+        if mapped_flight_cabin in allowed_flight_cabin
+        else None
+    )
 
     raw_hotel_level = _normalize_string(value.get("hotel_level"))
     raw_hotel_level = raw_hotel_level.lower() if raw_hotel_level else None
@@ -1154,6 +1282,11 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
         parsed.get("preferences") or {}
     )
 
+    if not result["preferences"].get("flight_cabin"):
+        detected_cabin = _extract_flight_cabin_from_text(prepared_request)
+        if detected_cabin:
+            result["preferences"]["flight_cabin"] = detected_cabin
+
     result["planning_signals"] = _normalize_planning_signals(
         parsed.get("planning_signals") or {}
     )
@@ -1229,7 +1362,10 @@ if __name__ == "__main__":
         "I want to travel from Singapore to Seoul in 2026-08-10 to 2026-08-15 with a budget of 12000 CNY and I prefer local food.",
         "My wife and I want to travel from Shenzhen to Rome for seven days with a budget of fifteen thousand CNY.",
         "My teacher and I want to travel from Hong Kong to Tokyo from april 4 to april 9 for 5 days with a budget of 30000 CNY. We prefer direct flights, five star hotels, and better food options.",
-        "My friend and I want a clean and centrally located four star hotel, local food but one fine dining dinner, lots of history museums and art galleries, and I definitely want to visit the Great Wall."
+        "My friend and I want a clean and centrally located four star hotel, local food but one fine dining dinner, lots of history museums and art galleries, and I definitely want to visit the Great Wall.",
+        "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and first class.",
+        "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and business class.",
+        "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and economy class."
     ]
 
     print("=== LLM Backend Status ===")

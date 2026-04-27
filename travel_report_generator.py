@@ -640,6 +640,10 @@ def _render_day_cards(router_output: Dict[str, Any], currency: str) -> str:
                 cost_label = _money(event.get("cost_estimated"), currency)
 
             event_note = ""
+            if raw_event_type == "flight" and isinstance(meta, dict):
+                note = _text(meta.get("selection_note"))
+                if note:
+                    event_note = f"<small class=\"event-note\">{_esc(note)}</small>"
             if raw_event_type in {"flight_unavailable", "transfer_unavailable"} and isinstance(meta, dict):
                 note = _selection_status_note(meta.get("selection_status"))
                 if note:

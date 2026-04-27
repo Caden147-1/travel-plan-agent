@@ -94,18 +94,30 @@ def _build_flight_day_constraints(selected_all_flight_legs: List[Dict[str, Any]]
             arrival = _format_time_value(flight.get("arrival_time"))
             if arrival:
                 arrival_date = dep_date
+                overnight_arrival = False
                 if dep_minutes is not None and arr_minutes is not None and arr_minutes <= dep_minutes:
                     dep_dt = _parse_date(dep_date)
                     if dep_dt:
                         arrival_date = (dep_dt + timedelta(days=1)).strftime("%Y-%m-%d")
                         day_constraints["skip_city_schedule"] = "true"
                         day_constraints["skip_city_local_transport"] = "true"
+                        overnight_arrival = True
                 arrival_constraints = constraints.setdefault(arrival_date, {})
-                recovery_start = _add_minutes_to_time(arrival, 30) or arrival
+                recovery_buffer_minutes = 120 if overnight_arrival or _is_redeye_flight(flight) else 30
+                recovery_start = _add_minutes_to_time(arrival, recovery_buffer_minutes) or arrival
                 arrival_constraints["schedule_start"] = _max_time_value(
                     recovery_start,
                     DEFAULT_DAY_START,
                 ) or recovery_start
+                if overnight_arrival or _is_redeye_flight(flight):
+                    arrival_constraints["overnight_arrival"] = "true"
+                    if arr_minutes is not None and arr_minutes >= 12 * 60:
+                        arrival_constraints["skip_city_schedule"] = "true"
+                    elif arr_minutes is not None and arr_minutes >= 10 * 60:
+                        arrival_constraints["schedule_start"] = _max_time_value(
+                            arrival_constraints.get("schedule_start"),
+                            "15:00",
+                        ) or arrival_constraints.get("schedule_start", "")
         elif leg_type == "inbound":
             departure = _format_time_value(flight.get("departure_time"))
             if departure:
@@ -317,6 +329,16 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         _resolve_timeline_overlaps(day)
         _compress_flexible_timeline(day)
         _ensure_hotel_day_boundary_transfers(day)
+        _sanitize_transfer_timeline(day)
+        _ensure_adjacent_event_transfers(day)
+        _resolve_timeline_overlaps(day)
+        _sort_and_recompute_day(day)
+
+    _reapply_flight_event_constraints(
+        daily_plans=daily_plans,
+        selected_all_flight_legs=normalized.get("selected_all_flight_legs", []),
+    )
+    for day in daily_plans:
         _sanitize_transfer_timeline(day)
         _ensure_adjacent_event_transfers(day)
         _resolve_timeline_overlaps(day)
@@ -1281,6 +1303,36 @@ def _flight_arrival_date(dep_date: str, flight: Dict[str, Any]) -> str:
     return (dep_dt + timedelta(days=1)).strftime("%Y-%m-%d")
 
 
+def _reapply_flight_event_constraints(
+    daily_plans: List[Dict[str, Any]],
+    selected_all_flight_legs: List[Dict[str, Any]],
+) -> None:
+    if not isinstance(daily_plans, list) or not isinstance(selected_all_flight_legs, list):
+        return
+
+    by_date = {
+        _normalize_text(day.get("date")): day
+        for day in daily_plans
+        if isinstance(day, dict) and _normalize_text(day.get("date"))
+    }
+    if not by_date:
+        return
+
+    for leg in selected_all_flight_legs:
+        if not isinstance(leg, dict):
+            continue
+        flights = leg.get("selected_flights") or []
+        if not flights or not isinstance(flights[0], dict):
+            continue
+        dep_date = _normalize_text(leg.get("departure_date"))
+        day = by_date.get(dep_date)
+        if day is None and _normalize_text(leg.get("leg_type")) == "outbound":
+            day = by_date.get(_flight_arrival_date(dep_date, flights[0]))
+        if day is None:
+            continue
+        _remove_impossible_city_events(day, leg, flights[0])
+
+
 def _remove_event_type(day_plan: Dict[str, Any], event_type: str) -> None:
     events = day_plan.get("events", [])
     if not isinstance(events, list):
@@ -1823,6 +1875,7 @@ def _insert_flight_and_transfer_events(
                 "departure_time": _normalize_text(f.get("departure_time")),
                 "arrival_time": _normalize_text(f.get("arrival_time")),
                 "travel_class": _normalize_text(f.get("travel_class")).lower(),
+                "selection_note": _normalize_text(f.get("selection_note")),
                 "time_source": _normalize_text(f.get("provider")) or "selected_flight",
                 "redeye_or_night_flight": _is_redeye_flight(f),
                 "time_counting_rule": "night_flight_not_counted_in_day_hours" if _is_redeye_flight(f) else "flight_duration_plus_2h_buffer",

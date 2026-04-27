@@ -61,6 +61,7 @@ def _default_result() -> Dict[str, Any]:
         },
         "preferences": {
             "flight": None,
+            "flight_cabin": None,
             "hotel": None,
             "food": None,
             "attraction_style": None,
@@ -1474,6 +1475,12 @@ preferences.flight:
 - "comfort"
 - null
 
+preferences.flight_cabin:
+- "economy"
+- "business"
+- "first"
+- null
+
 preferences.hotel:
 - "budget"
 - "standard"
@@ -1525,6 +1532,9 @@ planning_signals.attraction_intensity:
 Interpretation examples:
 - "prefer direct flights" -> preferences.flight = "direct", planning_signals.flight_priority = "high"
 - "cheap flights" -> preferences.flight = "cheap", planning_signals.flight_priority = "low"
+- "economy class" / "economy cabin" / "coach class" -> preferences.flight_cabin = "economy"
+- "business class" / "business cabin" / "business-class" -> preferences.flight_cabin = "business"
+- "first class" / "first-class" / "first cabin" / "first-class flights" -> preferences.flight_cabin = "first"
 - "want a good hotel" / "four star hotel" / "4 star hotel" -> preferences.hotel = "luxury", planning_signals.hotel_level = "high"
 - "clean and centrally located hotel" -> preferences.hotel = "central" or "clean", planning_signals.hotel_level = "medium"
 - "budget hotel" -> preferences.hotel = "budget", planning_signals.hotel_level = "low"
@@ -1555,6 +1565,7 @@ Output schema:
   }},
   "preferences": {{
     "flight": null,
+    "flight_cabin": null,
     "hotel": null,
     "food": null,
     "attraction_style": null
@@ -1577,8 +1588,59 @@ User request:
 # =========================================================
 
 
+def _normalize_flight_cabin_preference(value: Any) -> str:
+    """Normalize cabin-class preference into a stable Agent2 token."""
+    text = (_normalize_text(value) or "").lower().strip()
+    if not text:
+        return ""
+
+    text = text.replace("-", " ").replace("_", " ")
+    text = re.sub(r"\s+", " ", text).strip()
+
+    aliases = {
+        "economy": "economy",
+        "economy class": "economy",
+        "economy cabin": "economy",
+        "economyclass": "economy",
+        "coach": "economy",
+        "coach class": "economy",
+        "premium economy": "economy",
+        "premium economy class": "economy",
+        "经济舱": "economy",
+        "经济": "economy",
+
+        "business": "business",
+        "business class": "business",
+        "business cabin": "business",
+        "businessclass": "business",
+        "business class flight": "business",
+        "business class flights": "business",
+        "business class seat": "business",
+        "business class seats": "business",
+        "biz class": "business",
+        "商务舱": "business",
+        "商务": "business",
+
+        "first": "first",
+        "first class": "first",
+        "first cabin": "first",
+        "firstclass": "first",
+        "first class flight": "first",
+        "first class flights": "first",
+        "first class seat": "first",
+        "first class seats": "first",
+        "1st class": "first",
+        "1stclass": "first",
+        "头等舱": "first",
+        "头等": "first",
+    }
+    return aliases.get(text, "")
+
+
 def _get_preferences(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
     preferences = parsed_request.get("preferences", {}) or {}
+
+    flight_cabin = _normalize_flight_cabin_preference(preferences.get("flight_cabin"))
 
     hotel_features = preferences.get("hotel_features") or []
     if isinstance(hotel_features, str):
@@ -1609,6 +1671,7 @@ def _get_preferences(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "flight": (_normalize_text(preferences.get("flight")) or "").lower(),
+        "flight_cabin": flight_cabin,
         "hotel": (_normalize_text(preferences.get("hotel")) or "").lower(),
         "food": (_normalize_text(preferences.get("food")) or "").lower(),
         "attraction_style": (_normalize_text(preferences.get("attraction_style")) or "").lower(),
@@ -1848,6 +1911,7 @@ def _normalize_preference_levels(parsed_request: Dict[str, Any]) -> Dict[str, st
     signals = _get_planning_signals(parsed_request)
 
     flight_pref = prefs["flight"]
+    flight_cabin = prefs.get("flight_cabin", "")
     hotel_pref = prefs["hotel"]
     food_pref = prefs["food"]
     attraction_pref = prefs["attraction_style"]
@@ -1939,7 +2003,15 @@ def _normalize_preference_levels(parsed_request: Dict[str, Any]) -> Dict[str, st
         else:
             attraction_intensity = "light"
 
-    if flight_priority in flight_signal_map:
+    explicit_flight_cabin = flight_cabin if flight_cabin in {"first", "business", "economy"} else ""
+
+    if explicit_flight_cabin == "first":
+        flight_type = "first_class"
+    elif explicit_flight_cabin == "business":
+        flight_type = "business_class"
+    elif explicit_flight_cabin == "economy":
+        flight_type = "economy_class"
+    elif flight_priority in flight_signal_map:
         flight_type = flight_signal_map[flight_priority]
     else:
         if flight_pref == "direct" or _has_direct_flight_preference(flight_pref):
@@ -1962,7 +2034,9 @@ def _normalize_preference_levels(parsed_request: Dict[str, Any]) -> Dict[str, st
         "wants_fine_dining": wants_fine_dining,
         "attraction_intensity": attraction_intensity,
         "attraction_focus": primary_attraction_style or "mixed",
-        "flight_type": flight_type
+        "flight_type": flight_type,
+        "requested_flight_cabin": explicit_flight_cabin,
+        "flight_cabin_locked": "yes" if explicit_flight_cabin else "no"
     }
 
 
@@ -1981,7 +2055,11 @@ def _apply_budget_feasibility_guard(
 
     transport_min = int(weighted_cost_profile.get("transport_base_per_person", 0) * max(1, num_people))
     if guarded.get("flight_type") == "first_class":
-        transport_min = int(round(transport_min * 1.25))
+        transport_min = int(round(transport_min * 1.60))
+    elif guarded.get("flight_type") == "business_class":
+        transport_min = int(round(transport_min * 1.35))
+    elif guarded.get("flight_type") == "economy_class":
+        transport_min = int(round(transport_min * 1.00))
     elif guarded.get("flight_type") == "direct":
         transport_min = int(round(transport_min * 1.08))
     elif guarded.get("flight_type") == "comfort":
@@ -2059,6 +2137,10 @@ def _merge_cost_level(
 
     if normalized_prefs["flight_type"] == "first_class":
         delta += 2
+    elif normalized_prefs["flight_type"] == "business_class":
+        delta += 2
+    elif normalized_prefs["flight_type"] == "economy_class":
+        delta += 0
     elif normalized_prefs["flight_type"] == "direct":
         delta += 1
     elif normalized_prefs["flight_type"] == "comfort":
@@ -2174,11 +2256,19 @@ def _build_baseline_ratio(
     }
 
     if normalized_prefs["flight_type"] == "first_class":
-        ratio["transport"] += 0.08
-        ratio["buffer"] -= 0.02
+        ratio["transport"] += 0.12
+        ratio["buffer"] -= 0.04
+        ratio["hotel"] -= 0.04
         ratio["food"] -= 0.02
         ratio["attractions"] -= 0.02
+    elif normalized_prefs["flight_type"] == "business_class":
+        ratio["transport"] += 0.08
+        ratio["buffer"] -= 0.03
         ratio["hotel"] -= 0.02
+        ratio["food"] -= 0.02
+        ratio["attractions"] -= 0.01
+    elif normalized_prefs["flight_type"] == "economy_class":
+        ratio["transport"] += 0.00
     elif normalized_prefs["flight_type"] == "direct":
         ratio["transport"] += 0.04
         ratio["buffer"] -= 0.01
@@ -2307,7 +2397,11 @@ def _estimate_transport_cost(
     base = _safe_float(cost_profile["transport_base_per_person"]) * num_people
 
     if normalized_prefs["flight_type"] == "first_class":
+        base *= 1.60
+    elif normalized_prefs["flight_type"] == "business_class":
         base *= 1.35
+    elif normalized_prefs["flight_type"] == "economy_class":
+        base *= 1.00
     elif normalized_prefs["flight_type"] == "direct":
         base *= 1.15
     elif normalized_prefs["flight_type"] == "comfort":
@@ -2446,8 +2540,10 @@ def _apply_budget_pressure_downgrades(
     if estimated_total() <= total_budget:
         return guarded, adjustments
 
+    flight_cabin_locked = guarded.get("flight_cabin_locked") == "yes"
+
     downgrade_steps = [
-        ("flight_type", {"first_class": "comfort", "direct": "standard", "comfort": "standard", "standard": "budget"}),
+        ("flight_type", {"first_class": "business_class", "business_class": "economy_class", "economy_class": "budget", "direct": "standard", "comfort": "standard", "standard": "budget"}),
         ("hotel_level_detail", {"luxury": "standard", "premium": "standard"}),
         ("hotel_level", {"premium": "standard", "standard": "budget"}),
         ("food_level", {"premium": "standard", "standard": "budget"}),
@@ -2468,6 +2564,9 @@ def _apply_budget_pressure_downgrades(
     }
 
     for key, mapping in downgrade_steps:
+        if key == "flight_type" and flight_cabin_locked:
+            continue
+
         current = guarded.get(key)
         replacement = mapping.get(current)
         if not replacement or replacement == current:
@@ -2480,6 +2579,11 @@ def _apply_budget_pressure_downgrades(
 
         if estimated_total() <= total_budget:
             break
+
+    if flight_cabin_locked and estimated_total() > total_budget:
+        adjustments.append(
+            "Explicit cabin-class preference was preserved as a hard requirement; other categories may be compressed or the plan may exceed the original budget instead of silently downgrading the cabin."
+        )
 
     if adjustments:
         guarded["budget_pressure_mode"] = "yes"
@@ -2521,7 +2625,11 @@ def _build_compression_priority(normalized_prefs: Dict[str, str]) -> Dict[str, f
         priority["food"] = min(priority["food"], 0.28)
 
     if normalized_prefs["flight_type"] == "first_class":
-        priority["transport"] = 0.12
+        priority["transport"] = 0.10
+    elif normalized_prefs["flight_type"] == "business_class":
+        priority["transport"] = 0.14
+    elif normalized_prefs["flight_type"] == "economy_class":
+        priority["transport"] = 0.34
     elif normalized_prefs["flight_type"] == "direct":
         priority["transport"] = 0.18
     elif normalized_prefs["flight_type"] == "comfort":
@@ -2556,7 +2664,7 @@ def _fit_estimated_cost_to_budget(
         food_keep = max(food_keep, 0.78)
 
     min_keep_ratio = {
-        "transport": 0.82 if normalized_prefs["flight_type"] == "first_class" else (0.75 if normalized_prefs["flight_type"] in {"direct", "comfort"} else 0.65),
+        "transport": 0.86 if normalized_prefs["flight_type"] == "first_class" else (0.80 if normalized_prefs["flight_type"] == "business_class" else (0.75 if normalized_prefs["flight_type"] in {"direct", "comfort"} else 0.65)),
         "hotel": hotel_keep,
         "food": food_keep,
         "attractions": 0.80 if normalized_prefs["attraction_intensity"] == "heavy" else 0.50,
@@ -2611,16 +2719,25 @@ def _next_core_upgrade_candidates(normalized_prefs: Dict[str, str]) -> List[Tupl
     candidates: List[Tuple[str, Dict[str, str], str]] = []
 
     flight_type = current.get("flight_type", "standard")
-    next_flight = {
-        "budget": "standard",
-        "standard": "comfort",
-        "comfort": "first_class",
-        "direct": "first_class",
-    }.get(flight_type)
-    if next_flight:
-        upgraded = dict(current)
-        upgraded["flight_type"] = next_flight
-        candidates.append(("flight", upgraded, f"Upgraded flight execution from {flight_type} to {next_flight}"))
+
+    # If the user explicitly requested a cabin class, do not auto-upgrade it.
+    # Example: business class must stay business_class, economy class must stay economy_class.
+    flight_cabin_locked = str(current.get("flight_cabin_locked", "")).lower() == "yes"
+
+    if not flight_cabin_locked:
+        next_flight = {
+            "budget": "economy_class",
+            "economy_class": "business_class",
+            "standard": "business_class",
+            "comfort": "business_class",
+            "business_class": "first_class",
+            "direct": "first_class",
+        }.get(flight_type)
+
+        if next_flight:
+            upgraded = dict(current)
+            upgraded["flight_type"] = next_flight
+            candidates.append(("flight", upgraded, f"Upgraded flight execution from {flight_type} to {next_flight}"))
 
     hotel_detail = current.get("hotel_level_detail", current.get("hotel_level", "standard"))
     if hotel_detail == "budget":
@@ -2850,10 +2967,17 @@ def _split_under_budget_plan(
         upgrade_ratio["food"] += 0.01
 
     if effective_prefs["flight_type"] == "first_class":
-        upgrade_ratio["transport"] += 0.10
+        upgrade_ratio["transport"] += 0.12
         upgrade_ratio["buffer"] -= 0.04
         upgrade_ratio["hotel"] -= 0.03
         upgrade_ratio["food"] -= 0.02
+    elif effective_prefs["flight_type"] == "business_class":
+        upgrade_ratio["transport"] += 0.08
+        upgrade_ratio["buffer"] -= 0.03
+        upgrade_ratio["hotel"] -= 0.02
+        upgrade_ratio["food"] -= 0.01
+    elif effective_prefs["flight_type"] == "economy_class":
+        upgrade_ratio["transport"] += 0.00
     elif effective_prefs["flight_type"] == "direct":
         upgrade_ratio["transport"] += 0.06
         upgrade_ratio["buffer"] -= 0.03
@@ -3249,6 +3373,22 @@ def travel_budget_agent(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
                 "magnitude": "low",
                 "reason": "Local food tends to keep food allocation realistic rather than aggressively upscale."
             })
+        if normalized_prefs.get("flight_type") == "first_class":
+            richer_preference_impact.append({
+                "preference": "preferences.flight_cabin",
+                "affected_category": "transport",
+                "direction": "increase",
+                "magnitude": "high",
+                "reason": "First-class cabin preference substantially raises the transport allocation."
+            })
+        elif normalized_prefs.get("flight_type") == "business_class":
+            richer_preference_impact.append({
+                "preference": "preferences.flight_cabin",
+                "affected_category": "transport",
+                "direction": "increase",
+                "magnitude": "medium_high",
+                "reason": "Business-class cabin preference raises the transport allocation."
+            })
         llm_adjustments = llm_adjustments + feasibility_adjustments + budget_pressure_adjustments
         result["allocation_basis"]["destination_profile"] = destination_profile
         result["allocation_basis"]["destination_profile_tier"] = destination_profile_tier
@@ -3302,6 +3442,12 @@ def travel_budget_agent(parsed_request: Dict[str, Any]) -> Dict[str, Any]:
             assumptions.append("Agent2 incorporated hotel feature preferences such as central location / cleanliness into hotel budget interpretation.")
         if normalized_prefs.get("wants_fine_dining") == "yes":
             assumptions.append("Agent2 incorporated fine-dining preference into food budget interpretation.")
+        if normalized_prefs.get("flight_type") == "first_class":
+            assumptions.append("Agent2 detected a first-class cabin preference and increased transport budget priority accordingly.")
+        elif normalized_prefs.get("flight_type") == "business_class":
+            assumptions.append("Agent2 detected a business-class cabin preference and increased transport budget priority accordingly.")
+        elif normalized_prefs.get("flight_type") == "economy_class":
+            assumptions.append("Agent2 detected an economy-class cabin preference and kept transport allocation at the normal economy level.")
         result["assumptions"] = assumptions
         result["meta"]["llm_call_success"] = True
         result["meta"]["raw_response_preview"] = raw_text[:500]
@@ -3336,6 +3482,7 @@ if __name__ == "__main__":
         },
         "preferences": {
             "flight": "direct flights",
+            "flight_cabin": None,
             "hotel": "five star hotels",
             "food": "better food options",
             "attraction_style": None
