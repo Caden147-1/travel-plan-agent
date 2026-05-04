@@ -1,0 +1,250 @@
+{
+  "stage": "success",
+  "user_request": "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and first class.",
+  "prepared_request": "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and first class.",
+  "backend_status": {
+    "provider": "dashscope-compatible",
+    "configured": true,
+    "model": "qwen3.6-plus",
+    "base_url": "https://token-plan.cn-beijing.maas.aliyuncs.com/compatible-mode/v1",
+    "api_key_present": true
+  },
+  "prompt_preview": "You are a travel requirement extraction agent.\n\nYour task is to extract structured travel requirements from the user's request\nand return ONLY one valid JSON object.\n\nReference date for all relative date expressions:\n- today = 2026-05-02\n- tomorrow = 2026-05-03\n\nStrict rules:\n1. Return JSON only.\n2. Do not use markdown.\n3. Do not wrap the output in triple backticks.\n4. If a field is missing, use null for scalar fields and [] for list fields.\n5. \"destination\" must always be a JSON array.\n6. If only one destination is found, still return it as an array.\n7. If the user mentions a country but not a city, put the country in \"country\" and keep \"destination\" as [].\n8. \"budget.total\" must be a number if possible.\n9. Preserve the user's budget currency. For example, \"2000dollar\", \"2000 dollars\", \"$2000\", and \"2000 USD\" must use \"USD\", not \"CNY\".\n10. \"num_people\" must be an integer if possible.\n11. \"duration_days\" must be an integer if possible.\n12. Only fill \"travel_dates.start\" and \"travel_dates.end\" when the date is explicit enough.\n13. If the user gives month/day expressions without a year, resolve them to the current calendar year by default using today = 2026-05-02.\n14. If a missing year must be resolved, do not roll the date into next year just because the month/day has already passed.\n15. If exact dates still cannot be safely determined, set \"start\" and \"end\" to null and keep the original phrase in \"travel_dates.text\".\n16. Do not invent any information not explicitly mentioned ",
+  "prompt_chars": 8947,
+  "raw_response": "{\n  \"origin\": \"Guangzhou\",\n  \"destination\": [\n    \"Paris\"\n  ],\n  \"country\": null,\n  \"num_people\": null,\n  \"travel_dates\": {\n    \"start\": \"2026-06-19\",\n    \"end\": \"2026-06-23\",\n    \"text\": null\n  },\n  \"duration_days\": 5,\n  \"budget\": {\n    \"total\": 200000,\n    \"currency\": \"CNY\"\n  },\n  \"preferences\": {\n    \"flight\": \"direct\",\n    \"flight_cabin\": \"first\",\n    \"hotel\": null,\n    \"food\": null,\n    \"attraction_style\": null,\n    \"hotel_level\": null,\n    \"hotel_features\": [],\n    \"food_preferences\": [],\n    \"attraction_styles\": [],\n    \"must_visit_attractions\": []\n  },\n  \"planning_signals\": {\n    \"flight_priority\": \"high\",\n    \"hotel_level\": null,\n    \"food_priority\": null,\n    \"attraction_intensity\": null,\n    \"hotel_priority\": null\n  }\n}",
+  "parsed_json": {
+    "origin": "Guangzhou",
+    "destination": [
+      "Paris"
+    ],
+    "country": null,
+    "num_people": null,
+    "travel_dates": {
+      "start": "2026-06-19",
+      "end": "2026-06-23",
+      "text": null
+    },
+    "duration_days": 5,
+    "budget": {
+      "total": 200000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "direct",
+      "flight_cabin": "first",
+      "hotel": null,
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": "high",
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": null
+    }
+  },
+  "normalized": {
+    "origin": "Guangzhou",
+    "destination": [
+      "Paris"
+    ],
+    "country": null,
+    "num_people": 1,
+    "travel_dates": {
+      "start": "2026-06-19",
+      "end": "2026-06-23",
+      "text": null
+    },
+    "duration_days": 5,
+    "budget": {
+      "total": 200000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "direct",
+      "flight_cabin": "first",
+      "hotel": null,
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": "high",
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": null
+    },
+    "city_plan": {
+      "mode": "unknown",
+      "cities": []
+    },
+    "missing_fields": {
+      "critical": [],
+      "optional": [
+        "preferences.hotel_or_hotel_level",
+        "preferences.food",
+        "preferences.attraction_style"
+      ]
+    },
+    "is_ready_for_planning": true,
+    "parse_status": "success",
+    "meta": {
+      "llm_called": false,
+      "llm_call_success": false,
+      "raw_response_preview": null,
+      "error": null
+    },
+    "user_request": "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and first class."
+  },
+  "enriched": {
+    "origin": "Guangzhou",
+    "destination": [
+      "Paris"
+    ],
+    "country": null,
+    "num_people": 1,
+    "travel_dates": {
+      "start": "2026-06-19",
+      "end": "2026-06-23",
+      "text": null
+    },
+    "duration_days": 5,
+    "budget": {
+      "total": 200000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "direct",
+      "flight_cabin": "first",
+      "hotel": null,
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": "high",
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": null
+    },
+    "city_plan": {
+      "mode": "user_specified",
+      "cities": [
+        {
+          "city": "Paris",
+          "days": 5,
+          "source": "user"
+        }
+      ]
+    },
+    "missing_fields": {
+      "critical": [],
+      "optional": [
+        "preferences.hotel_or_hotel_level",
+        "preferences.food",
+        "preferences.attraction_style"
+      ]
+    },
+    "is_ready_for_planning": true,
+    "parse_status": "success",
+    "meta": {
+      "llm_called": true,
+      "llm_call_success": true,
+      "raw_response_preview": "{\n  \"origin\": \"Guangzhou\",\n  \"destination\": [\n    \"Paris\"\n  ],\n  \"country\": null,\n  \"num_people\": null,\n  \"travel_dates\": {\n    \"start\": \"2026-06-19\",\n    \"end\": \"2026-06-23\",\n    \"text\": null\n  },\n  \"duration_days\": 5,\n  \"budget\": {\n    \"total\": 200000,\n    \"currency\": \"CNY\"\n  },\n  \"preferences\": {\n    \"flight\": \"direct\",\n    \"flight_cabin\": \"first\",\n    \"hotel\": null,\n    \"food\": null,\n    \"attraction_style\": null,\n    \"hotel_level\": null,\n    \"hotel_features\": [],\n    \"food_preferences\": [],\n",
+      "error": null
+    },
+    "user_request": "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and first class.",
+    "primary_destination": "paris"
+  },
+  "final_result": {
+    "origin": "Guangzhou",
+    "destination": [
+      "Paris"
+    ],
+    "country": null,
+    "num_people": 1,
+    "travel_dates": {
+      "start": "2026-06-19",
+      "end": "2026-06-23",
+      "text": null
+    },
+    "duration_days": 5,
+    "budget": {
+      "total": 200000,
+      "currency": "CNY"
+    },
+    "preferences": {
+      "flight": "direct",
+      "flight_cabin": "first",
+      "hotel": null,
+      "food": null,
+      "attraction_style": null,
+      "hotel_level": null,
+      "hotel_features": [],
+      "food_preferences": [],
+      "attraction_styles": [],
+      "must_visit_attractions": []
+    },
+    "planning_signals": {
+      "flight_priority": "high",
+      "hotel_level": null,
+      "food_priority": null,
+      "attraction_intensity": null,
+      "hotel_priority": null
+    },
+    "city_plan": {
+      "mode": "user_specified",
+      "cities": [
+        {
+          "city": "Paris",
+          "days": 5,
+          "source": "user"
+        }
+      ]
+    },
+    "missing_fields": {
+      "critical": [],
+      "optional": [
+        "preferences.hotel_or_hotel_level",
+        "preferences.food",
+        "preferences.attraction_style"
+      ]
+    },
+    "is_ready_for_planning": true,
+    "parse_status": "success",
+    "meta": {
+      "llm_called": true,
+      "llm_call_success": true,
+      "raw_response_preview": "{\n  \"origin\": \"Guangzhou\",\n  \"destination\": [\n    \"Paris\"\n  ],\n  \"country\": null,\n  \"num_people\": null,\n  \"travel_dates\": {\n    \"start\": \"2026-06-19\",\n    \"end\": \"2026-06-23\",\n    \"text\": null\n  },\n  \"duration_days\": 5,\n  \"budget\": {\n    \"total\": 200000,\n    \"currency\": \"CNY\"\n  },\n  \"preferences\": {\n    \"flight\": \"direct\",\n    \"flight_cabin\": \"first\",\n    \"hotel\": null,\n    \"food\": null,\n    \"attraction_style\": null,\n    \"hotel_level\": null,\n    \"hotel_features\": [],\n    \"food_preferences\": [],\n",
+      "error": null
+    },
+    "user_request": "I want to travel from Guangzhou to Paris from 2026-06-19 to 2026-06-23 with a budget of 200000 CNY. I prefer direct flights and first class.",
+    "primary_destination": "paris"
+  },
+  "timings": {
+    "build_prompt_seconds": 0.0,
+    "llm_seconds": 7.18,
+    "extract_json_seconds": 0.0001,
+    "normalize_seconds": 0.0021,
+    "city_planning_seconds": 0.0031,
+    "total_seconds": 7.18
+  },
+  "error": null,
+  "traceback": null
+}

@@ -1,0 +1,410 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Shanghai to Tokyo, Kyoto, Osaka, Osaka. I&#x27;m not very satisfied. I want to spend more money on food</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Shanghai -> Tokyo, Kyoto, Osaka, Osaka. I&#x27;m not very satisfied. I want to spend more money on food</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-06-08 - 2026-06-14</b></div>
+          <div class="request-item"><span>Travelers</span><b>1</b></div>
+          <div class="request-item"><span>Budget</span><b>80000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>Not specified</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-06-08 - 2026-06-14</strong></div>
+        <div><span>Travelers</span><strong>1</strong></div>
+        <div><span>Budget</span><strong>80000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>55802.68 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>13106 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>28900 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>12916.68 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>880 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>55802.68 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-06-08 | Tokyo</h2></div><strong>8137.50 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Blossom Hibiya</strong><span>3952.50 CNY</span></div><ul class="event-list"><li><span class="time">13:35 - 17:45</span><span class="event-name">Flight Shanghai -&gt; Tokyo</span><span class="event-type">Flight (Economy)</span><span class="cost">3085 CNY</span></li><li><span class="time">18:15 - 18:33</span><span class="event-name">Transfer Haneda Airport -&gt; The Blossom Hibiya for check-in</span><span class="event-type">Transfer</span><span class="cost">180 CNY</span></li><li><span class="time">18:33 - 18:48</span><span class="event-name">Check-in The Blossom Hibiya</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">18:48 - 18:56</span><span class="event-name">Transfer The Blossom Hibiya -&gt; Momo Paradise Shinjuku Higashi-guchi</span><span class="event-type">Transfer</span><span class="cost">80 CNY</span></li><li><span class="time">18:56 - 19:56</span><span class="event-name">Momo Paradise Shinjuku Higashi-guchi</span><span class="event-type">Meal</span><span class="cost">690 CNY</span></li><li><span class="time">19:56 - 20:11</span><span class="event-name">Return to The Blossom Hibiya</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-06-09 | Tokyo</h2></div><strong>6682.51 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Blossom Hibiya</strong><span>3952.50 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The Blossom Hibiya</span><span class="event-type">Meal</span><span class="cost">766.67 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at The Blossom Hibiya -&gt; Riverside Photo Walk in Tokyo (2026-06-09)</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Riverside Photo Walk in Tokyo (2026-06-09)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:15 - 12:25</span><span class="event-name">Local area walk near Riverside Photo Walk in Tokyo (2026-06-09) before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:30 - 13:30</span><span class="event-name">Hotel lunch restaurant at The Blossom Hibiya</span><span class="event-type">Meal</span><span class="cost">766.67 CNY</span></li><li><span class="time">13:30 - 15:05</span><span class="event-name">Local area walk near Hotel lunch restaurant at The Blossom Hibiya before Market And Cafe Lane in Tokyo (2026-06-09)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:10 - 16:40</span><span class="event-name">Market And Cafe Lane in Tokyo (2026-06-09)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:40 - 16:45</span><span class="event-name">Transfer Market And Cafe Lane in Tokyo (2026-06-09) -&gt; Museum District Walk in Tokyo (2026-06-09)</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">16:45 - 18:15</span><span class="event-name">Museum District Walk in Tokyo (2026-06-09)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:15 - 18:20</span><span class="event-name">Transfer Museum District Walk in Tokyo (2026-06-09) -&gt; Hotel dinner restaurant at The Blossom Hibiya</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">18:20 - 19:20</span><span class="event-name">Hotel dinner restaurant at The Blossom Hibiya</span><span class="event-type">Meal</span><span class="cost">766.67 CNY</span></li><li><span class="time">19:20 - 19:25</span><span class="event-name">Transfer Hotel dinner restaurant at The Blossom Hibiya -&gt; Shibuya Sky</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">19:25 - 21:00</span><span class="event-name">Shibuya Sky</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to The Blossom Hibiya</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-06-10 | Kyoto</h2></div><strong>7998 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Higashiyama Shikikaboku</strong><span>3485 CNY</span></div><ul class="event-list"><li><span class="time">08:15 - 08:30</span><span class="event-name">Check-out The Blossom Hibiya</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">08:30 - 09:00</span><span class="event-name">Transfer The Blossom Hibiya -&gt; Haneda Airport</span><span class="event-type">Transfer</span><span class="cost">300 CNY</span></li><li><span class="time">10:30 - 11:35</span><span class="event-name">Flight Tokyo -&gt; Kyoto</span><span class="event-type">Flight (First)</span><span class="cost">2193 CNY</span></li><li><span class="time">11:35 - 12:00</span><span class="event-name">Transfer Osaka Itami Airport (nearby airport for Kyoto) -&gt; Kyoto Tonkatsu Katsuda Sanjo Kawaramachi</span><span class="event-type">Transfer</span><span class="cost">250 CNY</span></li><li><span class="time">12:00 - 12:45</span><span class="event-name">Kyoto Tonkatsu Katsuda Sanjo Kawaramachi</span><span class="event-type">Meal</span><span class="cost">555 CNY</span></li><li><span class="time">12:45 - 12:54</span><span class="event-name">Transfer Kyoto Tonkatsu Katsuda Sanjo Kawaramachi -&gt; SAMURAI NINJA MUSEUM Kyoto</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:54 - 14:24</span><span class="event-name">SAMURAI NINJA MUSEUM Kyoto</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">13:44 - 13:59</span><span class="event-name">Check-in Higashiyama Shikikaboku</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">13:59 - 14:12</span><span class="event-name">Transfer Higashiyama Shikikaboku -&gt; Fushimi Inari Taisha</span><span class="event-type">Transfer</span><span class="cost">130 CNY</span></li><li><span class="time">14:37 - 16:07</span><span class="event-name">Fushimi Inari Taisha</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">16:07 - 18:09</span><span class="event-name">Local area walk near Fushimi Inari Taisha before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:09 - 18:22</span><span class="event-name">Transfer Local area walk near Fushimi Inari Taisha before dinner -&gt; Wagyu Sukiyaki Kyoto Panga | Wagyu Halal restaurant</span><span class="event-type">Transfer</span><span class="cost">130 CNY</span></li><li><span class="time">18:22 - 19:22</span><span class="event-name">Wagyu Sukiyaki Kyoto Panga | Wagyu Halal restaurant</span><span class="event-type">Meal</span><span class="cost">555 CNY</span></li><li><span class="time">19:22 - 19:37</span><span class="event-name">Return to Higashiyama Shikikaboku</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-06-11 | Kyoto</h2></div><strong>5711.67 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Higashiyama Shikikaboku</strong><span>3485 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Higashiyama Shikikaboku</span><span class="event-type">Meal</span><span class="cost">616.67 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at Higashiyama Shikikaboku -&gt; Kiyomizu-dera</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Kiyomizu-dera</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">10:15 - 11:54</span><span class="event-name">Local area walk near Kiyomizu-dera before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:54 - 12:00</span><span class="event-name">Transfer Local area walk near Kiyomizu-dera before lunch -&gt; Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch</span><span class="event-type">Transfer</span><span class="cost">60 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch</span><span class="event-type">Meal</span><span class="cost">555 CNY</span></li><li><span class="time">13:00 - 16:08</span><span class="event-name">Local area walk near Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch before Museum District Walk in Kyoto (2026-06-11)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:08 - 16:13</span><span class="event-name">Transfer Local area walk near Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch before Museum District Walk in Kyoto (2026-06-11) -&gt; Museum District Walk in Kyoto (2026-06-11)</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">16:13 - 17:43</span><span class="event-name">Museum District Walk in Kyoto (2026-06-11)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:43 - 17:48</span><span class="event-name">Transfer Museum District Walk in Kyoto (2026-06-11) -&gt; Market And Cafe Lane in Kyoto (2026-06-11)</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">17:48 - 19:18</span><span class="event-name">Market And Cafe Lane in Kyoto (2026-06-11)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">19:18 - 19:24</span><span class="event-name">Transfer Market And Cafe Lane in Kyoto (2026-06-11) -&gt; Kyoto Tonkatsu Katsuda Shijokarasuma</span><span class="event-type">Transfer</span><span class="cost">60 CNY</span></li><li><span class="time">19:24 - 20:24</span><span class="event-name">Kyoto Tonkatsu Katsuda Shijokarasuma</span><span class="event-type">Meal</span><span class="cost">555 CNY</span></li><li><span class="time">20:24 - 20:39</span><span class="event-name">Return to Higashiyama Shikikaboku</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-06-12 | Osaka</h2></div><strong>10400 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Conrad Osaka</strong><span>6630 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:15</span><span class="event-name">Check-out Higashiyama Shikikaboku</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">08:15 - 08:58</span><span class="event-name">Drive Kyoto -&gt; Osaka</span><span class="event-type">Drive</span><span class="cost">500 CNY</span></li><li><span class="time">08:58 - 09:13</span><span class="event-name">Transfer Drive Kyoto -&gt; Osaka -&gt; Osaka Castle</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">09:13 - 10:43</span><span class="event-name">Osaka Castle</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">09:13 - 09:28</span><span class="event-name">Check-in Conrad Osaka</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">10:43 - 16:02</span><span class="event-name">Local area walk near Conrad Osaka before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:02 - 16:07</span><span class="event-name">Transfer Local area walk near Conrad Osaka before lunch -&gt; Halal Wagyu&amp;Vegan Ramen Gyumon Osaka Dotonbori</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">16:07 - 17:07</span><span class="event-name">Halal Wagyu&amp;Vegan Ramen Gyumon Osaka Dotonbori</span><span class="event-type">Meal</span><span class="cost">630 CNY</span></li><li><span class="time">17:07 - 19:27</span><span class="event-name">Local area walk near Halal Wagyu&amp;Vegan Ramen Gyumon Osaka Dotonbori before Dotonbori</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">19:27 - 19:32</span><span class="event-name">Transfer Local area walk near Halal Wagyu&amp;Vegan Ramen Gyumon Osaka Dotonbori before Dotonbori -&gt; Dotonbori</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">19:32 - 21:02</span><span class="event-name">Dotonbori</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">21:02 - 21:11</span><span class="event-name">Transfer Dotonbori -&gt; Hotel breakfast cafe at Conrad Osaka</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">21:11 - 21:51</span><span class="event-name">Hotel breakfast cafe at Conrad Osaka</span><span class="event-type">Meal</span><span class="cost">700 CNY</span></li><li><span class="time">21:51 - 21:56</span><span class="event-name">Transfer Hotel breakfast cafe at Conrad Osaka -&gt; Shopping Street Walk in Osaka (2026-06-12)</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">21:56 - 23:26</span><span class="event-name">Shopping Street Walk in Osaka (2026-06-12)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">23:26 - 23:31</span><span class="event-name">Transfer Shopping Street Walk in Osaka (2026-06-12) -&gt; Umeda Sky Building</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">23:26 - 24:35</span><span class="event-name">Umeda Sky Building</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">23:31 - 24:31</span><span class="event-name">Halal Wagyu&amp;Vegan Ramen Gyumon Osaka Dotonbori</span><span class="event-type">Meal</span><span class="cost">630 CNY</span></li><li><span class="time">24:05 - 25:05</span><span class="event-name">Kobe Beef WANOMIYA Dotonbori Main Store</span><span class="event-type">Meal</span><span class="cost">630 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-06-13 | Osaka. I&#x27;m not very satisfied. I want to spend more money on food</h2></div><strong>10515 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Royal Park Hotel Iconic Osaka-Midosuji</strong><span>7395 CNY</span></div><ul class="event-list"><li><span class="time">08:40 - 08:41</span><span class="event-name">Transfer Hotel breakfast cafe at The Royal Park Hotel Iconic Osaka-Midosuji -&gt; The Royal Park Hotel Iconic Osaka-Midosuji for check-in</span><span class="event-type">Transfer</span><span class="cost">10 CNY</span></li><li><span class="time">08:41 - 08:56</span><span class="event-name">Check-in The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">08:56 - 09:36</span><span class="event-name">Hotel breakfast cafe at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Meal</span><span class="cost">750 CNY</span></li><li><span class="time">09:36 - 09:41</span><span class="event-name">Transfer Hotel breakfast cafe at The Royal Park Hotel Iconic Osaka-Midosuji -&gt; Dotonbori</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">09:41 - 11:11</span><span class="event-name">Dotonbori</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">11:11 - 11:20</span><span class="event-name">Transfer Dotonbori -&gt; Conrad Osaka</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">11:45 - 12:00</span><span class="event-name">Check-out Conrad Osaka</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">12:00 - 12:09</span><span class="event-name">Transfer Conrad Osaka -&gt; Hotel lunch restaurant at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:09 - 13:09</span><span class="event-name">Hotel lunch restaurant at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Meal</span><span class="cost">750 CNY</span></li><li><span class="time">13:09 - 13:18</span><span class="event-name">Transfer Hotel lunch restaurant at The Royal Park Hotel Iconic Osaka-Midosuji -&gt; Osaka Castle</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">13:18 - 14:48</span><span class="event-name">Osaka Castle</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">Needs selection</span><span class="event-name">Flight Osaka -&gt; Osaka. I&#x27;m not very satisfied. I want to spend more money on food unavailable<small class="event-note">No live ticket candidate was returned by the flight search provider.</small></span><span class="event-type">Transfer Unavailable</span><span class="cost">0 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Meal</span><span class="cost">750 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Hotel dinner restaurant at The Royal Park Hotel Iconic Osaka-Midosuji -&gt; Umeda Sky Building</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">Umeda Sky Building</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-06-14 | Osaka. I&#x27;m not very satisfied. I want to spend more money on food</h2></div><strong>6358 CNY</strong></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Meal</span><span class="cost">750 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at The Royal Park Hotel Iconic Osaka-Midosuji -&gt; Market And Cafe Lane in Osaka. I&#x27;m not very satisfied. I want to spend more money on food (2026-06-14)</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Market And Cafe Lane in Osaka. I&#x27;m not very satisfied. I want to spend more money on food (2026-06-14)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:15 - 11:55</span><span class="event-name">Local area walk near Market And Cafe Lane in Osaka. I&#x27;m not very satisfied. I want to spend more money on food (2026-06-14) before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Meal</span><span class="cost">750 CNY</span></li><li><span class="time">13:00 - 13:05</span><span class="event-name">Transfer Hotel lunch restaurant at The Royal Park Hotel Iconic Osaka-Midosuji -&gt; Riverside Photo Walk in Osaka. I&#x27;m not very satisfied. I want to spend more money on food (2026-06-14)</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">13:05 - 14:35</span><span class="event-name">Riverside Photo Walk in Osaka. I&#x27;m not very satisfied. I want to spend more money on food (2026-06-14)</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:35 - 14:48</span><span class="event-name">Transfer Riverside Photo Walk in Osaka. I&#x27;m not very satisfied. I want to spend more money on food (2026-06-14) -&gt; Osaka Aquarium Kaiyukan</span><span class="event-type">Transfer</span><span class="cost">130 CNY</span></li><li><span class="time">14:48 - 16:18</span><span class="event-name">Osaka Aquarium Kaiyukan</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">16:18 - 17:36</span><span class="event-name">Local area walk near Osaka Aquarium Kaiyukan before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:36 - 18:00</span><span class="event-name">Transfer Local area walk near Osaka Aquarium Kaiyukan before dinner -&gt; Hotel dinner restaurant at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Transfer</span><span class="cost">240 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Meal</span><span class="cost">750 CNY</span></li><li><span class="time">19:40 - 19:55</span><span class="event-name">Check-out The Royal Park Hotel Iconic Osaka-Midosuji</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">19:55 - 20:55</span><span class="event-name">Transfer The Royal Park Hotel Iconic Osaka-Midosuji -&gt; Kansai International Airport (nearby airport for Osaka. I&#x27;m not very satisfied. I want to spend more money on food)</span><span class="event-type">Transfer</span><span class="cost">600 CNY</span></li><li><span class="time">22:25 - 23:40</span><span class="event-name">Flight Osaka. I&#x27;m not very satisfied. I want to spend more money on food -&gt; Shanghai</span><span class="event-type">Flight (Business)</span><span class="cost">2958 CNY</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 31.22222, "lng": 121.46406, "day": 0, "date": "", "city": "Shanghai", "name": "Start: Shanghai", "type": "origin", "time": "", "cost": 0.0, "route_point": true}, {"lat": 35.6895, "lng": 139.69171, "day": 1, "date": "2026-06-08", "city": "Tokyo", "name": "Fly Shanghai (SHA) -> Tokyo (HND) [Economy]", "type": "flight", "time": "", "cost": 3085.0, "route_point": true}, {"lat": 35.6895, "lng": 139.69771, "day": 1, "date": "2026-06-08", "city": "Tokyo", "name": "Day 1.2 Transfer Haneda Airport -> The Blossom Hibiya for check-in", "type": "transfer", "time": "18:15-18:33", "cost": 180.0, "estimated_coord": true}, {"lat": 35.6690374, "lng": 139.7625155, "day": 1, "date": "2026-06-08", "city": "Tokyo", "name": "Day 1.3 Check-in The Blossom Hibiya", "type": "checkin", "time": "18:33-18:48", "cost": 0.0, "estimated_coord": false}, {"lat": 35.69355292354617, "lng": 139.68728577004114, "day": 1, "date": "2026-06-08", "city": "Tokyo", "name": "Day 1.4 Transfer The Blossom Hibiya -> Momo Paradise Shinjuku Higashi-guchi", "type": "transfer", "time": "18:48-18:56", "cost": 80.0, "estimated_coord": true}, {"lat": 35.6910075, "lng": 139.7026367, "day": 1, "date": "2026-06-08", "city": "Tokyo", "name": "Day 1.5 Momo Paradise Shinjuku Higashi-guchi", "type": "meal", "time": "18:56-19:56", "cost": 690.0, "estimated_coord": false}, {"lat": 35.68352297807535, "lng": 139.6922346035763, "day": 1, "date": "2026-06-08", "city": "Tokyo", "name": "Day 1.6 Return to The Blossom Hibiya", "type": "transfer", "time": "19:56-20:11", "cost": 150.0, "estimated_coord": true}, {"lat": 35.67309032354617, "lng": 139.75209127004115, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.1 Hotel breakfast cafe at The Blossom Hibiya", "type": "meal", "time": "08:00-08:40", "cost": 766.67, "estimated_coord": true}, {"lat": 35.69426164960845, "lng": 139.69536057433925, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.2 Transfer Hotel breakfast cafe at The Blossom Hibiya -> Riverside Photo Walk in Tokyo (2026-06-09)", "type": "transfer", "time": "08:40-08:45", "cost": 50.0, "estimated_coord": true}, {"lat": 35.66306037807535, "lng": 139.75704010357632, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.3 Riverside Photo Walk in Tokyo (2026-06-09)", "type": "poi", "time": "08:45-10:15", "cost": 0.0, "estimated_coord": true}, {"lat": 35.67379904960845, "lng": 139.76016607433925, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.4 Local area walk near Riverside Photo Walk in Tokyo (2026-06-09) before lunch", "type": "poi", "time": "10:15-12:25", "cost": 0.0, "estimated_coord": true}, {"lat": 35.66799221097421, "lng": 139.7506072363041, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.5 Hotel lunch restaurant at The Blossom Hibiya", "type": "meal", "time": "12:30-13:30", "cost": 766.67, "estimated_coord": true}, {"lat": 35.66581713592508, "lng": 139.76157809807685, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.6 Local area walk near Hotel lunch restaurant at The Blossom Hibiya before Market And Cafe Lane in Tokyo (2026-06-09)", "type": "poi", "time": "13:30-15:05", "cost": 0.0, "estimated_coord": true}, {"lat": 35.674831651957696, "lng": 139.75495773100215, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.7 Market And Cafe Lane in Tokyo (2026-06-09)", "type": "poi", "time": "15:10-16:40", "cost": 0.0, "estimated_coord": true}, {"lat": 35.688454810974214, "lng": 139.6858017363041, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.8 Transfer Market And Cafe Lane in Tokyo (2026-06-09) -> Museum District Walk in Tokyo (2026-06-09)", "type": "transfer", "time": "16:40-16:45", "cost": 50.0, "estimated_coord": true}, {"lat": 35.6637126297081, "lng": 139.75375021134627, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.9 Museum District Walk in Tokyo (2026-06-09)", "type": "poi", "time": "16:45-18:15", "cost": 0.0, "estimated_coord": true}, {"lat": 35.68627973592508, "lng": 139.69677259807685, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.10 Transfer Museum District Walk in Tokyo (2026-06-09) -> Hotel dinner restaurant at The Blossom Hibiya", "type": "transfer", "time": "18:15-18:20", "cost": 50.0, "estimated_coord": true}, {"lat": 35.67315423491762, "lng": 139.76778721993358, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.11 Hotel dinner restaurant at The Blossom Hibiya", "type": "meal", "time": "18:20-19:20", "cost": 766.67, "estimated_coord": true}, {"lat": 35.6952942519577, "lng": 139.69015223100214, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.12 Transfer Hotel dinner restaurant at The Blossom Hibiya -> Shibuya Sky", "type": "transfer", "time": "19:20-19:25", "cost": 50.0, "estimated_coord": true}, {"lat": 35.6586719, "lng": 139.7019848, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.13 Shibuya Sky", "type": "poi", "time": "19:25-21:00", "cost": 80.0, "estimated_coord": false}, {"lat": 35.6841752297081, "lng": 139.68894471134627, "day": 2, "date": "2026-06-09", "city": "Tokyo", "name": "Day 2.14 Return to The Blossom Hibiya", "type": "transfer", "time": "21:00-21:15", "cost": 150.0, "estimated_coord": true}, {"lat": 35.02107, "lng": 135.75385, "day": 2, "date": "2026-06-10", "city": "Kyoto", "name": "Fly Tokyo (HND) -> Kyoto (ITM) [First]", "type": "flight", "time": "", "cost": 2193.0, "route_point": true}, {"lat": 35.67361566579106, "lng": 139.74542318363478, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.1 Check-out The Blossom Hibiya", "type": "checkout", "time": "08:15-08:30", "cost": 0.0, "estimated_coord": true}, {"lat": 35.02107, "lng": 135.75985, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.2 Transfer The Blossom Hibiya -> Haneda Airport", "type": "transfer", "time": "08:30-09:00", "cost": 300.0, "estimated_coord": true}, {"lat": 35.02512292354617, "lng": 135.74942577004114, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.4 Transfer Osaka Itami Airport (nearby airport for Kyoto) -> Kyoto Tonkatsu Katsuda Sanjo Kawaramachi", "type": "transfer", "time": "11:35-12:00", "cost": 250.0, "estimated_coord": true}, {"lat": 35.0091555, "lng": 135.7691765, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.5 Kyoto Tonkatsu Katsuda Sanjo Kawaramachi", "type": "meal", "time": "12:00-12:45", "cost": 555.0, "estimated_coord": false}, {"lat": 35.01509297807535, "lng": 135.7543746035763, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.6 Transfer Kyoto Tonkatsu Katsuda Sanjo Kawaramachi -> SAMURAI NINJA MUSEUM Kyoto", "type": "transfer", "time": "12:45-12:54", "cost": 90.0, "estimated_coord": true}, {"lat": 35.0072167, "lng": 135.7635673, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.7 SAMURAI NINJA MUSEUM Kyoto", "type": "poi", "time": "12:54-14:24", "cost": 80.0, "estimated_coord": false}, {"lat": 35.009275, "lng": 135.7858429, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.8 Check-in Higashiyama Shikikaboku", "type": "checkin", "time": "13:44-13:59", "cost": 0.0, "estimated_coord": false}, {"lat": 35.02583164960845, "lng": 135.75750057433925, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.9 Transfer Higashiyama Shikikaboku -> Fushimi Inari Taisha", "type": "transfer", "time": "13:59-14:12", "cost": 130.0, "estimated_coord": true}, {"lat": 34.9676945, "lng": 135.7851876, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.10 Fushimi Inari Taisha", "type": "poi", "time": "14:37-16:07", "cost": 80.0, "estimated_coord": false}, {"lat": 34.97174742354617, "lng": 135.77476337004114, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.11 Local area walk near Fushimi Inari Taisha before dinner", "type": "poi", "time": "16:07-18:09", "cost": 0.0, "estimated_coord": true}, {"lat": 35.02002481097421, "lng": 135.74794173630409, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.12 Transfer Local area walk near Fushimi Inari Taisha before dinner -> Wagyu Sukiyaki Kyoto Panga | Wagyu Halal restaurant", "type": "transfer", "time": "18:09-18:22", "cost": 130.0, "estimated_coord": true}, {"lat": 35.0097823, "lng": 135.7687319, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.13 Wagyu Sukiyaki Kyoto Panga | Wagyu Halal restaurant", "type": "meal", "time": "18:22-19:22", "cost": 555.0, "estimated_coord": false}, {"lat": 35.01784973592508, "lng": 135.75891259807685, "day": 3, "date": "2026-06-10", "city": "Kyoto", "name": "Day 3.14 Return to Higashiyama Shikikaboku", "type": "transfer", "time": "19:22-19:37", "cost": 150.0, "estimated_coord": true}, {"lat": 35.01332792354617, "lng": 135.77541867004115, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.1 Hotel breakfast cafe at Higashiyama Shikikaboku", "type": "meal", "time": "08:00-08:40", "cost": 616.67, "estimated_coord": true}, {"lat": 35.0268642519577, "lng": 135.75229223100214, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.2 Transfer Hotel breakfast cafe at Higashiyama Shikikaboku -> Kiyomizu-dera", "type": "transfer", "time": "08:40-08:45", "cost": 50.0, "estimated_coord": true}, {"lat": 34.9946662, "lng": 135.790661, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.3 Kiyomizu-dera", "type": "poi", "time": "08:45-10:15", "cost": 80.0, "estimated_coord": false}, {"lat": 34.99871912354617, "lng": 135.78023677004114, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.4 Local area walk near Kiyomizu-dera before lunch", "type": "poi", "time": "10:15-11:54", "cost": 0.0, "estimated_coord": true}, {"lat": 35.0157452297081, "lng": 135.75108471134627, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.5 Transfer Local area walk near Kiyomizu-dera before lunch -> Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch", "type": "transfer", "time": "11:54-12:00", "cost": 60.0, "estimated_coord": true}, {"lat": 35.008841499999996, "lng": 135.7771361, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.6 Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch", "type": "meal", "time": "12:00-13:00", "cost": 555.0, "estimated_coord": false}, {"lat": 35.012894423546165, "lng": 135.76671187004115, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.7 Local area walk near Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch before Museum District Walk in Kyoto (2026-06-11)", "type": "poi", "time": "13:00-16:08", "cost": 0.0, "estimated_coord": true}, {"lat": 35.02518683491762, "lng": 135.76512171993357, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.8 Transfer Local area walk near Kyoto Gyukatsu Motomura Sanjo Kawaramachi Branch before Museum District Walk in Kyoto (2026-06-11) -> Museum District Walk in Kyoto (2026-06-11)", "type": "transfer", "time": "16:08-16:13", "cost": 50.0, "estimated_coord": true}, {"lat": 35.00329797807535, "lng": 135.78036750357631, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.9 Museum District Walk in Kyoto (2026-06-11)", "type": "poi", "time": "16:13-17:43", "cost": 0.0, "estimated_coord": true}, {"lat": 35.02564826579106, "lng": 135.74275768363478, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.10 Transfer Museum District Walk in Kyoto (2026-06-11) -> Market And Cafe Lane in Kyoto (2026-06-11)", "type": "transfer", "time": "17:43-17:48", "cost": 50.0, "estimated_coord": true}, {"lat": 35.01403664960845, "lng": 135.78349347433925, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.11 Market And Cafe Lane in Kyoto (2026-06-11)", "type": "poi", "time": "17:48-19:18", "cost": 0.0, "estimated_coord": true}, {"lat": 35.01020139819156, "lng": 135.75893659952519, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.12 Transfer Market And Cafe Lane in Kyoto (2026-06-11) -> Kyoto Tonkatsu Katsuda Shijokarasuma", "type": "transfer", "time": "19:18-19:24", "cost": 60.0, "estimated_coord": true}, {"lat": 35.0012535, "lng": 135.7594566, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.13 Kyoto Tonkatsu Katsuda Shijokarasuma", "type": "meal", "time": "19:24-20:24", "cost": 555.0, "estimated_coord": false}, {"lat": 35.03252013211957, "lng": 135.75744088769588, "day": 4, "date": "2026-06-11", "city": "Kyoto", "name": "Day 4.14 Return to Higashiyama Shikikaboku", "type": "transfer", "time": "20:24-20:39", "cost": 150.0, "estimated_coord": true}, {"lat": 34.69379, "lng": 135.50107, "day": 3, "date": "2026-06-12", "city": "Osaka", "name": "Transfer Kyoto -> Osaka", "type": "direct_drive", "time": "", "cost": 500.0, "route_point": true}, {"lat": 35.008229810974214, "lng": 135.7739346363041, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.1 Check-out Higashiyama Shikikaboku", "type": "checkout", "time": "08:00-08:15", "cost": 0.0, "estimated_coord": true}, {"lat": 34.69379, "lng": 135.50707, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.3 Transfer Drive Kyoto -> Osaka -> Osaka Castle", "type": "transfer", "time": "08:58-09:13", "cost": 150.0, "estimated_coord": true}, {"lat": 34.6872571, "lng": 135.5318546, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.4 Osaka Castle", "type": "poi", "time": "09:13-10:43", "cost": 80.0, "estimated_coord": false}, {"lat": 34.6933317, "lng": 135.5016353, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.5 Check-in Conrad Osaka", "type": "checkin", "time": "09:13-09:28", "cost": 0.0, "estimated_coord": false}, {"lat": 34.69738462354617, "lng": 135.49121107004115, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.6 Local area walk near Conrad Osaka before lunch", "type": "poi", "time": "10:43-16:02", "cost": 0.0, "estimated_coord": true}, {"lat": 34.69784292354617, "lng": 135.49664577004114, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.7 Transfer Local area walk near Conrad Osaka before lunch -> Halal Wagyu&Vegan Ramen Gyumon Osaka Dotonbori", "type": "transfer", "time": "16:02-16:07", "cost": 50.0, "estimated_coord": true}, {"lat": 34.668776699999995, "lng": 135.506869, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.8 Halal Wagyu&Vegan Ramen Gyumon Osaka Dotonbori", "type": "meal", "time": "16:07-17:07", "cost": 630.0, "estimated_coord": false}, {"lat": 34.672829623546164, "lng": 135.49644477004114, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.9 Local area walk near Halal Wagyu&Vegan Ramen Gyumon Osaka Dotonbori before Dotonbori", "type": "poi", "time": "17:07-19:27", "cost": 0.0, "estimated_coord": true}, {"lat": 34.68781297807535, "lng": 135.5015946035763, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.10 Transfer Local area walk near Halal Wagyu&Vegan Ramen Gyumon Osaka Dotonbori before Dotonbori -> Dotonbori", "type": "transfer", "time": "19:27-19:32", "cost": 50.0, "estimated_coord": true}, {"lat": 34.6687234, "lng": 135.5072971, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.11 Dotonbori", "type": "poi", "time": "19:32-21:02", "cost": 80.0, "estimated_coord": false}, {"lat": 34.69855164960845, "lng": 135.50472057433925, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.12 Transfer Dotonbori -> Hotel breakfast cafe at Conrad Osaka", "type": "transfer", "time": "21:02-21:11", "cost": 90.0, "estimated_coord": true}, {"lat": 34.68735467807535, "lng": 135.4961599035763, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.13 Hotel breakfast cafe at Conrad Osaka", "type": "meal", "time": "21:11-21:51", "cost": 700.0, "estimated_coord": true}, {"lat": 34.69274481097421, "lng": 135.49516173630408, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.14 Transfer Hotel breakfast cafe at Conrad Osaka -> Shopping Street Walk in Osaka (2026-06-12)", "type": "transfer", "time": "21:51-21:56", "cost": 50.0, "estimated_coord": true}, {"lat": 34.69809334960845, "lng": 135.49928587433925, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.15 Shopping Street Walk in Osaka (2026-06-12)", "type": "poi", "time": "21:56-23:26", "cost": 0.0, "estimated_coord": true}, {"lat": 34.69056973592508, "lng": 135.50613259807685, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.16 Transfer Shopping Street Walk in Osaka (2026-06-12) -> Umeda Sky Building", "type": "transfer", "time": "23:26-23:31", "cost": 50.0, "estimated_coord": true}, {"lat": 34.7052872, "lng": 135.4956527, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.17 Umeda Sky Building", "type": "poi", "time": "23:26-24:35", "cost": 80.0, "estimated_coord": false}, {"lat": 34.662799678075345, "lng": 135.5013936035763, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.18 Halal Wagyu&Vegan Ramen Gyumon Osaka Dotonbori", "type": "meal", "time": "23:31-24:31", "cost": 630.0, "estimated_coord": true}, {"lat": 34.668834499999996, "lng": 135.5041417, "day": 5, "date": "2026-06-12", "city": "Osaka", "name": "Day 5.19 Kobe Beef WANOMIYA Dotonbori Main Store", "type": "meal", "time": "24:05-25:05", "cost": 630.0, "estimated_coord": false}, {"lat": 34.6871762, "lng": 135.5059413, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.2 Check-in The Royal Park Hotel Iconic Osaka-Midosuji", "type": "checkin", "time": "08:41-08:56", "cost": 0.0, "estimated_coord": false}, {"lat": 34.69122912354617, "lng": 135.49551707004113, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.3 Hotel breakfast cafe at The Royal Park Hotel Iconic Osaka-Midosuji", "type": "meal", "time": "08:56-09:36", "cost": 750.0, "estimated_coord": true}, {"lat": 34.67277632354617, "lng": 135.49687287004113, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.5 Dotonbori", "type": "poi", "time": "09:41-11:11", "cost": 80.0, "estimated_coord": true}, {"lat": 34.69228651097421, "lng": 135.4897270363041, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.7 Check-out Conrad Osaka", "type": "checkout", "time": "11:45-12:00", "cost": 0.0, "estimated_coord": true}, {"lat": 34.68119917807535, "lng": 135.5004659035763, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.9 Hotel lunch restaurant at The Royal Park Hotel Iconic Osaka-Midosuji", "type": "meal", "time": "12:09-13:09", "cost": 750.0, "estimated_coord": true}, {"lat": 34.691310023546166, "lng": 135.52143037004114, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.11 Osaka Castle", "type": "poi", "time": "13:18-14:48", "cost": 80.0, "estimated_coord": true}, {"lat": 34.69193784960845, "lng": 135.50359187433924, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.13 Hotel dinner restaurant at The Royal Park Hotel Iconic Osaka-Midosuji", "type": "meal", "time": "18:00-19:00", "cost": 750.0, "estimated_coord": true}, {"lat": 34.70934012354617, "lng": 135.48522847004114, "day": 6, "date": "2026-06-13", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 6.15 Umeda Sky Building", "type": "poi", "time": "19:15-21:00", "cost": 80.0, "estimated_coord": true}, {"lat": 31.226272923546166, "lng": 121.45363577004113, "day": 5, "date": "2026-06-14", "city": "Shanghai", "name": "Fly Osaka. I'm not very satisfied. I want to spend more money on food (KIX) -> Shanghai (PVG) [Business]", "type": "flight", "time": "", "cost": 2958.0, "route_point": true, "estimated_coord": false}, {"lat": 34.686131010974215, "lng": 135.49403303630407, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.1 Hotel breakfast cafe at The Royal Park Hotel Iconic Osaka-Midosuji", "type": "meal", "time": "08:00-08:40", "cost": 750.0, "estimated_coord": true}, {"lat": 34.683955935925084, "lng": 135.50500389807684, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.3 Market And Cafe Lane in Osaka. I'm not very satisfied. I want to spend more money on food (2026-06-14)", "type": "poi", "time": "08:45-10:15", "cost": 0.0, "estimated_coord": true}, {"lat": 34.6929704519577, "lng": 135.49838353100213, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.4 Local area walk near Market And Cafe Lane in Osaka. I'm not very satisfied. I want to spend more money on food (2026-06-14) before lunch", "type": "poi", "time": "10:15-11:55", "cost": 0.0, "estimated_coord": true}, {"lat": 34.681851429708104, "lng": 135.49717601134626, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.5 Hotel lunch restaurant at The Royal Park Hotel Iconic Osaka-Midosuji", "type": "meal", "time": "12:00-13:00", "cost": 750.0, "estimated_coord": true}, {"lat": 34.69129303491762, "lng": 135.51121301993356, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.7 Riverside Photo Walk in Osaka. I'm not very satisfied. I want to spend more money on food (2026-06-14)", "type": "poi", "time": "13:05-14:35", "cost": 0.0, "estimated_coord": true}, {"lat": 34.6545182, "lng": 135.4349645, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.9 Osaka Aquarium Kaiyukan", "type": "poi", "time": "14:48-16:18", "cost": 80.0, "estimated_coord": false}, {"lat": 34.65857112354617, "lng": 135.42454027004115, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.10 Local area walk near Osaka Aquarium Kaiyukan before dinner", "type": "poi", "time": "16:18-17:36", "cost": 0.0, "estimated_coord": true}, {"lat": 34.691754465791064, "lng": 135.48884898363477, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.12 Hotel dinner restaurant at The Royal Park Hotel Iconic Osaka-Midosuji", "type": "meal", "time": "18:00-19:00", "cost": 750.0, "estimated_coord": true}, {"lat": 34.67630759819156, "lng": 135.50502789952517, "day": 7, "date": "2026-06-14", "city": "Osaka. I'm not very satisfied. I want to spend more money on food", "name": "Day 7.13 Check-out The Royal Park Hotel Iconic Osaka-Midosuji", "type": "checkout", "time": "19:40-19:55", "cost": 0.0, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${p.cost} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${p.cost || 0} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${p.cost} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

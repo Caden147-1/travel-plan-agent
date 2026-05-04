@@ -166,6 +166,12 @@ def _clean_flight_leg(leg: dict) -> dict:
         "leg_index": leg.get("leg_index"),
         "from_city": leg.get("from_city"),
         "to_city": leg.get("to_city"),
+        "from_airport": leg.get("from_airport"),
+        "to_airport": leg.get("to_airport"),
+        "candidate_from_airports": leg.get("candidate_from_airports", []),
+        "candidate_to_airports": leg.get("candidate_to_airports", []),
+        "from_airport_candidate_source": leg.get("from_airport_candidate_source"),
+        "to_airport_candidate_source": leg.get("to_airport_candidate_source"),
         "departure_date": leg.get("departure_date"),
         "budget": leg.get("budget"),
         "selection_status": leg.get("selection_status"),
@@ -378,7 +384,11 @@ def _clean_final_output(agent3_output: dict, parsed: dict, budget_result: dict |
         },
 
         "budget_plan": budget_result.get("budget_plan", {}),
-        "city_budget_plan": budget_result.get("city_budget_plan", []),
+        "city_budget_plan": (
+            budget_result.get("city_budget_plan")
+            or agent3_output.get("city_budget_plan_used")
+            or []
+        ),
         "budget_strategy": budget_result.get("budget_strategy"),
         "cost_level": budget_result.get("cost_level"),
         "normalized_preferences": budget_result.get("normalized_preferences", {}),
@@ -669,6 +679,7 @@ def _run_agent2_agent3(parsed: dict) -> tuple[dict | None, dict | None, dict | N
             "cost_level": budget_result.get("cost_level"),
             "budget_status": budget_result.get("budget_status"),
             "normalized_preferences": budget_result.get("normalized_preferences", {}),
+            "allocation_basis": budget_result.get("allocation_basis", {}),
             "budget_plan": budget_result.get("budget_plan", {}),
             "city_budget_plan": budget_result.get("city_budget_plan", []),
         },
@@ -836,6 +847,7 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
                         "cost_level": retry_budget_result.get("cost_level"),
                         "budget_status": retry_budget_result.get("budget_status"),
                         "normalized_preferences": retry_budget_result.get("normalized_preferences", {}),
+                        "allocation_basis": retry_budget_result.get("allocation_basis", {}),
                         "budget_plan": retry_budget_result.get("budget_plan", {}),
                         "city_budget_plan": retry_budget_result.get("city_budget_plan", []),
                     }
@@ -865,6 +877,7 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
         "cost_level": budget_result.get("cost_level"),
         "budget_status": budget_result.get("budget_status"),
         "normalized_preferences": budget_result.get("normalized_preferences", {}),
+        "allocation_basis": budget_result.get("allocation_basis", {}),
         "budget_plan": budget_result.get("budget_plan", {}),
         "city_budget_plan": budget_result.get("city_budget_plan", []),
     }

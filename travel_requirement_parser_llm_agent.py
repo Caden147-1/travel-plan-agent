@@ -7,7 +7,11 @@ import requests
 from pathlib import Path
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
-from dotenv import load_dotenv
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:
+    def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
+        return False
 from destination import run_city_planning_agent
 from travel_time import get_today_date
 
@@ -131,6 +135,7 @@ def _default_result() -> Dict[str, Any]:
             "food": None,
             "attraction_style": None,
             "hotel_level": None,
+            "hotel_area": None,
             "hotel_features": [],
             "food_preferences": [],
             "attraction_styles": [],
@@ -211,6 +216,7 @@ Strict rules:
 22. preferences.must_visit_attractions must be a JSON array of strings.
 23. Only include attractions explicitly mentioned by the user. Do not guess.
 24. For relative date expressions such as "today", "tomorrow", "starting tomorrow", and "leaving tomorrow", you must use the reference date above, not your own internal date.
+25. Only fill preferences.hotel_area when the user explicitly describes where they want to stay, such as "stay in Ginza", "hotel near Kyoto Station", "住在银座附近", or "酒店在大阪梅田附近". Do not infer hotel_area from attractions or destination cities.
 
 Allowed values:
 
@@ -256,6 +262,14 @@ preferences.hotel_level (new richer scalar):
 - "premium"
 - "luxury"
 - null
+
+preferences.hotel_area (new optional scalar):
+- free-form lodging area/location string from an explicit stay/hotel expression
+- examples:
+  - "hotel near Kyoto Station" -> "Kyoto Station"
+  - "stay in Ginza" -> "Ginza"
+  - "住在银座附近" -> "银座"
+- if no explicit lodging area is mentioned, use null
 
 preferences.hotel_features (new list):
 allowed items:
@@ -338,6 +352,8 @@ HOTELS
 - "clean hotel" -> add "clean" to preferences.hotel_features; legacy preferences.hotel may be "clean"
 - "centrally located hotel" / "city center hotel" -> add "central" to preferences.hotel_features; legacy preferences.hotel may be "central"
 - "clean and centrally located hotel" -> preferences.hotel_features = ["clean", "central"]
+- "hotel near Kyoto Station" -> preferences.hotel_area = "Kyoto Station"
+- "stay in Ginza" -> preferences.hotel_area = "Ginza"
 
 FOOD
 - "love local food" -> preferences.food = "local", preferences.food_preferences = ["local"], planning_signals.food_priority = "high"
@@ -391,6 +407,7 @@ Output schema:
     "food": null,
     "attraction_style": null,
     "hotel_level": null,
+    "hotel_area": null,
     "hotel_features": [],
     "food_preferences": [],
     "attraction_styles": [],
@@ -660,6 +677,71 @@ def _extract_origin_destination_from_text(user_request: str) -> Dict[str, Any]:
     }
 
 
+def _split_city_list_fragment(fragment: str) -> List[str]:
+    if not fragment:
+        return []
+    cleaned = re.sub(r"(?i)\b(?:and|then)\b", ",", fragment)
+    parts = [p.strip(" .;:") for p in cleaned.split(",")]
+    cities: List[str] = []
+    seen = set()
+    for part in parts:
+        part = re.sub(r"(?i)\b(?:the\s+)?(?:cities?|destinations?)\s+(?:are|include|will be)\b", "", part).strip()
+        part = re.sub(r"(?i)\b(?:in|within)\s+[A-Z][A-Za-z .'-]+$", "", part).strip()
+        part = re.sub(r"(?i)\b(?:stay|staying|spend|with|for)\b.*$", "", part).strip()
+        normalized = _normalize_string(part)
+        if not normalized:
+            continue
+        if normalized.lower() in {"japan", "china", "country"}:
+            continue
+        if normalized.lower() not in seen:
+            cities.append(normalized)
+            seen.add(normalized.lower())
+    return cities
+
+
+def _extract_explicit_city_list_from_text(user_request: str) -> List[str]:
+    text = _prepare_user_request(user_request)
+    if not text:
+        return []
+
+    results: List[str] = []
+    seen = set()
+
+    list_patterns = [
+        re.compile(
+            r"(?i)\b(?:cities|destinations)\s+(?:are|include|will be)\s+(?P<cities>[^.]+)"
+        ),
+        re.compile(
+            r"(?i)\b(?:the\s+)?(?:cities|destinations)\s*:\s*(?P<cities>[^.]+)"
+        ),
+    ]
+    for pattern in list_patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+        for city in _split_city_list_fragment(match.group("cities")):
+            key = city.lower()
+            if key not in seen:
+                results.append(city)
+                seen.add(key)
+
+    stay_patterns = [
+        re.compile(r"(?i)\b(?:stay|staying)\s+(\d+)\s+nights?\s+in\s+([A-Z][A-Za-z .'-]+)"),
+        re.compile(r"(?i)\b(\d+)\s+nights?\s+in\s+([A-Z][A-Za-z .'-]+)"),
+        re.compile(r"(?i)\b([A-Z][A-Za-z .'-]+?)\s+for\s+(\d+)\s+nights?\b"),
+    ]
+    for pattern in stay_patterns:
+        for match in pattern.finditer(text):
+            city_group = 2 if match.lastindex and match.group(1).isdigit() else 1
+            city = _normalize_string(match.group(city_group))
+            city = city.strip(" .;:") if city else city
+            if city and city.lower() not in seen:
+                results.append(city)
+                seen.add(city.lower())
+
+    return results
+
+
 def _extract_flight_cabin_from_text(user_request: Optional[str]) -> Optional[str]:
     """
     Deterministic fallback for cabin-class expressions.
@@ -719,6 +801,65 @@ def _extract_flight_cabin_from_text(user_request: Optional[str]) -> Optional[str
     return None
 
 
+def _clean_hotel_area_candidate(raw: Any) -> Optional[str]:
+    text = _normalize_string(raw)
+    if not text:
+        return None
+
+    text = re.sub(
+        r"(?i)\b(?:for|with|budget|under|below|above|from|to|then|and|but)\b.*$",
+        "",
+        text,
+    ).strip()
+    text = re.sub(r"(?i)\b\d+\s*(?:days?|nights?|people|persons?|cny|rmb|usd).*$", "", text).strip()
+    text = re.sub(
+        r"(?:\u9884\u7b97|\u5929|\u665a|\u4eba|\u51fa\u53d1|\u56de\u6765|\u7136\u540e|\u6700\u540e|\u5148\u53bb).*$",
+        "",
+        text,
+    ).strip()
+    text = re.sub(r"(?i)\b(?:hotel|hotels|accommodation|lodging|area|district)\b$", "", text).strip()
+    text = re.sub(
+        r"(?:\u9644\u8fd1|\u5468\u8fb9|\u4e00\u5e26|\u533a\u57df|\u7684?\u9152\u5e97|\u9152\u5e97|\u4f4f\u5bbf)$",
+        "",
+        text,
+    ).strip(" ,.;:，。；;")
+
+    return text or None
+
+
+def _extract_hotel_area_from_text(user_request: Optional[str]) -> Optional[str]:
+    text = _prepare_user_request(user_request or "")
+    if not text:
+        return None
+
+    patterns = [
+        re.compile(
+            r"(?i)\b(?:hotel|hotels|stay|staying|accommodation|lodging)\s+"
+            r"(?:in|near|around|by|close to|nearby)\s+([^,.，。;；\n]+)"
+        ),
+        re.compile(
+            r"(?i)\b(?:in|near|around|by|close to|nearby)\s+"
+            r"([^,.，。;；\n]+?)\s+(?:hotel|hotels|accommodation|lodging)\b"
+        ),
+        re.compile(
+            r"(?:\u4f4f\u5728|\u4f4f\u5230|"
+            r"\u9152\u5e97(?:\u5728|\u9760\u8fd1|\u9644\u8fd1|\u9009\u5728)?|"
+            r"\u4f4f\u5bbf(?:\u5728|\u9760\u8fd1|\u9644\u8fd1)?)\s*"
+            r"([^,，。；;\n]+)\s*"
+            r"(?:\u9644\u8fd1|\u5468\u8fb9|\u4e00\u5e26|\u533a\u57df|\u533a)?"
+            r"(?:\u7684)?(?:\u9152\u5e97|\u4f4f\u5bbf)?"
+        ),
+    ]
+    for pattern in patterns:
+        match = pattern.search(text)
+        if not match:
+            continue
+        cleaned = _clean_hotel_area_candidate(match.group(1))
+        if cleaned:
+            return cleaned
+    return None
+
+
 def _merge_missing_fields_from_text(result: Dict[str, Any], user_request: str) -> Dict[str, Any]:
     """
     Second-pass fallback: if Agent1 misses core route/date details, recover them from raw text.
@@ -733,11 +874,27 @@ def _merge_missing_fields_from_text(result: Dict[str, Any], user_request: str) -
     if not merged.get("destination") and route_fallback.get("destination"):
         merged["destination"] = route_fallback["destination"]
 
+    explicit_cities = _extract_explicit_city_list_from_text(prepared_request)
+    if explicit_cities:
+        existing_destinations = _normalize_destination(merged.get("destination"))
+        seen_destinations = {item.lower() for item in existing_destinations}
+        for city in explicit_cities:
+            if city.lower() not in seen_destinations:
+                existing_destinations.append(city)
+                seen_destinations.add(city.lower())
+        if existing_destinations:
+            merged["destination"] = existing_destinations
+
     preferences = merged.get("preferences") or {}
     if not preferences.get("flight_cabin"):
         detected_cabin = _extract_flight_cabin_from_text(prepared_request)
         if detected_cabin:
             preferences["flight_cabin"] = detected_cabin
+            merged["preferences"] = preferences
+    if not preferences.get("hotel_area"):
+        detected_hotel_area = _extract_hotel_area_from_text(prepared_request)
+        if detected_hotel_area:
+            preferences["hotel_area"] = detected_hotel_area
             merged["preferences"] = preferences
 
     travel_dates = merged.get("travel_dates") or {}
@@ -854,6 +1011,7 @@ def _normalize_preferences(value: Any) -> Dict[str, Any]:
         "food": None,
         "attraction_style": None,
         "hotel_level": None,
+        "hotel_area": None,
         "hotel_features": [],
         "food_preferences": [],
         "attraction_styles": [],
@@ -929,6 +1087,8 @@ def _normalize_preferences(value: Any) -> Dict[str, Any]:
     raw_hotel_level = _normalize_string(value.get("hotel_level"))
     raw_hotel_level = raw_hotel_level.lower() if raw_hotel_level else None
     default_preferences["hotel_level"] = raw_hotel_level if raw_hotel_level in allowed_hotel_level else None
+
+    default_preferences["hotel_area"] = _normalize_string(value.get("hotel_area"))
 
     raw_hotel_features = _normalize_list_of_strings(value.get("hotel_features"))
     default_preferences["hotel_features"] = [x for x in raw_hotel_features if x in allowed_hotel_features]
@@ -1085,6 +1245,84 @@ def _resolve_date_to_default_year(date_str: Optional[str], today: Optional[datet
     return candidate.strftime("%Y-%m-%d")
 
 
+def _format_month_day_with_year(month: int, day: int, year: int) -> Optional[str]:
+    try:
+        return datetime(year, month, day).strftime("%Y-%m-%d")
+    except ValueError:
+        return None
+
+
+def _parse_flexible_iso_date(value: str) -> Optional[datetime]:
+    match = re.fullmatch(r"((?:19|20)\d{2})-(\d{1,2})-(\d{1,2})", value.strip())
+    if not match:
+        return None
+    try:
+        return datetime(int(match.group(1)), int(match.group(2)), int(match.group(3)))
+    except ValueError:
+        return None
+
+
+def _extract_explicit_date_range_from_text(text: Optional[str]) -> Dict[str, Optional[str]]:
+    if not text:
+        return {"start": None, "end": None, "text": None}
+
+    normalized = text.strip()
+    separator = r"(?:\s*(?:to|through|until|till|and|到|至|~|–|—)\s*|\s+-\s+)"
+
+    iso_match = re.search(
+        rf"\b((?:19|20)\d{{2}}-\d{{1,2}}-\d{{1,2}}){separator}((?:19|20)\d{{2}}-\d{{1,2}}-\d{{1,2}})\b",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if iso_match:
+        start_dt = _parse_flexible_iso_date(iso_match.group(1))
+        end_dt = _parse_flexible_iso_date(iso_match.group(2))
+        if start_dt and end_dt and end_dt >= start_dt:
+            return {
+                "start": start_dt.strftime("%Y-%m-%d"),
+                "end": end_dt.strftime("%Y-%m-%d"),
+                "text": iso_match.group(0),
+            }
+
+    today = get_today_date()
+    current_year = today.year
+    numeric_match = re.search(
+        rf"(?<!\d)(\d{{1,2}})\s*[-/.]\s*(\d{{1,2}})(?!\d){separator}(?:(\d{{1,2}})\s*[-/.]\s*)?(\d{{1,2}})(?!\d)",
+        normalized,
+        flags=re.IGNORECASE,
+    )
+    if not numeric_match:
+        return {"start": None, "end": None, "text": None}
+
+    start_month = int(numeric_match.group(1))
+    start_day = int(numeric_match.group(2))
+    end_month = int(numeric_match.group(3) or start_month)
+    end_day = int(numeric_match.group(4))
+    if not (1 <= start_month <= 12 and 1 <= end_month <= 12 and 1 <= start_day <= 31 and 1 <= end_day <= 31):
+        return {"start": None, "end": None, "text": None}
+
+    start = _format_month_day_with_year(start_month, start_day, current_year)
+    end = _format_month_day_with_year(end_month, end_day, current_year)
+    if not start or not end:
+        return {"start": None, "end": None, "text": None}
+
+    start_dt = _parse_date(start)
+    end_dt = _parse_date(end)
+    if start_dt and end_dt and end_dt < start_dt:
+        next_year_end = _format_month_day_with_year(end_month, end_day, current_year + 1)
+        if next_year_end:
+            end = next_year_end
+            end_dt = _parse_date(end)
+    if not start_dt or not end_dt or end_dt < start_dt:
+        return {"start": None, "end": None, "text": None}
+
+    return {
+        "start": start,
+        "end": end,
+        "text": numeric_match.group(0),
+    }
+
+
 def _normalize_travel_dates(
     value: Any,
     user_request: Optional[str] = None
@@ -1107,6 +1345,15 @@ def _normalize_travel_dates(
     start = default_dates["start"]
     end = default_dates["end"]
     text = default_dates["text"] or ""
+    explicit_range = _extract_explicit_date_range_from_text(user_request or text)
+    if explicit_range.get("start") and explicit_range.get("end"):
+        default_dates["start"] = explicit_range["start"]
+        default_dates["end"] = explicit_range["end"]
+        default_dates["text"] = explicit_range.get("text") or text or user_request
+        start = default_dates["start"]
+        end = default_dates["end"]
+        text = default_dates["text"] or ""
+
     relative_start = _extract_relative_start_date_from_text(user_request or text)
 
     if relative_start:
@@ -1286,6 +1533,10 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
         detected_cabin = _extract_flight_cabin_from_text(prepared_request)
         if detected_cabin:
             result["preferences"]["flight_cabin"] = detected_cabin
+    if not result["preferences"].get("hotel_area"):
+        detected_hotel_area = _extract_hotel_area_from_text(prepared_request)
+        if detected_hotel_area:
+            result["preferences"]["hotel_area"] = detected_hotel_area
 
     result["planning_signals"] = _normalize_planning_signals(
         parsed.get("planning_signals") or {}

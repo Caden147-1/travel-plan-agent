@@ -1,8 +1,21 @@
 import copy
 import json
+import math
+import os
 import re
 from datetime import datetime
-from typing import Any, Dict, List
+from functools import lru_cache
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Tuple
+
+import requests
+
+
+BASE_DIR = Path(__file__).resolve().parent
+CITY_CENTROIDS_PATH = BASE_DIR / "cities15000.txt"
+AIRPORT_MAPPING_PATH = BASE_DIR / "global_airports.json"
+GOOGLE_DISTANCE_MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json"
+NEARBY_AIRPORT_RADIUS_KM = 220.0
 
 
 COUNTRY_NAME_ALIASES = {
@@ -232,6 +245,7 @@ def extract_explicit_city_days(user_request: str, destination_list):
 
     Supported examples:
     - "New York for 3 days and Las Vegas for 5 days"
+    - "Stay 2 nights in Tokyo, 2 nights in Kyoto, and 2 nights in Osaka"
     - "go to Tokyo for 2 days, Osaka for 3 days"
     - "visit Seoul for 4 days and Busan for 2 days"
 
@@ -264,23 +278,31 @@ def extract_explicit_city_days(user_request: str, destination_list):
         city_pattern = re.escape(city_key)
 
         patterns = [
-            rf"\b{city_pattern}\b\s*for\s*(\d+)\s*days?\b",
-            rf"\b{city_pattern}\b\s+(\d+)\s*days?\b",
-            rf"(?:stay in|visit|go to|travel to)\s+\b{city_pattern}\b\s*(?:for\s*)?(\d+)\s*days?\b",
+            (rf"\b{city_pattern}\b\s*for\s*(\d+)\s*days?\b", "days"),
+            (rf"\b{city_pattern}\b\s+(\d+)\s*days?\b", "days"),
+            (rf"(?:stay in|visit|go to|travel to)\s+\b{city_pattern}\b\s*(?:for\s*)?(\d+)\s*days?\b", "days"),
+            (rf"\b{city_pattern}\b\s*for\s*(\d+)\s*nights?\b", "nights"),
+            (rf"\b{city_pattern}\b\s+(\d+)\s*nights?\b", "nights"),
+            (rf"(?:stay in|staying in)\s+\b{city_pattern}\b\s*(?:for\s*)?(\d+)\s*nights?\b", "nights"),
+            (rf"(?:stay|staying)\s+(\d+)\s*nights?\s+in\s+\b{city_pattern}\b", "nights"),
+            (rf"\b(\d+)\s*nights?\s+in\s+\b{city_pattern}\b", "nights"),
         ]
 
         matched_days = None
-        for pattern in patterns:
+        matched_unit = "days"
+        for pattern, unit in patterns:
             match = re.search(pattern, lowered_request, flags=re.IGNORECASE)
             if match:
                 matched_days = int(match.group(1))
+                matched_unit = unit
                 break
 
         if matched_days is not None:
             results.append({
                 "city": city_text,
                 "days": matched_days,
-                "source": "user_explicit"
+                "source": "user_explicit",
+                "unit": matched_unit,
             })
 
     if not results:
@@ -309,11 +331,13 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
 
     # 1) Highest priority: explicit city_plan
     if isinstance(planned_cities, list) and planned_cities:
-        trimmed_planned_cities = _trim_items(planned_cities, max_city_count)
+        explicit_mode = _normalize_text(city_plan.get("mode")) in {"user_specified", "user_explicit_city_days"}
+        trimmed_planned_cities = planned_cities if explicit_mode else _trim_items(planned_cities, max_city_count)
 
         ratio_items: List[Dict[str, Any]] = []
         explicit_day_values: List[int] = []
         all_have_days = True
+        direct_explicit_nights: List[Dict[str, Any]] = []
 
         for item in trimmed_planned_cities:
             if isinstance(item, dict):
@@ -327,6 +351,13 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
                     all_have_days = False
 
                 explicit_day_values.append(max(0, day_val))
+                if explicit_mode and _normalize_text(item.get("unit")) == "nights" and day_val > 0:
+                    direct_explicit_nights.append({
+                        "city": city_name,
+                        "days": day_val,
+                        "source": _normalize_text(item.get("source")) or "user_explicit",
+                        "unit": "nights",
+                    })
 
                 ratio_items.append({
                     "city": city_name,
@@ -343,6 +374,9 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
                     "days_ratio": 1.0,
                     "source": "destination"
                 })
+
+        if direct_explicit_nights and len(direct_explicit_nights) == len(ratio_items):
+            return direct_explicit_nights
 
         if ratio_items:
             if all_have_days and sum(explicit_day_values) > 0:
@@ -458,6 +492,532 @@ def _get_city_plan_mode(parsed_request: Dict[str, Any], db: Dict[str, Any]) -> s
     return "unknown"
 
 
+def _normalize_alias_key(text: Any) -> str:
+    text = _normalize_text(text).lower()
+    text = re.sub(r"[_\-]+", " ", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _normalize_route_city_key(text: Any) -> str:
+    text = _normalize_alias_key(text)
+    text = re.sub(r"\b(city|airport|international airport|intl airport)\b", "", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
+def _geonames_feature_rank(feature_code: Any) -> int:
+    rank_map = {
+        "PPLC": 6,
+        "PPLA": 5,
+        "PPLA2": 4,
+        "PPLA3": 3,
+        "PPLA4": 2,
+        "PPL": 1,
+        "PPLX": 0,
+    }
+    return rank_map.get(_normalize_text(feature_code).upper(), -1)
+
+
+@lru_cache(maxsize=1)
+def _load_city_centroids() -> Dict[str, Dict[str, Any]]:
+    index: Dict[str, Dict[str, Any]] = {}
+    if not CITY_CENTROIDS_PATH.exists():
+        return index
+
+    try:
+        with CITY_CENTROIDS_PATH.open("r", encoding="utf-8") as f:
+            for line in f:
+                parts = line.rstrip("\n").split("\t")
+                if len(parts) < 9 or _normalize_text(parts[6]).upper() != "P":
+                    continue
+                try:
+                    lat = float(parts[4])
+                    lng = float(parts[5])
+                except Exception:
+                    continue
+
+                record = {
+                    "name": _normalize_text(parts[1]),
+                    "asciiname": _normalize_text(parts[2]),
+                    "lat": lat,
+                    "lng": lng,
+                    "feature_code": _normalize_text(parts[7]).upper(),
+                    "country_code": _normalize_text(parts[8]).upper(),
+                    "population": _safe_int(parts[14], 0) if len(parts) > 14 else 0,
+                }
+                aliases = {_normalize_alias_key(record["name"]), _normalize_alias_key(record["asciiname"])}
+                aliases.update(_normalize_alias_key(x) for x in (_normalize_text(parts[3]) or "").split(","))
+                for alias in aliases:
+                    if not alias:
+                        continue
+                    existing = index.get(alias)
+                    if existing is None:
+                        index[alias] = record
+                        continue
+                    old_rank = _geonames_feature_rank(existing.get("feature_code"))
+                    new_rank = _geonames_feature_rank(record.get("feature_code"))
+                    if (new_rank > old_rank) or (
+                        new_rank == old_rank
+                        and record["population"] > _safe_int(existing.get("population"), 0)
+                    ):
+                        index[alias] = record
+    except Exception:
+        return {}
+
+    return index
+
+
+def _get_city_centroid(city: Any) -> Optional[Dict[str, Any]]:
+    key = _normalize_alias_key(city)
+    if not key:
+        return None
+    return _load_city_centroids().get(key)
+
+
+def _city_coord(city: Any) -> Optional[Dict[str, float]]:
+    centroid = _get_city_centroid(city)
+    if not centroid:
+        return None
+    lat = _safe_float(centroid.get("lat"), 0.0)
+    lng = _safe_float(centroid.get("lng"), 0.0)
+    if lat == 0.0 and lng == 0.0:
+        return None
+    return {"lat": lat, "lng": lng}
+
+
+def _haversine_distance_km(lat1: float, lng1: float, lat2: float, lng2: float) -> float:
+    r = 6371.0
+    dlat = math.radians(lat2 - lat1)
+    dlng = math.radians(lng2 - lng1)
+    a = (
+        math.sin(dlat / 2) ** 2
+        + math.cos(math.radians(lat1))
+        * math.cos(math.radians(lat2))
+        * math.sin(dlng / 2) ** 2
+    )
+    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+    return r * c
+
+
+def _coord_key(coord: Dict[str, float]) -> str:
+    return f"{_safe_float(coord.get('lat'), 0.0):.5f},{_safe_float(coord.get('lng'), 0.0):.5f}"
+
+
+def _distance_between_coords(origin: Dict[str, float], destination: Dict[str, float]) -> float:
+    return _haversine_distance_km(
+        _safe_float(origin.get("lat"), 0.0),
+        _safe_float(origin.get("lng"), 0.0),
+        _safe_float(destination.get("lat"), 0.0),
+        _safe_float(destination.get("lng"), 0.0),
+    )
+
+
+def _env_bool(name: str, default: bool = False) -> bool:
+    value = os.getenv(name)
+    if value is None:
+        return default
+    return str(value).strip().lower() in {"1", "true", "yes", "y", "on"}
+
+
+def _airport_type_rank(airport_type: Any) -> int:
+    return {
+        "large_airport": 5,
+        "medium_airport": 4,
+        "small_airport": 3,
+    }.get(_normalize_text(airport_type).lower(), 0)
+
+
+@lru_cache(maxsize=1)
+def _load_airports_by_iata() -> Dict[str, Dict[str, Any]]:
+    if not AIRPORT_MAPPING_PATH.exists():
+        return {}
+
+    try:
+        with AIRPORT_MAPPING_PATH.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+    except Exception:
+        return {}
+
+    result: Dict[str, Dict[str, Any]] = {}
+    if not isinstance(raw, dict):
+        return result
+
+    for iata_key, airport in raw.items():
+        if not isinstance(airport, dict):
+            continue
+        iata = _normalize_text(airport.get("iata") or iata_key).upper()
+        lat = _safe_float(airport.get("lat"), 0.0)
+        lng = _safe_float(airport.get("lng"), 0.0)
+        airport_type = _normalize_text(airport.get("type")).lower()
+        if not iata or (lat == 0.0 and lng == 0.0) or airport_type not in {"large_airport", "medium_airport", "small_airport"}:
+            continue
+        result[iata] = {
+            "iata": iata,
+            "name": _normalize_text(airport.get("name")),
+            "city": _normalize_text(airport.get("city")),
+            "country": _normalize_text(airport.get("country")).upper(),
+            "lat": lat,
+            "lng": lng,
+            "type": airport_type,
+        }
+    return result
+
+
+@lru_cache(maxsize=1)
+def _build_city_airport_index() -> Dict[str, List[Dict[str, Any]]]:
+    city_index: Dict[str, List[Dict[str, Any]]] = {}
+    for airport in _load_airports_by_iata().values():
+        key = _normalize_route_city_key(airport.get("city"))
+        if key:
+            city_index.setdefault(key, []).append(airport)
+
+    for airports in city_index.values():
+        airports.sort(key=lambda x: (-_airport_type_rank(x.get("type")), _normalize_text(x.get("name"))))
+    return city_index
+
+
+def _get_direct_city_airports(city: Any) -> List[Dict[str, Any]]:
+    city_key = _normalize_route_city_key(city)
+    if not city_key:
+        return []
+    city_index = _build_city_airport_index()
+    direct = list(city_index.get(city_key, []))
+    if direct:
+        return direct
+
+    matched: Dict[str, Dict[str, Any]] = {}
+    for indexed_key, airports in city_index.items():
+        if city_key in indexed_key or indexed_key in city_key:
+            for airport in airports:
+                iata = _normalize_text(airport.get("iata")).upper()
+                if iata:
+                    matched[iata] = airport
+    result = list(matched.values())
+    result.sort(key=lambda x: (-_airport_type_rank(x.get("type")), _normalize_text(x.get("name"))))
+    return result
+
+
+def _coord_for_place(place: Any) -> Optional[Dict[str, float]]:
+    text = _normalize_text(place)
+    if not text:
+        return None
+    city_coord = _city_coord(text)
+    if city_coord:
+        return city_coord
+    airport = _load_airports_by_iata().get(text.upper())
+    if airport:
+        return {"lat": _safe_float(airport.get("lat"), 0.0), "lng": _safe_float(airport.get("lng"), 0.0)}
+    return None
+
+
+def _find_gateway_for_city(city: Any, selected_city_keys: Dict[str, str]) -> Dict[str, Any]:
+    city_name = _normalize_text(city)
+    city_key = _normalize_route_city_key(city_name)
+    direct_airports = _get_direct_city_airports(city_name)
+    if direct_airports:
+        return {
+            "gateway_city": city_name,
+            "gateway_city_key": city_key,
+            "airport": direct_airports[0],
+            "uses_other_selected_city_airport": False,
+            "has_direct_airport": True,
+        }
+
+    city_coord = _city_coord(city_name)
+    if not city_coord:
+        return {
+            "gateway_city": city_name,
+            "gateway_city_key": city_key,
+            "airport": None,
+            "uses_other_selected_city_airport": False,
+            "has_direct_airport": False,
+        }
+
+    city_country = _normalize_text((_get_city_centroid(city_name) or {}).get("country_code")).upper()
+    nearby: List[Dict[str, Any]] = []
+    for airport in _load_airports_by_iata().values():
+        airport_city_key = _normalize_route_city_key(airport.get("city"))
+        if not airport_city_key:
+            continue
+        if city_country and _normalize_text(airport.get("country")).upper() != city_country:
+            continue
+        distance_km = _haversine_distance_km(
+            city_coord["lat"],
+            city_coord["lng"],
+            _safe_float(airport.get("lat"), 0.0),
+            _safe_float(airport.get("lng"), 0.0),
+        )
+        if distance_km <= NEARBY_AIRPORT_RADIUS_KM:
+            nearby.append({
+                "airport": airport,
+                "airport_city_key": airport_city_key,
+                "distance_km": distance_km,
+            })
+
+    nearby.sort(key=lambda x: (x["distance_km"], -_airport_type_rank((x.get("airport") or {}).get("type"))))
+    for candidate in nearby:
+        gateway_key = _normalize_text(candidate.get("airport_city_key"))
+        if gateway_key in selected_city_keys and gateway_key != city_key:
+            return {
+                "gateway_city": selected_city_keys[gateway_key],
+                "gateway_city_key": gateway_key,
+                "airport": candidate.get("airport"),
+                "airport_distance_km": round(candidate["distance_km"], 2),
+                "uses_other_selected_city_airport": True,
+                "has_direct_airport": False,
+            }
+
+    if nearby:
+        candidate = nearby[0]
+        airport = candidate.get("airport") or {}
+        return {
+            "gateway_city": _normalize_text(airport.get("city")) or city_name,
+            "gateway_city_key": candidate.get("airport_city_key") or city_key,
+            "airport": airport,
+            "airport_distance_km": round(candidate["distance_km"], 2),
+            "uses_other_selected_city_airport": False,
+            "has_direct_airport": False,
+        }
+
+    return {
+        "gateway_city": city_name,
+        "gateway_city_key": city_key,
+        "airport": None,
+        "uses_other_selected_city_airport": False,
+        "has_direct_airport": False,
+    }
+
+
+def _distance_map_from_origin(
+    origin_coord: Dict[str, float],
+    destination_coords: List[Dict[str, float]],
+) -> Dict[str, Dict[str, Any]]:
+    result: Dict[str, Dict[str, Any]] = {
+        _coord_key(coord): {
+            "distance_km": round(_distance_between_coords(origin_coord, coord), 2),
+            "source": "haversine_fallback",
+        }
+        for coord in destination_coords
+    }
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key or not _env_bool("TRAVEL_CITY_ORDER_USE_MAP_API", True):
+        return result
+
+    try:
+        response = requests.get(
+            GOOGLE_DISTANCE_MATRIX_URL,
+            params={
+                "origins": f"{origin_coord['lat']},{origin_coord['lng']}",
+                "destinations": "|".join(f"{coord['lat']},{coord['lng']}" for coord in destination_coords),
+                "mode": "driving",
+                "key": api_key,
+            },
+            timeout=5,
+        )
+        if response.status_code != 200:
+            return result
+        data = response.json() if response.text else {}
+        rows = data.get("rows") if isinstance(data, dict) else []
+        elements = rows[0].get("elements", []) if rows and isinstance(rows[0], dict) else []
+        for idx, element in enumerate(elements[:len(destination_coords)]):
+            if not isinstance(element, dict) or element.get("status") != "OK":
+                continue
+            distance_m = _safe_float((element.get("distance") or {}).get("value"), 0.0)
+            if distance_m > 0:
+                coord = destination_coords[idx]
+                result[_coord_key(coord)] = {
+                    "distance_km": round(distance_m / 1000.0, 2),
+                    "source": "google_distance_matrix",
+                }
+    except Exception:
+        pass
+    return result
+
+
+def _request_has_explicit_route_sequence(user_request: Any, city_names: List[str]) -> bool:
+    text = _normalize_text(user_request)
+    if not text or len(city_names) < 2:
+        return False
+    markers = [
+        r"(?i)\b(first|second|third|then|next|after that|finally|last)\b",
+        r"(?i)\b(before|after)\b",
+        r"\u7b2c\s*[\u4e00\u4e8c\u4e09\u56db\u4e94\u516d\u4e03\u516b\u4e5d\u5341\d]+\s*\u7ad9",
+        r"\u5148\u53bb|\u5148\u5230|\u7136\u540e|\u518d\u53bb|\u63a5\u7740|\u4e4b\u540e|\u6700\u540e",
+    ]
+    if not any(re.search(pattern, text) for pattern in markers):
+        return False
+    lowered = text.lower()
+    return sum(1 for city in city_names if _normalize_text(city).lower() in lowered) >= 2
+
+
+def _route_order_city_items(
+    city_items: List[Dict[str, Any]],
+    origin: Any,
+    city_plan_mode: Any,
+    user_request: Any,
+) -> Tuple[List[Dict[str, Any]], Dict[str, Any]]:
+    original_items = [dict(item) for item in city_items if isinstance(item, dict)]
+    original_order = [_normalize_text(item.get("city")) for item in original_items if _normalize_text(item.get("city"))]
+    meta: Dict[str, Any] = {
+        "applied": False,
+        "strategy": "gateway_aware_far_to_near_from_origin",
+        "origin": _normalize_text(origin),
+        "original_order": original_order,
+        "optimized_order": original_order,
+    }
+
+    if len(original_items) < 2 or len(original_order) < 2:
+        meta["reason"] = "single_city_or_empty"
+        return original_items, meta
+    if _normalize_text(city_plan_mode) == "user_explicit_city_days":
+        meta["reason"] = "explicit_city_day_or_night_allocation"
+        return original_items, meta
+    if _request_has_explicit_route_sequence(user_request, original_order):
+        meta["reason"] = "explicit_user_sequence_detected"
+        return original_items, meta
+
+    origin_coord = _coord_for_place(origin)
+    if not origin_coord:
+        meta["reason"] = "origin_coordinate_unavailable"
+        return original_items, meta
+
+    selected_city_keys: Dict[str, str] = {}
+    for city in original_order:
+        city_key = _normalize_route_city_key(city)
+        if city_key and city_key not in selected_city_keys:
+            selected_city_keys[city_key] = city
+
+    records: List[Dict[str, Any]] = []
+    anchor_coords: Dict[str, Dict[str, float]] = {}
+    for index, item in enumerate(original_items):
+        city_name = _normalize_text(item.get("city"))
+        if not city_name:
+            continue
+        city_key = _normalize_route_city_key(city_name)
+        gateway = _find_gateway_for_city(city_name, selected_city_keys)
+        gateway_city = _normalize_text(gateway.get("gateway_city")) or city_name
+        anchor_coord = _city_coord(gateway_city) or _city_coord(city_name)
+        airport = gateway.get("airport") if isinstance(gateway.get("airport"), dict) else None
+        if not anchor_coord and airport:
+            anchor_coord = {"lat": _safe_float(airport.get("lat"), 0.0), "lng": _safe_float(airport.get("lng"), 0.0)}
+        if anchor_coord:
+            anchor_coords[_coord_key(anchor_coord)] = anchor_coord
+        gateway_key = _normalize_text(gateway.get("gateway_city_key")) or city_key
+        records.append({
+            "index": index,
+            "item": item,
+            "city": city_name,
+            "city_key": city_key,
+            "gateway": gateway,
+            "gateway_city": gateway_city,
+            "gateway_key": gateway_key,
+            "anchor_coord": anchor_coord,
+            "gateway_rank": 1 if gateway.get("uses_other_selected_city_airport") else 0,
+        })
+
+    distance_map = _distance_map_from_origin(origin_coord, list(anchor_coords.values()))
+    sortable: List[Dict[str, Any]] = []
+    unsortable: List[Dict[str, Any]] = []
+    for record in records:
+        coord = record.get("anchor_coord")
+        if not coord:
+            unsortable.append(record)
+            continue
+        distance_info = distance_map.get(_coord_key(coord))
+        if not distance_info:
+            unsortable.append(record)
+            continue
+        record["distance_km"] = _safe_float(distance_info.get("distance_km"), 0.0)
+        record["distance_source"] = _normalize_text(distance_info.get("source")) or "unknown"
+        sortable.append(record)
+
+    if len(sortable) < 2:
+        meta["reason"] = "insufficient_distance_data"
+        return original_items, meta
+
+    group_distances: Dict[str, float] = {}
+    for record in sortable:
+        group_key = _normalize_text(record.get("gateway_key")) or _normalize_text(record.get("city_key"))
+        group_distances[group_key] = max(
+            group_distances.get(group_key, 0.0),
+            _safe_float(record.get("distance_km"), 0.0),
+        )
+
+    sortable.sort(
+        key=lambda record: (
+            -group_distances.get(_normalize_text(record.get("gateway_key")), _safe_float(record.get("distance_km"), 0.0)),
+            _safe_int(record.get("gateway_rank"), 0),
+            _safe_int(record.get("index"), 0),
+        )
+    )
+
+    ordered_records = sortable + unsortable
+    ordered_items = [dict(record["item"]) for record in ordered_records]
+    optimized_order = [_normalize_text(item.get("city")) for item in ordered_items if _normalize_text(item.get("city"))]
+    meta["optimized_order"] = optimized_order
+    if optimized_order != original_order:
+        meta["applied"] = True
+    else:
+        meta["reason"] = "already_ordered"
+
+    sources = sorted({
+        _normalize_text(record.get("distance_source"))
+        for record in sortable
+        if _normalize_text(record.get("distance_source"))
+    })
+    meta.update({
+        "distance_unit": "km",
+        "distance_source": sources[0] if len(sources) == 1 else "mixed",
+        "gateway_city_priority": True,
+        "cities": [
+            {
+                "city": record.get("city"),
+                "distance_from_origin_km": (
+                    round(_safe_float(record.get("distance_km"), 0.0), 2)
+                    if record.get("distance_km") is not None
+                    else None
+                ),
+                "distance_anchor_city": record.get("gateway_city"),
+                "gateway_city": record.get("gateway_city"),
+                "gateway_airport": _normalize_text(((record.get("gateway") or {}).get("airport") or {}).get("iata")),
+                "uses_other_selected_city_airport": bool((record.get("gateway") or {}).get("uses_other_selected_city_airport")),
+                "has_direct_airport": bool((record.get("gateway") or {}).get("has_direct_airport")),
+            }
+            for record in ordered_records
+        ],
+    })
+    return ordered_items, meta
+
+
+def _apply_route_ordering_to_city_plan(
+    result: Dict[str, Any],
+    city_plan: Dict[str, Any],
+    user_request: Any,
+) -> None:
+    cities = city_plan.get("cities")
+    if not isinstance(cities, list) or len(cities) < 2:
+        return
+
+    ordered_cities, route_meta = _route_order_city_items(
+        city_items=cities,
+        origin=result.get("origin"),
+        city_plan_mode=city_plan.get("mode"),
+        user_request=user_request,
+    )
+    city_plan["route_ordering"] = route_meta
+    if not route_meta.get("applied"):
+        return
+
+    city_plan["cities"] = ordered_cities
+    destination = result.get("destination")
+    if isinstance(destination, list) and len(destination) > 1:
+        destination_keys = {_normalize_route_city_key(city) for city in destination}
+        ordered_keys = {_normalize_route_city_key(item.get("city")) for item in ordered_cities}
+        if destination_keys == ordered_keys:
+            result["destination"] = [_normalize_text(item.get("city")) for item in ordered_cities]
+
+
 def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
     """
     Generate a city-level travel plan based on structured travel input.
@@ -532,11 +1092,15 @@ def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
 
         if explicit_city_days and len(explicit_city_days) == len(destination):
             explicit_total = sum(item["days"] for item in explicit_city_days)
+            explicit_units = {_normalize_text(item.get("unit")) for item in explicit_city_days}
 
             city_plan["mode"] = "user_explicit_city_days"
             city_plan["cities"] = explicit_city_days
 
-            result["duration_days"] = explicit_total
+            if explicit_units <= {"days"}:
+                result["duration_days"] = explicit_total
+            elif explicit_units <= {"nights"} and not result.get("duration_days"):
+                result["duration_days"] = explicit_total + 1
         else:
             city_plan["mode"] = "user_specified"
 
@@ -548,10 +1112,11 @@ def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
                 }]
             else:
                 equal_ratio_items = []
-                for city_name in destination[:_max_city_count_by_duration(result.get("duration_days", duration_days))]:
+                explicit_destinations = destination
+                for city_name in explicit_destinations:
                     equal_ratio_items.append({
                         "city": _normalize_text(city_name),
-                        "days_ratio": 1.0 / len(destination[:_max_city_count_by_duration(result.get("duration_days", duration_days))]),
+                        "days_ratio": 1.0 / len(explicit_destinations),
                         "source": "user"
                     })
 
@@ -588,6 +1153,8 @@ def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
     else:
         city_plan["mode"] = "unknown"
         city_plan["cities"] = []
+
+    _apply_route_ordering_to_city_plan(result, city_plan, user_request=user_request)
 
     result["city_plan"] = city_plan
     result["primary_destination"] = _get_effective_primary_destination(result, db)

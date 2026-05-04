@@ -39,11 +39,12 @@ def _safe_float(value: Any, default: float = 0.0) -> float:
         return default
 
 
+def _money_amount(value: Any) -> int:
+    return int(round(_safe_float(value, 0.0)))
+
+
 def _money(value: Any, currency: str = "CNY") -> str:
-    amount = _safe_float(value, 0.0)
-    if abs(amount - round(amount)) < 0.005:
-        return f"{int(round(amount))} {currency}"
-    return f"{amount:.2f} {currency}"
+    return f"{_money_amount(value)} {currency}"
 
 
 def _traveler_count(router_output: Dict[str, Any]) -> int:
@@ -475,7 +476,10 @@ def _collect_route_points(router_output: Dict[str, Any]) -> List[Dict[str, Any]]
                 "estimated_coord": estimated_coord,
             })
 
-    return _spread_duplicate_points(_sort_route_points(points))
+    route_points = _spread_duplicate_points(_sort_route_points(points))
+    for point in route_points:
+        point["cost"] = _money_amount(point.get("cost"))
+    return route_points
 
 
 def _day_total(day: Dict[str, Any], actual_checkin_dates: Optional[Dict[str, str]] = None) -> float:
@@ -1013,8 +1017,12 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
     let progressLine = null;
     let currentMarker = null;
 
+    function moneyAmount(value) {{
+      return Math.round(Number(value) || 0);
+    }}
+
     function pointLabel(p, idx) {{
-      return `<strong>${{idx + 1}}. ${{p.name}}</strong><br>${{p.date}} | ${{p.city}}<br>${{p.time}} | ${{p.type}}<br>${{p.cost}} {currency}${{p.estimated_coord ? '<br><em>Approximate location</em>' : ''}}`;
+      return `<strong>${{idx + 1}}. ${{p.name}}</strong><br>${{p.date}} | ${{p.city}}<br>${{p.time}} | ${{p.type}}<br>${{moneyAmount(p.cost)}} {currency}${{p.estimated_coord ? '<br><em>Approximate location</em>' : ''}}`;
     }}
 
     function updateStep(idx, pan = true) {{
@@ -1066,7 +1074,7 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
       currentMarker.bindPopup(pointLabel(p, currentIndex));
       stepTitle.textContent = `${{currentIndex + 1}} / ${{routePoints.length}} | ${{p.name}}`;
       stepDetail.textContent = `${{p.date || ''}} ${{p.time || ''}} | ${{p.city}} | ${{p.type}}${{p.estimated_coord ? ' | approximate location' : ''}}`;
-      stepCost.textContent = `${{p.cost || 0}} {currency}`;
+      stepCost.textContent = `${{moneyAmount(p.cost)}} {currency}`;
       if (pan) {{
         const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
         map.flyTo(activeLatLng, targetZoom, {{ animate: true, duration: 1.35 }});
@@ -1126,7 +1134,7 @@ def render_travel_report_html(router_output: Dict[str, Any], user_request: str) 
       routeStep.max = String(routePoints.length - 1);
       false && routePoints.forEach((p, idx) => {{
         L.marker([p.lat, p.lng]).addTo(map).bindPopup(
-          `<strong>${{idx + 1}}. ${{p.name}}</strong><br>${{p.date}} | ${{p.city}}<br>${{p.time}} | ${{p.type}}<br>${{p.cost}} {currency}${{p.estimated_coord ? '<br><em>Approximate location</em>' : ''}}`
+          `<strong>${{idx + 1}}. ${{p.name}}</strong><br>${{p.date}} | ${{p.city}}<br>${{p.time}} | ${{p.type}}<br>${{moneyAmount(p.cost)}} {currency}${{p.estimated_coord ? '<br><em>Approximate location</em>' : ''}}`
         );
       }});
       if (latLngs.length > 1) {{

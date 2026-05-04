@@ -94,6 +94,7 @@ class Agent3Selection:
         self.hotel_features = self._extract_string_list(
             self.raw_preferences.get("hotel_features")
         )
+        self.hotel_area = self._normalize_text(self.raw_preferences.get("hotel_area"))
         self.food_preferences = self._extract_string_list(
             self.raw_preferences.get("food_preferences")
         )
@@ -223,6 +224,7 @@ class Agent3Selection:
         self.city_budget_plan, self.budget_source = self._extract_city_budget_plan()
         self.city_date_ranges = self._build_city_date_ranges()
         self.total_budget_plan = self.raw_input.get("budget_plan", {}) or {}
+        self.hotel_area_fallbacks: Dict[str, Dict[str, Any]] = {}
 
         self.rooms_needed = max(1, math.ceil(self.num_people / 2))
 
@@ -238,9 +240,11 @@ class Agent3Selection:
         self.hotel_budget_tolerance = 1.20
         self.poi_budget_tolerance = 1.00
         self.restaurant_budget_tolerance = 1.00
+        self.target_budget_utilization_min = 0.75
+        self.target_budget_utilization_max = 0.90
         self.min_flight_distance_km = 180.0
         self.flight_buffer_hours = 2.0
-        self.max_direct_drive_hours_for_auto_drive = 5.0
+        self.max_direct_drive_hours_for_auto_drive = 4.0
         self.nearby_airport_radius_km = 220.0
         self.max_nearby_airport_candidates = 5
         self.drive_metrics_cache: Dict[str, Dict[str, Any]] = {}
@@ -1033,6 +1037,10 @@ class Agent3Selection:
         if not route:
             return False, None, "empty_route"
 
+        direct_drive_h = self._safe_float(route.get("direct_drive_hours"), 0.0)
+        if 0 < direct_drive_h <= self.max_direct_drive_hours_for_auto_drive:
+            return True, direct_drive_h, "direct_drive_under_4h"
+
         from_airport = route.get("from_airport")
         to_airport = route.get("to_airport")
 
@@ -1055,6 +1063,25 @@ class Agent3Selection:
     # Agent1 / Agent2 alignment
     # =========================================================
     def _extract_effective_cities(self) -> List[Dict[str, Any]]:
+        city_plan = self.parsed_request.get("city_plan", {}) or {}
+        planned_cities = city_plan.get("cities", [])
+        city_plan_mode = self._normalize_text(city_plan.get("mode"))
+
+        if city_plan_mode == "user_explicit_city_days" and isinstance(planned_cities, list) and planned_cities:
+            normalized_from_explicit: List[Dict[str, Any]] = []
+            for item in planned_cities:
+                if not isinstance(item, dict):
+                    continue
+                city_name = self._normalize_text(item.get("city"))
+                if city_name:
+                    normalized_from_explicit.append({
+                        "city": city_name,
+                        "days": max(1, self._safe_int(item.get("days"), 1)),
+                        "source": self._normalize_text(item.get("source")) or "user_explicit",
+                    })
+            if normalized_from_explicit:
+                return normalized_from_explicit
+
         city_budget_plan = (
             self.raw_input.get("city_budget_plan")
             or self.budget_result.get("city_budget_plan")
@@ -1076,9 +1103,6 @@ class Agent3Selection:
                     })
             if normalized:
                 return normalized
-
-        city_plan = self.parsed_request.get("city_plan", {}) or {}
-        planned_cities = city_plan.get("cities", [])
 
         if isinstance(planned_cities, list) and planned_cities:
             for item in planned_cities:
@@ -1431,8 +1455,7 @@ class Agent3Selection:
             )
 
         flight_legs: List[Dict[str, Any]] = [outbound_route]
-        if not self._has_mid_distance_car_rental_plan():
-            flight_legs.extend(intercity_routes)
+        flight_legs.extend(intercity_routes)
         if inbound_route.get("departure_date"):
             flight_legs.append(inbound_route)
 
@@ -1781,35 +1804,70 @@ class Agent3Selection:
     # =========================================================
     # query builders
     # =========================================================
-    def _build_hotel_query(self, city: str) -> str:
+    def _hotel_area_for_city(self, city: str) -> Optional[str]:
+        area = self._normalize_text(self.hotel_area)
+        if not area:
+            return None
+
+        if len(self.effective_cities) <= 1:
+            return area
+
+        area_key = self._normalize_city_key(area)
+        city_key = self._normalize_city_key(city)
+        if city_key and city_key in area_key:
+            return area
+
+        known_area_markers = {
+            "tokyo": ["ginza", "shinjuku", "shibuya", "ueno", "asakusa", "roppongi", "akihabara", "\u6771\u4eac", "\u94f6\u5ea7"],
+            "osaka": ["osaka", "umeda", "namba", "shinsaibashi", "\u5927\u962a", "\u6885\u7530", "\u96be\u6ce2", "\u5fc3\u658b\u6865"],
+            "kyoto": ["kyoto", "kyoto station", "gion", "karasuma", "\u4eac\u90fd", "\u4eac\u90fd\u7ad9", "\u7947\u56ed", "\u56db\u6761"],
+            "seoul": ["hongdae", "myeongdong", "gangnam", "insadong", "itaewon", "\ud64d\ub300", "\uba85\ub3d9", "\uac15\ub0a8"],
+            "busan": ["haeundae", "seomyeon", "gwangalli", "\ud574\uc6b4\ub300", "\uc11c\uba74", "\uad11\uc548\ub9ac"],
+            "paris": ["latin quarter", "marais", "saint germain", "opera", "montmartre"],
+            "london": ["soho", "covent garden", "mayfair", "paddington", "kensington"],
+            "new york": ["midtown", "times square", "soho", "chelsea", "tribeca"],
+        }
+        if any(marker in area_key for marker in known_area_markers.get(city_key, [])):
+            return area
+
+        # When the area is explicit but not in our small district map, treat it
+        # as a soft preference for the first stay city instead of silently
+        # dropping it. This preserves user intent for places like Hongdae.
+        first_city = self._normalize_text((self.effective_cities[0] or {}).get("city")) if self.effective_cities else ""
+        if city_key and city_key == self._normalize_city_key(first_city):
+            return area
+        return None
+
+    def _build_hotel_query(self, city: str, hotel_area: Optional[str] = None) -> str:
         level = self._target_hotel_level()
         features = set(self.hotel_features)
+        city_target = f"{hotel_area}, {city}" if self._normalize_text(hotel_area) else city
 
         if level == "budget":
             if "central" in features:
-                return f"budget central hotels in {city}"
-            return f"budget hotels in {city}"
+                return f"budget central hotels in {city_target}"
+            return f"budget hotels in {city_target}"
         if level == "luxury":
             if "central" in features:
-                return f"luxury central hotels in {city}"
-            return f"luxury hotels in {city}"
+                return f"luxury central hotels in {city_target}"
+            return f"luxury hotels in {city_target}"
         if level == "premium":
             if "central" in features and "clean" in features:
-                return f"well-rated central 4 star hotels in {city}"
+                return f"well-rated central 4 star hotels in {city_target}"
             if "central" in features:
-                return f"central 4 star hotels in {city}"
+                return f"central 4 star hotels in {city_target}"
             if "clean" in features:
-                return f"well-rated clean 4 star hotels in {city}"
-            return f"4 star hotels in {city}"
+                return f"well-rated clean 4 star hotels in {city_target}"
+            return f"4 star hotels in {city_target}"
         if "central" in features:
-            return f"central hotels in {city}"
+            return f"central hotels in {city_target}"
         if "clean" in features:
-            return f"well-rated clean hotels in {city}"
+            return f"well-rated clean hotels in {city_target}"
         if self.hotel_pref == "central":
-            return f"central hotels in {city}"
+            return f"central hotels in {city_target}"
         if self.hotel_pref == "clean":
-            return f"well-rated clean hotels in {city}"
-        return f"Hotels in {city}"
+            return f"well-rated clean hotels in {city_target}"
+        return f"Hotels in {city_target}"
 
     def _poi_style_query(self, city: str, style: str) -> str:
         if style == "historical":
@@ -2406,12 +2464,13 @@ class Agent3Selection:
         city: str,
         check_in_date: str,
         check_out_date: str,
-        max_results: int = 10
+        max_results: int = 10,
+        hotel_area: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         url = "https://www.searchapi.io/api/v1/search"
         params = {
             "engine": "google_hotels",
-            "q": self._build_hotel_query(city),
+            "q": self._build_hotel_query(city, hotel_area=hotel_area),
             "check_in_date": check_in_date,
             "check_out_date": check_out_date,
             "currency": self.currency,
@@ -2463,11 +2522,19 @@ class Agent3Selection:
             if len(normalized) >= max_results:
                 break
 
+        if hotel_area:
+            for item in normalized:
+                item["hotel_area_query"] = hotel_area
         return normalized
 
-    def fetch_hotel_candidates_from_google_places(self, city: str, max_results: int = 20) -> List[Dict[str, Any]]:
+    def fetch_hotel_candidates_from_google_places(
+        self,
+        city: str,
+        max_results: int = 20,
+        hotel_area: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         try:
-            query = self._build_hotel_query(city)
+            query = self._build_hotel_query(city, hotel_area=hotel_area)
             places = self.search_places_new(query, max_results=max_results)
             hotels = []
             for hotel in places:
@@ -2485,6 +2552,7 @@ class Agent3Selection:
                     "types": hotel.get("types", []),
                     "price_level": hotel.get("priceLevel"),
                     "source": "google_places_fallback",
+                    "hotel_area_query": hotel_area,
                     "realtime_price_available": False,
                     "realtime_nightly_per_room": None,
                     "realtime_total_cost": None,
@@ -2497,21 +2565,61 @@ class Agent3Selection:
         date_info = self.city_date_ranges.get(city, {})
         check_in = date_info.get("check_in")
         check_out = date_info.get("check_out")
+        hotel_area = self._hotel_area_for_city(city)
+        area_search_failed = False
 
         if check_in and check_out:
+            if hotel_area:
+                try:
+                    hotels = self.search_hotels_searchapi(
+                        city=city,
+                        check_in_date=check_in,
+                        check_out_date=check_out,
+                        max_results=max_results,
+                        hotel_area=hotel_area,
+                    )
+                    if hotels:
+                        return hotels, "searchapi_google_hotels_area_preferred"
+                except Exception:
+                    area_search_failed = True
             try:
                 hotels = self.search_hotels_searchapi(
                     city=city,
                     check_in_date=check_in,
                     check_out_date=check_out,
-                    max_results=max_results
+                    max_results=max_results,
                 )
                 if hotels:
+                    if hotel_area:
+                        self.hotel_area_fallbacks[city] = {
+                            "requested_area": hotel_area,
+                            "fallback": "city_level_search",
+                            "reason": "area_search_failed" if area_search_failed else "no_hotel_results_for_requested_area",
+                        }
+                        for hotel in hotels:
+                            hotel["hotel_area_fallback"] = True
                     return hotels, "searchapi_google_hotels"
             except Exception:
                 pass
 
+        if hotel_area:
+            fallback_hotels = self.fetch_hotel_candidates_from_google_places(
+                city,
+                max_results=max_results,
+                hotel_area=hotel_area,
+            )
+            if fallback_hotels:
+                return fallback_hotels, "google_places_area_preferred"
+            self.hotel_area_fallbacks[city] = {
+                "requested_area": hotel_area,
+                "fallback": "city_level_search",
+                "reason": "area_search_failed" if area_search_failed else "no_hotel_results_for_requested_area",
+            }
+
         fallback_hotels = self.fetch_hotel_candidates_from_google_places(city, max_results=max_results)
+        if hotel_area:
+            for hotel in fallback_hotels:
+                hotel["hotel_area_fallback"] = True
         return fallback_hotels, "google_places_fallback"
 
     # =========================================================
@@ -2527,6 +2635,8 @@ class Agent3Selection:
         if self.flight_type == "economy_class":
             return ["economy"]
         if self.flight_type == "comfort" or self.flight_pref == "comfort":
+            return ["economy", "business"]
+        if not self.budget_pressure_mode and self.total_budget >= 50000 and self.flight_pref != "cheap":
             return ["economy", "business"]
         return ["economy"]
 
@@ -2832,6 +2942,7 @@ class Agent3Selection:
     def _estimate_restaurant_cost(self, restaurant: Dict[str, Any], city_days: int) -> Dict[str, Any]:
         tier_result = self._get_restaurant_tier(restaurant)
         estimated_meal_per_person = float(tier_result.get("tier_price_per_person", 300))
+        pre_spend_up_meal_per_person = estimated_meal_per_person
         if self.budget_pressure_mode:
             estimated_meal_per_person = min(estimated_meal_per_person, 100.0)
             tier_result = {
@@ -2840,8 +2951,39 @@ class Agent3Selection:
                 "source": "budget_pressure_cap",
                 "reason": "Budget is a hard cap, so restaurant execution is capped at budget/local meal pricing.",
             }
-        recommended_visits = 1
+        else:
+            city = self._normalize_text(restaurant.get("city"))
+            city_key = self._normalize_city_key(city)
+            city_food_budget = 0.0
+            for item in self.city_budget_plan:
+                if self._normalize_city_key(item.get("city")) == city_key:
+                    city_food_budget = self._safe_float(item.get("food_budget"), 0.0)
+                    break
+            if city_food_budget > 0:
+                total_meal_slots = max(1, city_days * 3)
+                target_per_person = city_food_budget / total_meal_slots / max(1, self.num_people)
+                spend_up_meal = min(max(estimated_meal_per_person, target_per_person * 0.9), target_per_person, 1800.0)
+                if spend_up_meal > estimated_meal_per_person:
+                    estimated_meal_per_person = round(spend_up_meal, 2)
+                    tier_result = {
+                        **tier_result,
+                        "tier_price_per_person": estimated_meal_per_person,
+                        "source": "budget_spend_up",
+                        "reason": "Budget has room, so meal tier is raised toward the city dining allocation.",
+                    }
+        if self.budget_pressure_mode:
+            recommended_visits = 1
+        else:
+            recommended_visits = round(
+                max(1.0, (max(1, city_days) * 3) / max(1, self._restaurant_target_count(city_days))),
+                2,
+            )
         estimated_total_cost = round(estimated_meal_per_person * self.num_people * recommended_visits, 2)
+        if self._normalize_text(tier_result.get("source")) == "budget_spend_up":
+            restaurant["pre_spend_up_estimated_total_cost"] = round(
+                pre_spend_up_meal_per_person * self.num_people * recommended_visits,
+                2,
+            )
         restaurant["estimated_meal_per_person"] = estimated_meal_per_person
         restaurant["recommended_visits"] = recommended_visits
         restaurant["estimated_total_cost"] = estimated_total_cost
@@ -2851,12 +2993,54 @@ class Agent3Selection:
             restaurant["meal_tier_reason"] = self._normalize_text(tier_result.get("reason"))
         return restaurant
 
+    def _city_hotel_budget_for_city(self, city: Any) -> float:
+        city_key = self._normalize_city_key(city)
+        if not city_key:
+            return 0.0
+        for item in self.city_budget_plan:
+            if self._normalize_city_key(item.get("city")) == city_key:
+                return self._safe_float(item.get("hotel_budget"), 0.0)
+        return 0.0
+
+    def _apply_hotel_cost_spend_up(
+        self,
+        hotel: Dict[str, Any],
+        estimated_total_cost: float,
+        estimated_nightly_per_room: float,
+        city_nights: int,
+    ) -> Tuple[float, float]:
+        if self.budget_pressure_mode:
+            return estimated_total_cost, estimated_nightly_per_room
+
+        city_hotel_budget = self._city_hotel_budget_for_city(hotel.get("city"))
+        if city_hotel_budget <= 0:
+            return estimated_total_cost, estimated_nightly_per_room
+
+        target_total = min(city_hotel_budget, max(estimated_total_cost, city_hotel_budget * 0.85))
+        if target_total <= estimated_total_cost:
+            return estimated_total_cost, estimated_nightly_per_room
+
+        hotel["pre_spend_up_estimated_total_cost"] = round(estimated_total_cost, 2)
+        hotel["hotel_cost_spend_up"] = True
+        estimated_total_cost = round(target_total, 2)
+        estimated_nightly_per_room = round(
+            estimated_total_cost / max(1, self.rooms_needed) / max(1, city_nights),
+            2,
+        )
+        return estimated_total_cost, estimated_nightly_per_room
+
     def _estimate_hotel_cost(self, hotel: Dict[str, Any], city_days: int, city_nights: int) -> Dict[str, Any]:
         city_nights = max(1, city_nights)
 
         if hotel.get("realtime_total_cost") is not None:
             estimated_total_cost = round(self._safe_float(hotel.get("realtime_total_cost"), 0.0), 2)
             nightly_per_room = self._safe_float(hotel.get("realtime_nightly_per_room"), 0.0)
+            estimated_total_cost, nightly_per_room = self._apply_hotel_cost_spend_up(
+                hotel,
+                estimated_total_cost,
+                nightly_per_room,
+                city_nights,
+            )
             hotel["estimated_total_cost"] = estimated_total_cost
             hotel["estimated_nightly_per_room"] = nightly_per_room
             return hotel
@@ -2887,6 +3071,13 @@ class Agent3Selection:
         estimated_total_cost = round(
             estimated_nightly_per_room * self.rooms_needed * city_nights,
             2
+        )
+
+        estimated_total_cost, estimated_nightly_per_room = self._apply_hotel_cost_spend_up(
+            hotel,
+            estimated_total_cost,
+            estimated_nightly_per_room,
+            city_nights,
         )
 
         hotel["estimated_total_cost"] = estimated_total_cost
@@ -3582,6 +3773,15 @@ class Agent3Selection:
                     )
             return enriched
 
+        if not self.budget_pressure_mode and budget > 0:
+            target_floor = budget * 0.55
+            targeted = [
+                f for f in ranked
+                if target_floor <= self._safe_float(f.get("price_total"), 0.0) <= budget
+            ]
+            if targeted:
+                return finalize(targeted), "within_budget_target_utilization"
+
         strict = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget]
         if strict:
             return finalize(strict), "within_budget_generalized_cost"
@@ -3896,7 +4096,7 @@ class Agent3Selection:
         return ranked[:max_items], "not_found_within_tolerance"
 
     def _get_hotel_reference_total_by_city(self, selected_hotels: List[Dict[str, Any]]) -> float:
-        city_min_map: Dict[str, float] = {}
+        city_reference_map: Dict[str, float] = {}
 
         for hotel in selected_hotels:
             city = self._normalize_text(hotel.get("city"))
@@ -3904,10 +4104,10 @@ class Agent3Selection:
             if not city or cost <= 0:
                 continue
 
-            if city not in city_min_map or cost < city_min_map[city]:
-                city_min_map[city] = cost
+            if city not in city_reference_map or cost > city_reference_map[city]:
+                city_reference_map[city] = cost
 
-        return round(sum(city_min_map.values()), 2)
+        return round(sum(city_reference_map.values()), 2)
 
     # =========================================================
     # flight leg helpers
@@ -4257,8 +4457,8 @@ class Agent3Selection:
         stop_penalty = self._flight_stop_penalty_cny(stops)
         timing_penalty = self._flight_timing_penalty_cny(flight, leg_type)
         budget_utilization_penalty = 0.0
-        if budget > 0 and price < budget:
-            budget_utilization_penalty = max(0.0, 1.0 - price / budget) * 40.0
+        if budget > 0 and price < budget and not self.budget_pressure_mode:
+            budget_utilization_penalty = max(0.0, 1.0 - price / budget) * min(1200.0, budget * 0.08)
         return round(price + time_cost + stop_penalty + timing_penalty + budget_utilization_penalty, 2)
 
     def _finalize_selected_flight_reason(self, flight: Dict[str, Any], budget: float) -> Dict[str, Any]:
@@ -4380,6 +4580,8 @@ class Agent3Selection:
         direct_drive_h = self._safe_float(leg.get("direct_drive_hours"), 0.0)
         if direct_drive_h <= 0:
             return flights, "drive_time_unavailable"
+        if direct_drive_h <= self.max_direct_drive_hours_for_auto_drive:
+            return [], "direct_drive_under_4h"
 
         annotated = [self._annotate_flight_ground_time(flight, leg) for flight in flights]
         faster_or_equal_flights = [
@@ -4400,27 +4602,13 @@ class Agent3Selection:
         for item in best:
             item["why_selected"] = (
                 self._normalize_text(item.get("why_selected"))
-                + "; flight kept although direct drive is estimated faster because direct drive exceeds the 5h drive constraint"
+                + "; flight kept although direct drive is estimated faster because direct drive exceeds the 4h drive constraint"
             ).strip()
         return best, "direct_drive_faster_but_over_drive_limit"
 
     def _leg_is_short_distance(self, leg: Dict[str, Any]) -> bool:
-        from_city = self._normalize_city_key(leg.get("from_city"))
-        to_city = self._normalize_city_key(leg.get("to_city"))
-
-        known_near_pairs = {
-            ("tokyo", "osaka"): True,
-            ("osaka", "kyoto"): True,
-            ("paris", "brussels"): True,
-            ("vienna", "prague"): True,
-        }
-
-        if (from_city, to_city) in known_near_pairs:
-            return known_near_pairs[(from_city, to_city)]
-        if (to_city, from_city) in known_near_pairs:
-            return known_near_pairs[(to_city, from_city)]
-
-        return False
+        direct_drive_h = self._safe_float(leg.get("direct_drive_hours"), 0.0)
+        return 0 < direct_drive_h <= self.max_direct_drive_hours_for_auto_drive
 
     def _direct_drive_cost_estimate(self) -> float:
         level = self._normalize_text(self.cost_level).lower()
@@ -4434,6 +4622,8 @@ class Agent3Selection:
         direct_drive_h = self._safe_float(leg.get("direct_drive_hours"), 0.0)
         if direct_drive_h <= 0:
             return False
+        if direct_drive_h <= self.max_direct_drive_hours_for_auto_drive:
+            return True
         if "direct_drive_faster" in self._normalize_text(fetch_status):
             return direct_drive_h <= self.max_direct_drive_hours_for_auto_drive
         if "missing_route_info" in self._normalize_text(fetch_status):
@@ -4469,8 +4659,8 @@ class Agent3Selection:
                 "estimated_drive_hours": round(drive_h, 2) if drive_h > 0 else None,
                 "estimated_drive_distance_km": round(drive_km, 2) if drive_km > 0 else None,
                 "comparison_note": (
-                    "Direct driving was selected because city-to-city driving time was shorter "
-                    "than candidate flight time including airport transfer and 2h airport buffer."
+                    "Direct driving was selected because city-to-city driving time is within "
+                    "the 4h ground-transport rule, so flight search/selection is skipped."
                 ),
             },
         }
@@ -4895,9 +5085,7 @@ class Agent3Selection:
 
             selected_all_flight_legs.append(leg_output)
 
-        rental_intercity_legs = self._build_mid_distance_rental_legs(
-            route_plan.get("intercity", []) or []
-        )
+        rental_intercity_legs: List[Dict[str, Any]] = []
         if rental_intercity_legs:
             selected_intercity_flights.extend(rental_intercity_legs)
             selected_all_flight_legs.extend(rental_intercity_legs)
@@ -5069,6 +5257,10 @@ class Agent3Selection:
                     "estimated_total_cost": hotel.get("estimated_total_cost"),
                     "realtime_price_available": hotel.get("realtime_price_available"),
                     "realtime_nightly_per_room": hotel.get("realtime_nightly_per_room"),
+                    "hotel_area_query": hotel.get("hotel_area_query"),
+                    "hotel_area_fallback": hotel.get("hotel_area_fallback"),
+                    "hotel_cost_spend_up": hotel.get("hotel_cost_spend_up"),
+                    "pre_spend_up_estimated_total_cost": hotel.get("pre_spend_up_estimated_total_cost"),
                     "why_selected": hotel.get("why_selected"),
                 })
 
@@ -5101,6 +5293,7 @@ class Agent3Selection:
                     "estimated_meal_per_person": restaurant.get("estimated_meal_per_person"),
                     "recommended_visits": restaurant.get("recommended_visits"),
                     "estimated_total_cost": restaurant.get("estimated_total_cost"),
+                    "pre_spend_up_estimated_total_cost": restaurant.get("pre_spend_up_estimated_total_cost"),
                     "matched_query": restaurant.get("matched_query"),
                     "local_food_match_score": restaurant.get("local_food_match_score"),
                     "why_selected": restaurant.get("why_selected"),
@@ -5120,7 +5313,9 @@ class Agent3Selection:
                 "hotel_selection_status": f"{hotel_filter_status}|{hotel_status}",
                 "restaurant_selection_status": f"{restaurant_filter_status}|{restaurant_status}",
                 "poi_selection_status": f"{poi_filter_status}|{poi_status}",
-                "hotel_provider": hotel_provider
+                "hotel_provider": hotel_provider,
+                "hotel_area_preference": self._hotel_area_for_city(city),
+                "hotel_area_fallback": self.hotel_area_fallbacks.get(city),
             })
 
             if not selected_city_hotels:
@@ -5129,6 +5324,18 @@ class Agent3Selection:
                 warnings.append(
                     f"Hotel fallback mode applied for {city}: no candidates fully satisfied all hotel preferences, so relaxed selection was used to guarantee output."
                 )
+            if city in self.hotel_area_fallbacks:
+                fallback = self.hotel_area_fallbacks.get(city) or {}
+                requested_area = self._normalize_text(fallback.get("requested_area")) or self.hotel_area
+                fallback_reason = self._normalize_text(fallback.get("reason"))
+                if fallback_reason == "area_search_failed":
+                    warnings.append(
+                        f"Hotel area fallback for {city}: area-level hotel search for {requested_area} failed; expanded to city-level search."
+                    )
+                else:
+                    warnings.append(
+                        f"Hotel area fallback for {city}: no hotels were found near {requested_area}; expanded to city-level search."
+                    )
 
             if not selected_city_restaurants:
                 warnings.append(f"No restaurant candidates selected for {city}.")
@@ -5166,6 +5373,86 @@ class Agent3Selection:
         selected_hotel_total = self._get_hotel_reference_total_by_city(selected_hotels)
         selected_restaurant_total = self._get_sum_selected_total(selected_restaurants, "estimated_total_cost")
         selected_poi_total = self._get_sum_selected_total(selected_pois, "estimated_total_cost")
+        overall_selected_total = round(
+            total_flight_spend
+            + selected_mid_distance_car_rental_total
+            + selected_hotel_total
+            + selected_restaurant_total
+            + selected_poi_total,
+            2
+        )
+
+        if self.total_budget > 0 and not self.budget_pressure_mode and overall_selected_total > self.total_budget:
+            total_reduced = 0.0
+            for _ in range(100):
+                remaining_overage = round(overall_selected_total - self.total_budget, 2)
+                if remaining_overage <= 0:
+                    break
+                reducible_items: List[Dict[str, Any]] = []
+                for item in selected_hotels + selected_restaurants:
+                    current_cost = self._safe_float(item.get("estimated_total_cost"), 0.0)
+                    floor_cost = self._safe_float(item.get("pre_spend_up_estimated_total_cost"), 0.0)
+                    if current_cost > floor_cost > 0:
+                        reducible_items.append(item)
+
+                if not reducible_items:
+                    break
+
+                reducible_items.sort(
+                    key=lambda item: self._safe_float(item.get("estimated_total_cost"), 0.0)
+                    - self._safe_float(item.get("pre_spend_up_estimated_total_cost"), 0.0),
+                    reverse=True,
+                )
+                item = reducible_items[0]
+                current_cost = self._safe_float(item.get("estimated_total_cost"), 0.0)
+                floor_cost = self._safe_float(item.get("pre_spend_up_estimated_total_cost"), 0.0)
+                reducible = max(0.0, current_cost - floor_cost)
+                reduction = min(reducible, remaining_overage)
+                if reduction <= 0:
+                    break
+                new_cost = round(current_cost - reduction, 2)
+                item["estimated_total_cost"] = new_cost
+                item["spend_up_capped_by_total_budget"] = True
+                if item in selected_restaurants:
+                    visits = self._safe_float(item.get("recommended_visits"), 1.0)
+                    if visits > 0 and self.num_people > 0:
+                        meal_per_person = round(new_cost / visits / self.num_people, 2)
+                        item["estimated_meal_per_person"] = meal_per_person
+                        item["meal_tier_per_person"] = int(meal_per_person)
+                total_reduced = round(total_reduced + reduction, 2)
+                selected_hotel_total = self._get_hotel_reference_total_by_city(selected_hotels)
+                selected_restaurant_total = self._get_sum_selected_total(selected_restaurants, "estimated_total_cost")
+                overall_selected_total = round(
+                    total_flight_spend
+                    + selected_mid_distance_car_rental_total
+                    + selected_hotel_total
+                    + selected_restaurant_total
+                    + selected_poi_total,
+                    2
+                )
+
+            if total_reduced > 0:
+                warnings.append(
+                    f"Budget spend-up cap applied: reduced upgraded hotel/meal estimates by {total_reduced} to keep selected spend within the total budget."
+                )
+
+        budget_utilization_ratio = (
+            round(overall_selected_total / self.total_budget, 4)
+            if self.total_budget > 0
+            else None
+        )
+        if self.total_budget <= 0 or budget_utilization_ratio is None:
+            budget_utilization_status = "budget_unavailable"
+        elif self.budget_pressure_mode:
+            budget_utilization_status = "cap_mode"
+        elif budget_utilization_ratio < self.target_budget_utilization_min:
+            budget_utilization_status = "under_target"
+        elif budget_utilization_ratio <= self.target_budget_utilization_max:
+            budget_utilization_status = "target_met"
+        elif budget_utilization_ratio <= 1.0:
+            budget_utilization_status = "above_target_within_budget"
+        else:
+            budget_utilization_status = "over_budget"
 
         budget_fit_status = {
             "flight_total": self._budget_fit_label(
@@ -5175,7 +5462,8 @@ class Agent3Selection:
             ),
             "hotel": "candidate_based_not_summed",
             "food": self._budget_fit_label(selected_restaurant_total, food_budget_input),
-            "attractions": self._budget_fit_label(selected_poi_total, attractions_budget_input)
+            "attractions": self._budget_fit_label(selected_poi_total, attractions_budget_input),
+            "overall": budget_utilization_status,
         }
 
         # -------------------------
@@ -5223,19 +5511,21 @@ class Agent3Selection:
         # Rule 2:
         # If Agent2 allocation is OK, only check the FINAL selected total.
         if not overall_budget_warning_triggered:
-            overall_selected_total = round(
-                total_flight_spend
-                + selected_mid_distance_car_rental_total
-                + selected_hotel_total
-                + selected_restaurant_total
-                + selected_poi_total,
-                2
-            )
-
             if self.total_budget > 0 and overall_selected_total > self.total_budget:
                 warnings.append(
                     f"Overall selected budget warning: total selected spend is {overall_selected_total}, "
                     f"which exceeds the user's total budget {self.total_budget}."
+                )
+            elif (
+                self.total_budget > 0
+                and not self.budget_pressure_mode
+                and budget_utilization_ratio is not None
+                and budget_utilization_ratio < self.target_budget_utilization_min
+            ):
+                warnings.append(
+                    f"Budget utilization warning: selected spend is {overall_selected_total}, "
+                    f"only {round(budget_utilization_ratio * 100, 1)}% of the user's total budget {self.total_budget}; "
+                    "selection could not reach the 75%-90% target with available candidates."
                 )
 
         # De-duplicate warnings while preserving order
@@ -5293,10 +5583,15 @@ class Agent3Selection:
                 "selected_total_transport_spend": total_transport_spend,
                 "selected_hotel_total_reference": selected_hotel_total,
                 "selected_restaurant_total": selected_restaurant_total,
-                "selected_poi_total": selected_poi_total
+                "selected_poi_total": selected_poi_total,
+                "overall_selected_total": overall_selected_total,
+                "budget_utilization_ratio": budget_utilization_ratio,
+                "budget_utilization_status": budget_utilization_status,
             },
             "selection_debug": {
                 "hotel_provider_used": hotel_provider_used,
+                "hotel_area": self.hotel_area,
+                "hotel_area_fallbacks": self.hotel_area_fallbacks,
                 "all_poi_candidates_count": all_poi_candidates_count,
                 "all_hotel_candidates_count": all_hotel_candidates_count,
                 "all_restaurant_candidates_count": all_restaurant_candidates_count,
