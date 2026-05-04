@@ -183,6 +183,8 @@ def _build_flight_day_constraints(selected_all_flight_legs: List[Dict[str, Any]]
 
 def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
     normalized = _normalize_agent3_payload(router_output)
+    refinement_context = normalized.get("refinement_context") or {}
+    activity_radius_km = _refinement_activity_radius_km(refinement_context)
     local_transport_tier = _local_transport_tier_from_cost_level(normalized.get("cost_level"))
     local_transport_rate = _local_transport_rate_per_minute(
         local_transport_tier,
@@ -255,6 +257,7 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
         city_candidates = _filter_city_candidates_by_hotel_radius(
             city_candidates=city_candidates,
             hotel=primary_hotel,
+            activity_radius_km=activity_radius_km,
         )
 
         must_city, _ = _split_must_visit_and_regular_pois(
@@ -340,11 +343,11 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
                 )
             elif bool(radius_meta.get("meal_fallback_used")):
                 day_plan.setdefault("warnings", []).append(
-                    f"No restaurants found within {int(HOTEL_ACTIVITY_RADIUS_KM)}km of hotel; meal search relaxed to {int(HOTEL_MEAL_FALLBACK_RADIUS_KM)}km."
+                    f"No restaurants found within {int(_safe_float(radius_meta.get('poi_limit_km'), HOTEL_ACTIVITY_RADIUS_KM))}km of hotel; meal search relaxed to {int(_safe_float(radius_meta.get('meal_limit_km'), HOTEL_MEAL_FALLBACK_RADIUS_KM))}km."
                 )
             if int(_safe_float(radius_meta.get("poi_in_radius_count"), 0)) <= 0:
                 day_plan.setdefault("warnings", []).append(
-                    f"No POIs found within {int(HOTEL_ACTIVITY_RADIUS_KM)}km of hotel; POI options may be limited."
+                    f"No POIs found within {int(_safe_float(radius_meta.get('poi_limit_km'), HOTEL_ACTIVITY_RADIUS_KM))}km of hotel; POI options may be limited."
                 )
         must_visit_left = must_visit_remaining_by_city.get(city, [])
 
@@ -659,6 +662,7 @@ def _normalize_agent3_payload(router_output: Dict[str, Any]) -> Dict[str, Any]:
         "selected_pois": payload.get("selected_pois", []) or [],
         "selected_all_flight_legs": payload.get("selected_all_flight_legs", []) or [],
         "must_visit_attractions": payload.get("must_visit_attractions") or preferences.get("must_visit_attractions", []) or [],
+        "refinement_context": payload.get("refinement_context", {}) if isinstance(payload.get("refinement_context"), dict) else {},
     }
 
 
@@ -1378,20 +1382,35 @@ def _is_within_hotel_radius(hotel: Dict[str, Any], place: Dict[str, Any], radius
     return distance_km <= max(0.0, _safe_float(radius_km, 0.0))
 
 
+def _refinement_activity_radius_km(refinement_context: Dict[str, Any]) -> Optional[float]:
+    if not isinstance(refinement_context, dict):
+        return None
+    if _normalize_text(refinement_context.get("mode")).lower() != "refine":
+        return None
+    value = _safe_float(refinement_context.get("max_activity_radius_km"), 0.0)
+    if value in {5.0, 10.0, 15.0}:
+        return value
+    return None
+
+
 def _filter_city_candidates_by_hotel_radius(
     city_candidates: Dict[str, List[Dict[str, Any]]],
     hotel: Optional[Dict[str, Any]],
+    activity_radius_km: Optional[float] = None,
 ) -> Dict[str, Any]:
     pois = [x for x in (city_candidates.get("pois", []) or []) if isinstance(x, dict)]
     restaurants = [x for x in (city_candidates.get("restaurants", []) or []) if isinstance(x, dict)]
+    has_refinement_radius = activity_radius_km is not None
+    activity_radius = _safe_float(activity_radius_km, HOTEL_ACTIVITY_RADIUS_KM) if has_refinement_radius else HOTEL_ACTIVITY_RADIUS_KM
+    meal_fallback_radius = activity_radius if has_refinement_radius else HOTEL_MEAL_FALLBACK_RADIUS_KM
 
     if not isinstance(hotel, dict):
         return {
             "pois": pois,
             "restaurants": restaurants,
             "radius_meta": {
-                "poi_limit_km": HOTEL_ACTIVITY_RADIUS_KM,
-                "meal_limit_km": HOTEL_ACTIVITY_RADIUS_KM,
+                "poi_limit_km": activity_radius,
+                "meal_limit_km": activity_radius,
                 "meal_fallback_used": False,
                 "poi_in_radius_count": len(pois),
                 "meal_in_10km_count": len(restaurants),
@@ -1400,23 +1419,23 @@ def _filter_city_candidates_by_hotel_radius(
             },
         }
 
-    pois_in_radius = [p for p in pois if _is_within_hotel_radius(hotel, p, HOTEL_ACTIVITY_RADIUS_KM)]
-    restaurants_in_10 = [r for r in restaurants if _is_within_hotel_radius(hotel, r, HOTEL_ACTIVITY_RADIUS_KM)]
-    restaurants_in_15 = [r for r in restaurants if _is_within_hotel_radius(hotel, r, HOTEL_MEAL_FALLBACK_RADIUS_KM)]
+    pois_in_radius = [p for p in pois if _is_within_hotel_radius(hotel, p, activity_radius)]
+    restaurants_in_radius = [r for r in restaurants if _is_within_hotel_radius(hotel, r, activity_radius)]
+    restaurants_in_fallback = [r for r in restaurants if _is_within_hotel_radius(hotel, r, meal_fallback_radius)]
 
-    use_meal_fallback = not restaurants_in_10 and bool(restaurants_in_15)
-    filtered_restaurants = restaurants_in_10 if restaurants_in_10 else restaurants_in_15
+    use_meal_fallback = not restaurants_in_radius and bool(restaurants_in_fallback)
+    filtered_restaurants = restaurants_in_radius if restaurants_in_radius else restaurants_in_fallback
 
     return {
         "pois": pois_in_radius,
         "restaurants": filtered_restaurants,
         "radius_meta": {
-            "poi_limit_km": HOTEL_ACTIVITY_RADIUS_KM,
-            "meal_limit_km": HOTEL_MEAL_FALLBACK_RADIUS_KM if use_meal_fallback else HOTEL_ACTIVITY_RADIUS_KM,
+            "poi_limit_km": activity_radius,
+            "meal_limit_km": meal_fallback_radius if use_meal_fallback else activity_radius,
             "meal_fallback_used": use_meal_fallback,
             "poi_in_radius_count": len(pois_in_radius),
-            "meal_in_10km_count": len(restaurants_in_10),
-            "meal_in_15km_count": len(restaurants_in_15),
+            "meal_in_10km_count": len([r for r in restaurants if _is_within_hotel_radius(hotel, r, 10.0)]),
+            "meal_in_15km_count": len([r for r in restaurants if _is_within_hotel_radius(hotel, r, 15.0)]),
             "hotel_missing_for_radius_filter": False,
         },
     }
@@ -5002,7 +5021,8 @@ def _resolve_timeline_overlaps(day_plan: Dict[str, Any]) -> None:
             last_end = end
             continue
         is_protected_transfer = event_type == "transfer" and reason in PROTECTED_TRANSFER_REASONS
-        if start < last_end and event_type not in fixed_types and not is_protected_transfer:
+        can_shift_hotel_process = event_type in {"checkin", "checkout"}
+        if start < last_end and (event_type not in fixed_types or can_shift_hotel_process) and not is_protected_transfer:
             delta = last_end - start
             new_start = start + delta
             new_end = end + delta

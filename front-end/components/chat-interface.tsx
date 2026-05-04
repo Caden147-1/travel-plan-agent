@@ -38,6 +38,9 @@ interface PlanResponse {
     estimated_total_cost?: number
     must_visit_coverage?: string
   }
+  refinement_state?: RefinementState
+  upgrade_status?: UpgradeStatus[]
+  planning_baseline?: PlanningBaseline
 }
 
 interface GuidanceResponse {
@@ -59,6 +62,69 @@ interface HistoryItem {
   updatedAt?: string
   status?: "pending" | "ready" | "error" | "cancelled"
   error?: string
+  refinementState?: RefinementState
+  pendingRefinement?: PendingRefinement
+  planningBaselineRequest?: string
+  planningBudgetTotal?: number
+  planningSelectedTotal?: number
+}
+
+type RefinementCategory = "food" | "attractions" | "flight" | "hotel"
+
+interface CategoryCeiling {
+  reason?: string
+  spend?: number
+  budget?: number
+  ratio?: number
+}
+
+interface RefinementState {
+  categoryCeilings?: Partial<Record<RefinementCategory, CategoryCeiling>>
+  categorySpend?: Record<string, { spend?: number; budget?: number; ratio?: number; budget_key?: string }>
+  lastTargetCategories?: RefinementCategory[]
+  maxActivityRadiusKm?: number
+  allowTotalBudgetIncrease?: boolean
+  totalBudget?: number
+  selectedTotal?: number
+}
+
+interface PendingRefinement {
+  targetCategories: RefinementCategory[]
+  followupMessage: string
+  needBudgetDecision: boolean
+  needDistanceDecision: boolean
+  reason?: "standard" | "maxed_budget"
+  allowTotalBudgetIncrease?: boolean
+  newTotalBudget?: number
+  maxActivityRadiusKm?: number
+}
+
+interface UpgradeStatus {
+  category: RefinementCategory
+  status: "upgraded" | "maxed" | string
+  message: string
+  spend?: number
+  budget?: number
+  ratio?: number
+}
+
+interface RefinementContext {
+  mode: "refine"
+  previous_request: string
+  followup_message: string
+  target_categories: RefinementCategory[]
+  allow_total_budget_increase: boolean
+  new_total_budget?: number
+  max_activity_radius_km?: number
+  previous_refinement_state?: RefinementState
+  previous_total_budget?: number
+  previous_selected_total?: number
+}
+
+interface PlanningBaseline {
+  request?: string
+  total_budget?: number
+  selected_total?: number
 }
 
 type DraftMap = Record<string, string>
@@ -109,6 +175,7 @@ export function ChatInterface() {
   const activeConversationId = activeHistoryId ?? null
   const isActiveLoading = Boolean(activeConversationId && loadingByHistoryId[activeConversationId])
   const showActiveLoading = Boolean(activeHistoryItem?.status === "pending" && activeConversationId && loadingByHistoryId[activeConversationId])
+  const maxedCategories = getMaxedCategories(activeHistoryItem?.refinementState)
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" })
@@ -235,8 +302,37 @@ export function ChatInterface() {
       content: request,
     }
     const submittedMessages = [...previousMessages, userMessage]
-    const plannerRequest = buildPlannerRequest(submittedMessages)
-    const requestValidationError = validateRequest(plannerRequest)
+    let plannerRequest = buildPlannerRequest(submittedMessages)
+    let refinementContext: RefinementContext | null = null
+    let nextPendingRefinement: PendingRefinement | undefined
+    let directAssistantContent = ""
+
+    if (existingHistory?.pendingRefinement) {
+      const resolved = resolvePendingRefinement(existingHistory.pendingRefinement, request, existingHistory)
+      if (resolved.rejection) {
+        directAssistantContent = resolved.rejection
+        nextPendingRefinement = undefined
+      } else if (resolved.question) {
+        directAssistantContent = resolved.question
+        nextPendingRefinement = resolved.pendingRefinement
+      } else if (resolved.context) {
+        refinementContext = resolved.context
+        plannerRequest = getPlanningBaselineRequest(existingHistory)
+      }
+    } else {
+      const refinementStart = buildRefinementStart(request, existingHistory)
+      if (refinementStart.rejection) {
+        directAssistantContent = refinementStart.rejection
+      } else if (refinementStart.question) {
+        directAssistantContent = refinementStart.question
+        nextPendingRefinement = refinementStart.pendingRefinement
+      } else if (refinementStart.context) {
+        refinementContext = refinementStart.context
+        plannerRequest = existingHistory ? getPlanningBaselineRequest(existingHistory) : plannerRequest
+      }
+    }
+
+    const requestValidationError = refinementContext ? "" : validateRequest(plannerRequest)
 
     setActiveConversation(historyId)
     clearDraft(previousDraftKey)
@@ -252,11 +348,41 @@ export function ChatInterface() {
         messages: submittedMessages,
         createdAt: existing?.createdAt || now,
         updatedAt: now,
-        status: "pending",
+        status: directAssistantContent ? "ready" : "pending",
         error: undefined,
+        pendingRefinement: nextPendingRefinement,
       }
       return [nextItem, ...previous.filter((item) => item.id !== historyId)]
     })
+
+    if (directAssistantContent) {
+      const nextMessages: Message[] = [
+        ...submittedMessages,
+        {
+          id: crypto.randomUUID(),
+          role: "assistant",
+          content: directAssistantContent,
+        },
+      ]
+      saveHistory((previous) =>
+        previous.map((item) =>
+          item.id === historyId
+            ? {
+                ...item,
+                requestId: item.requestId || `local-${historyId.slice(0, 8)}`,
+                messages: nextMessages,
+                summary: directAssistantContent,
+                status: "ready",
+                pendingRefinement: nextPendingRefinement,
+                updatedAt: new Date().toISOString(),
+              }
+            : item,
+        ),
+      )
+      if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
+      return
+    }
+
     setConversationLoading(historyId, true)
     setThinkingStepIndex(0)
     setThinkingElapsedSeconds(0)
@@ -293,51 +419,56 @@ export function ChatInterface() {
         return
       }
 
-      const guidanceResponse = await fetch(`${apiBase}/api/guidance`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: plannerRequest }),
-        signal: abortController.signal,
-      })
-      const guidanceData = (await guidanceResponse.json()) as GuidanceResponse
+      if (!refinementContext) {
+        const guidanceResponse = await fetch(`${apiBase}/api/guidance`, {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ message: plannerRequest }),
+          signal: abortController.signal,
+        })
+        const guidanceData = (await guidanceResponse.json()) as GuidanceResponse
 
-      if (!guidanceResponse.ok || !guidanceData.success) {
-        throw new Error(guidanceData.error || "Request intake failed.")
-      }
+        if (!guidanceResponse.ok || !guidanceData.success) {
+          throw new Error(guidanceData.error || "Request intake failed.")
+        }
 
-      if (!guidanceData.ready) {
-        const guidance = guidanceData.guidance || buildFallbackGuidance(plannerRequest)
-        const nextMessages: Message[] = [
-          ...submittedMessages,
-          {
-            id: crypto.randomUUID(),
-            role: "assistant",
-            content: guidance,
-          },
-        ]
-        saveHistory((previous) =>
-          previous.map((item) =>
-            item.id === historyId
-              ? {
-                  ...item,
-                  requestId: guidanceData.request_id || item.requestId,
-                  messages: nextMessages,
-                  summary: guidance,
-                  status: "error",
-                  error: guidanceData.error || "The request needs more details.",
-                  updatedAt: new Date().toISOString(),
-                }
-              : item,
-          ),
-        )
-        if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
-        return
+        if (!guidanceData.ready) {
+          const guidance = guidanceData.guidance || buildFallbackGuidance(plannerRequest)
+          const nextMessages: Message[] = [
+            ...submittedMessages,
+            {
+              id: crypto.randomUUID(),
+              role: "assistant",
+              content: guidance,
+            },
+          ]
+          saveHistory((previous) =>
+            previous.map((item) =>
+              item.id === historyId
+                ? {
+                    ...item,
+                    requestId: guidanceData.request_id || item.requestId,
+                    messages: nextMessages,
+                    summary: guidance,
+                    status: "error",
+                    error: guidanceData.error || "The request needs more details.",
+                    updatedAt: new Date().toISOString(),
+                  }
+                : item,
+            ),
+          )
+          if (activeHistoryIdRef.current === historyId) setMessages(nextMessages)
+          return
+        }
       }
 
       const response = await fetch(`${apiBase}/api/plan`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ message: plannerRequest }),
+        body: JSON.stringify({
+          message: plannerRequest,
+          ...(refinementContext ? { refinement_context: refinementContext } : {}),
+        }),
         signal: abortController.signal,
       })
       const data = (await response.json()) as PlanResponse
@@ -390,6 +521,11 @@ export function ChatInterface() {
                 messages: nextMessages,
                 summary,
                 reportUrl: data.report_url,
+                refinementState: data.refinement_state || item.refinementState,
+                planningBaselineRequest: data.planning_baseline?.request || plannerRequest,
+                planningBudgetTotal: data.planning_baseline?.total_budget || data.trip_summary?.budget?.total || item.planningBudgetTotal,
+                planningSelectedTotal: data.planning_baseline?.selected_total || data.itinerary_summary?.estimated_total_cost || item.planningSelectedTotal,
+                pendingRefinement: undefined,
                 status: "ready",
                 updatedAt: new Date().toISOString(),
               }
@@ -679,6 +815,15 @@ export function ChatInterface() {
 
         <div className="border-t border-border p-4">
           <form onSubmit={handleSubmit} className="max-w-3xl mx-auto">
+            {maxedCategories.length > 0 && (
+              <div className="mb-2 flex flex-wrap gap-2">
+                {maxedCategories.map((category) => (
+                  <span key={category} className="rounded-md border border-border bg-secondary px-2 py-1 text-xs text-muted-foreground">
+                    {categoryLabel(category)} maxed under current budget
+                  </span>
+                ))}
+              </div>
+            )}
             <div className="relative flex items-end gap-2 bg-input rounded-lg border border-border p-2">
               <textarea
                 ref={textareaRef}
@@ -722,6 +867,11 @@ function normalizeHistoryItem(item: HistoryItem): HistoryItem {
       content: renderMessageContent(message.content),
     })),
     summary: item.summary ? renderMessageContent(item.summary) : item.summary,
+    refinementState: item.refinementState,
+    pendingRefinement: item.pendingRefinement,
+    planningBaselineRequest: item.planningBaselineRequest,
+    planningBudgetTotal: item.planningBudgetTotal,
+    planningSelectedTotal: item.planningSelectedTotal,
   }
 }
 
@@ -896,6 +1046,202 @@ function formatHistoryDate(value: string): string {
     hour: "2-digit",
     minute: "2-digit",
   })
+}
+
+function categoryLabel(category: RefinementCategory): string {
+  const labels: Record<RefinementCategory, string> = {
+    food: "Food",
+    attractions: "Attractions",
+    flight: "Flight",
+    hotel: "Hotel",
+  }
+  return labels[category]
+}
+
+function getMaxedCategories(state?: RefinementState): RefinementCategory[] {
+  const ceilings = state?.categoryCeilings || {}
+  return (Object.keys(ceilings) as RefinementCategory[]).filter((category) => Boolean(ceilings[category]))
+}
+
+function detectRefinementCategories(text: string): RefinementCategory[] {
+  const value = text.toLowerCase()
+  const categories: RefinementCategory[] = []
+  const add = (category: RefinementCategory) => {
+    if (!categories.includes(category)) categories.push(category)
+  }
+  if (/\b(food|restaurant|restaurants|meal|meals|dining)\b|餐|饭|美食/.test(value)) add("food")
+  if (/\b(attraction|attractions|poi|pois|sightseeing|museum|museums|activity|activities)\b|景点|门票|游玩/.test(value)) add("attractions")
+  if (/\b(flight|flights|ticket|tickets|cabin|business|first class|airline)\b|机票|航班|商务舱|头等舱/.test(value)) add("flight")
+  if (/\b(hotel|hotels|stay|lodging|room|rooms)\b|酒店|住宿/.test(value)) add("hotel")
+  return categories.length ? categories : ["food", "attractions", "flight", "hotel"]
+}
+
+function isRefinementIntent(text: string): boolean {
+  const value = text.toLowerCase()
+  return /not satisfied|unsatisfied|spend more|more money|upgrade|better|higher|premium|luxury|improve|不满意|加钱|多花|升级|更好|高级/.test(value)
+}
+
+function parseBudgetDecision(text: string): { decided: boolean; allow: boolean; amount?: number } {
+  const value = text.toLowerCase()
+  const amount = parseLargestNumber(value)
+  if (/不增加|不提高|不加|不要|不用|不可以|不同意|no\b|within|current budget|same budget|原预算|总预算内/.test(value)) {
+    return { decided: true, allow: false }
+  }
+  if (amount !== undefined && amount >= 1000) {
+    const looksLikeDelta = /\badd\b|increase by|raise by|加\s*\d|增加\s*\d|多\s*\d|再加/.test(value)
+    const looksLikeCompleteBudget = /\bto\s*\d|new total|complete total|total budget|budget\s*(?:to|is|=|:)?\s*\d|到\s*\d|至\s*\d|总预算|完整预算|新预算/.test(value)
+    if (looksLikeDelta && !looksLikeCompleteBudget) {
+      return { decided: true, allow: true }
+    }
+    return { decided: true, allow: true, amount }
+  }
+  if (/yes\b|ok\b|agree|allow|increase|raise|more budget|new budget|同意|可以|增加|提高|加预算|新预算/.test(value)) {
+    return { decided: true, allow: true }
+  }
+  return { decided: false, allow: false }
+}
+
+function parseLargestNumber(text: string): number | undefined {
+  const matches = text.match(/\d+(?:,\d{3})*(?:\.\d+)?/g)
+  if (!matches) return undefined
+  const values = matches.map((item) => Number(item.replace(/,/g, ""))).filter((item) => Number.isFinite(item))
+  if (!values.length) return undefined
+  return Math.max(...values)
+}
+
+function parseRadiusDecision(text: string): { decided: boolean; radius?: number } {
+  const value = text.toLowerCase()
+  if (/15\s*km|15公里|十五公里/.test(value)) return { decided: true, radius: 15 }
+  if (/10\s*km|10公里|十公里/.test(value)) return { decided: true, radius: 10 }
+  if (/5\s*km|5公里|五公里|nearby|附近|不远|不扩大/.test(value)) return { decided: true, radius: 5 }
+  if (/yes\b|ok\b|accept|farther|further|更远|远一点|可以/.test(value)) return { decided: true, radius: 15 }
+  if (/no\b|不要|不可以|不能接受/.test(value)) return { decided: true, radius: 5 }
+  return { decided: false }
+}
+
+function buildRefinementQuestion(pending: PendingRefinement): string {
+  const categories = pending.targetCategories.map(categoryLabel).join(", ")
+  const parts = [`I can refine ${categories} based on the previous report.`]
+  if (pending.needBudgetDecision) {
+    if (pending.reason === "maxed_budget") {
+      parts.push("This category is already at the highest spec I can fit under the current budget. To upgrade it further, please provide a new complete total budget. If you do not want to increase the budget, say no and I will keep the current plan.")
+    } else {
+      parts.push("Can I increase the total budget? If yes, please give the new complete total budget. If no, say to keep the current budget.")
+    }
+  }
+  if (pending.needDistanceDecision) {
+    parts.push("For food/attractions, can you accept higher-spec places farther from the hotel? Please choose 5km, 10km, or 15km.")
+  }
+  return parts.join("\n")
+}
+
+function buildRefinementContext(
+  historyItem: HistoryItem,
+  followupMessage: string,
+  targetCategories: RefinementCategory[],
+  budgetDecision: { allow: boolean; amount?: number },
+  radiusKm?: number,
+): RefinementContext {
+  const previousBudget = historyItem.planningBudgetTotal || historyItem.refinementState?.totalBudget
+  const previousSelectedTotal = historyItem.planningSelectedTotal || historyItem.refinementState?.selectedTotal
+  return {
+    mode: "refine",
+    previous_request: getPlanningBaselineRequest(historyItem),
+    followup_message: followupMessage,
+    target_categories: targetCategories,
+    allow_total_budget_increase: budgetDecision.allow,
+    ...(budgetDecision.allow && budgetDecision.amount ? { new_total_budget: budgetDecision.amount } : {}),
+    ...(radiusKm ? { max_activity_radius_km: radiusKm } : {}),
+    previous_refinement_state: historyItem.refinementState,
+    ...(previousBudget ? { previous_total_budget: previousBudget } : {}),
+    ...(previousSelectedTotal ? { previous_selected_total: previousSelectedTotal } : {}),
+  }
+}
+
+function getPlanningBaselineRequest(historyItem: HistoryItem): string {
+  return historyItem.planningBaselineRequest || historyItem.request
+}
+
+function buildRefinementStart(request: string, historyItem?: HistoryItem | null): {
+  context?: RefinementContext
+  question?: string
+  pendingRefinement?: PendingRefinement
+  rejection?: string
+} {
+  if (!historyItem?.reportUrl || !isRefinementIntent(request)) return {}
+  const targetCategories = detectRefinementCategories(request)
+  const maxed = targetCategories.filter((category) => historyItem.refinementState?.categoryCeilings?.[category])
+  if (maxed.length > 0) {
+    const pendingRefinement: PendingRefinement = {
+      targetCategories: maxed,
+      followupMessage: request,
+      needBudgetDecision: true,
+      needDistanceDecision: false,
+      reason: "maxed_budget",
+    }
+    return {
+      question: buildRefinementQuestion(pendingRefinement),
+      pendingRefinement,
+    }
+  }
+
+  const budgetDecision = parseBudgetDecision(request)
+  const needsDistance = targetCategories.some((category) => category === "food" || category === "attractions")
+  const radiusDecision = needsDistance ? parseRadiusDecision(request) : { decided: true, radius: undefined }
+  const needBudgetDecision = !budgetDecision.decided
+  const needDistanceDecision = needsDistance && !radiusDecision.decided
+  if (needBudgetDecision || needDistanceDecision) {
+    const pendingRefinement: PendingRefinement = {
+      targetCategories,
+      followupMessage: request,
+      needBudgetDecision,
+      needDistanceDecision,
+      reason: "standard",
+      ...(budgetDecision.decided ? { allowTotalBudgetIncrease: budgetDecision.allow, newTotalBudget: budgetDecision.amount } : {}),
+      ...(radiusDecision.decided ? { maxActivityRadiusKm: radiusDecision.radius } : {}),
+    }
+    return { question: buildRefinementQuestion(pendingRefinement), pendingRefinement }
+  }
+
+  return {
+    context: buildRefinementContext(historyItem, request, targetCategories, budgetDecision, radiusDecision.radius),
+  }
+}
+
+function resolvePendingRefinement(
+  pending: PendingRefinement,
+  request: string,
+  historyItem: HistoryItem,
+): { context?: RefinementContext; question?: string; pendingRefinement?: PendingRefinement; rejection?: string } {
+  const budgetDecision = pending.needBudgetDecision ? parseBudgetDecision(request) : { decided: true, allow: false }
+  const radiusDecision = pending.needDistanceDecision ? parseRadiusDecision(request) : { decided: true, radius: undefined }
+  const stillPending: PendingRefinement = {
+    ...pending,
+    needBudgetDecision: pending.needBudgetDecision && (!budgetDecision.decided || (budgetDecision.allow && !budgetDecision.amount)),
+    needDistanceDecision: pending.needDistanceDecision && !radiusDecision.decided,
+    ...(budgetDecision.decided ? { allowTotalBudgetIncrease: budgetDecision.allow, newTotalBudget: budgetDecision.amount } : {}),
+    ...(radiusDecision.decided ? { maxActivityRadiusKm: radiusDecision.radius } : {}),
+  }
+  if (pending.reason === "maxed_budget" && budgetDecision.decided && !budgetDecision.allow) {
+    return {
+      rejection: `${pending.targetCategories.map(categoryLabel).join(", ")} will stay unchanged because the current plan is already at the highest spec under the existing budget.`,
+    }
+  }
+  if (stillPending.needBudgetDecision || stillPending.needDistanceDecision) {
+    return { question: buildRefinementQuestion(stillPending), pendingRefinement: stillPending }
+  }
+  return {
+    context: buildRefinementContext(
+      historyItem,
+      pending.followupMessage,
+      pending.targetCategories,
+      {
+        allow: stillPending.allowTotalBudgetIncrease || false,
+        amount: stillPending.newTotalBudget,
+      },
+      stillPending.maxActivityRadiusKm,
+    ),
+  }
 }
 
 function buildPlannerRequest(messages: Message[]): string {
@@ -1076,6 +1422,9 @@ function formatSummary(data: PlanResponse): string {
   const trip = data.trip_summary || {}
   const destinations = trip.destination?.length ? trip.destination.join(", ") : "destination"
   const budget = formatBudget(trip.budget)
+  const upgrades = data.upgrade_status?.length
+    ? `\n\nUpgrade status:\n${data.upgrade_status.map((item) => `- ${item.message}`).join("\n")}`
+    : ""
   const warnings = data.warnings?.length ? `\n\nWarnings:\n${data.warnings.slice(0, 3).map((item) => `- ${item}`).join("\n")}` : ""
 
   return [
@@ -1085,6 +1434,7 @@ function formatSummary(data: PlanResponse): string {
     `Days: ${trip.duration_days || data.itinerary_summary?.total_days || "unknown"}`,
     `Budget: ${budget}`,
     data.report_url ? "The HTML report is ready." : "The pipeline finished, but no report URL was returned.",
+    upgrades,
     warnings,
   ].filter(Boolean).join("\n")
 }

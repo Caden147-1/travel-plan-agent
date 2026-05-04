@@ -25,9 +25,11 @@ from itinerary_agent import (
     _ensure_required_meals,
     _realign_evening_activity_transfers,
     _remove_invalid_same_site_transfers,
+    _resolve_timeline_overlaps,
     _sanitize_transfer_timeline,
     _poi_dedupe_key,
     _normalize_agent3_payload,
+    _filter_city_candidates_by_hotel_radius,
     _schedule_city_day,
     run_itinerary_agent,
 )
@@ -72,6 +74,159 @@ def test_schedule_city_day_accepts_new_kwargs() -> None:
     )
 
     _assert(isinstance(result, dict), "_schedule_city_day should return a day plan dict")
+
+
+def test_refinement_state_marks_food_budget_ceiling() -> None:
+    final_output = {
+        "budget_check": {
+            "selected_restaurant_total": 980.0,
+            "food_budget_input": 1000.0,
+            "selected_poi_total": 100.0,
+            "attractions_budget_input": 500.0,
+            "selected_total_transport_spend": 1000.0,
+            "transport_budget_input": 3000.0,
+            "selected_hotel_total_reference": 2000.0,
+            "hotel_budget_input": 4000.0,
+        },
+        "budget_plan": {"buffer": 0.0},
+    }
+    state, statuses = router._build_refinement_state(
+        final_output,
+        {"mode": "refine", "target_categories": ["food"], "previous_refinement_state": {}},
+    )
+
+    _assert("food" in state.get("categoryCeilings", {}), "Food should be marked maxed at 98% of category budget")
+    _assert(statuses and statuses[0].get("status") == "maxed", "Food upgrade status should be maxed")
+
+
+def test_refinement_state_keeps_food_upgrade_open_when_under_budget() -> None:
+    final_output = {
+        "budget_check": {
+            "selected_restaurant_total": 500.0,
+            "food_budget_input": 1000.0,
+        },
+        "budget_plan": {"buffer": 300.0},
+    }
+    state, statuses = router._build_refinement_state(
+        final_output,
+        {"mode": "refine", "target_categories": ["food"], "previous_refinement_state": {}},
+    )
+
+    _assert("food" not in state.get("categoryCeilings", {}), "Food should not be maxed when spend is well below budget")
+    _assert(statuses and statuses[0].get("status") == "upgraded", "Food upgrade should remain open under budget")
+    _assert(state.get("totalBudget") == 0.0, "Refinement state should include a total budget snapshot")
+    _assert(state.get("selectedTotal") == 500.0, "Refinement state should include a selected spend snapshot")
+
+
+def test_refinement_uses_previous_budget_when_user_does_not_increase_again() -> None:
+    parsed = {
+        "budget": {"total": 80000, "currency": "CNY"},
+        "preferences": {},
+        "planning_signals": {},
+    }
+    context = router._normalize_refinement_context({
+        "mode": "refine",
+        "previous_request": "Plan Tokyo with 80000 CNY budget",
+        "followup_message": "upgrade food again within current budget",
+        "target_categories": ["food"],
+        "allow_total_budget_increase": False,
+        "previous_total_budget": 100000,
+        "previous_selected_total": 76000,
+    })
+
+    refined = router._apply_refinement_to_parsed(parsed, context)
+
+    _assert(refined["budget"]["total"] == 100000, "Refinement should use the last successful total budget")
+    _assert(refined["refinement_context"]["previous_selected_total"] == 76000, "Previous spend baseline should be preserved")
+
+
+def test_refinement_new_budget_overrides_previous_budget() -> None:
+    parsed = {
+        "budget": {"total": 80000, "currency": "CNY"},
+        "preferences": {},
+        "planning_signals": {},
+    }
+    context = router._normalize_refinement_context({
+        "mode": "refine",
+        "previous_request": "Plan Tokyo with 80000 CNY budget",
+        "followup_message": "upgrade food with 120000 total budget",
+        "target_categories": ["food"],
+        "allow_total_budget_increase": True,
+        "new_total_budget": 120000,
+        "previous_total_budget": 100000,
+        "previous_selected_total": 76000,
+    })
+
+    refined = router._apply_refinement_to_parsed(parsed, context)
+
+    _assert(refined["budget"]["total"] == 120000, "Explicit new budget should become the planning budget")
+
+
+def test_refinement_rejects_lower_selected_total_than_previous_plan() -> None:
+    final_output = {
+        "trip_summary": {"budget": {"total": 100000, "currency": "CNY"}},
+        "budget_check": {
+            "total_budget_input": 100000,
+            "selected_total_transport_spend": 20000,
+            "selected_hotel_total_reference": 25000,
+            "selected_restaurant_total": 10000,
+            "selected_poi_total": 5000,
+        },
+        "budget_plan": {"buffer": 40000},
+        "warnings": [],
+    }
+    context = {
+        "mode": "refine",
+        "target_categories": ["food"],
+        "previous_selected_total": 70000,
+        "previous_refinement_state": {},
+    }
+
+    error = router._refinement_non_decrease_error(final_output, context, {}, [])
+
+    _assert(error is not None, "Refinement should reject a generated plan with lower total spend")
+    _assert(error.get("stage") == "refinement_non_decrease", "Lower-spend refinement should use the non-decrease stage")
+
+
+def test_refinement_radius_controls_food_and_poi_filtering() -> None:
+    hotel = {"name": "Hotel", "lat": 0.0, "lng": 0.0}
+    near = {"name": "Near", "lat": 0.0, "lng": 0.03}
+    far = {"name": "Far", "lat": 0.0, "lng": 0.09}
+    city_candidates = {
+        "pois": [near, far],
+        "restaurants": [near, far],
+    }
+
+    strict = _filter_city_candidates_by_hotel_radius(city_candidates, hotel, activity_radius_km=5.0)
+    relaxed = _filter_city_candidates_by_hotel_radius(city_candidates, hotel, activity_radius_km=15.0)
+
+    _assert(len(strict.get("pois", [])) == 1, "5km refinement radius should keep only near POIs")
+    _assert(len(strict.get("restaurants", [])) == 1, "5km refinement radius should keep only near restaurants")
+    _assert(len(relaxed.get("pois", [])) == 2, "15km refinement radius should include farther POIs")
+    _assert(len(relaxed.get("restaurants", [])) == 2, "15km refinement radius should include farther restaurants")
+
+
+def test_refinement_state_marks_flight_and_hotel_budget_ceilings() -> None:
+    final_output = {
+        "budget_check": {
+            "selected_total_transport_spend": 4900.0,
+            "transport_budget_input": 5000.0,
+            "selected_hotel_total_reference": 3920.0,
+            "hotel_budget_input": 4000.0,
+        },
+        "budget_plan": {"buffer": 0.0},
+    }
+    state, statuses = router._build_refinement_state(
+        final_output,
+        {"mode": "refine", "target_categories": ["flight", "hotel"], "previous_refinement_state": {}},
+    )
+
+    ceilings = state.get("categoryCeilings", {})
+    status_by_category = {item.get("category"): item.get("status") for item in statuses}
+    _assert("flight" in ceilings, "Flight should be marked maxed at 98% of transport budget")
+    _assert("hotel" in ceilings, "Hotel should be marked maxed at 98% of hotel budget")
+    _assert(status_by_category.get("flight") == "maxed", "Flight upgrade status should be maxed")
+    _assert(status_by_category.get("hotel") == "maxed", "Hotel upgrade status should be maxed")
 
 
 def test_finalize_success_output_fails_when_itinerary_fails() -> None:
@@ -446,6 +601,29 @@ def test_evening_transfer_starts_after_dinner_end() -> None:
 
     _assert(transfer.get("start") == "19:25", "Evening transfer should start after dinner ends")
     _assert(poi.get("start") == transfer.get("end"), "Evening POI should start after the transfer")
+
+
+def test_checkin_after_poi_overlap_is_shifted_after_previous_event() -> None:
+    day = {
+        "date": "2026-06-10",
+        "city": "Kyoto",
+        "schedule_start": "09:00",
+        "schedule_end": "20:30",
+        "events": [
+            {"type": "poi", "name": "Fushimi Inari Taisha", "start": "12:59", "end": "14:29", "duration_h": 1.5},
+            {"type": "checkin", "name": "Check-in Higashiyama Shikikaboku", "start": "13:44", "end": "13:59", "duration_h": 0.25},
+            {"type": "poi", "name": "Local area walk before Nijo Castle", "start": "14:29", "end": "15:29", "duration_h": 1.0},
+        ],
+    }
+
+    _resolve_timeline_overlaps(day)
+    events = day["events"]
+    first_poi = next(event for event in events if event.get("name") == "Fushimi Inari Taisha")
+    checkin = next(event for event in events if event.get("type") == "checkin")
+    walk = next(event for event in events if event.get("name") == "Local area walk before Nijo Castle")
+
+    _assert(checkin.get("start") >= first_poi.get("end"), "Check-in must not overlap the previous POI")
+    _assert(walk.get("start") >= checkin.get("end"), "Following flexible activity must move after shifted check-in")
 
 
 def test_stale_evening_transfer_is_removed_and_rebuilt() -> None:
@@ -2128,6 +2306,13 @@ def test_compress_timeline_keeps_lunch_in_window() -> None:
 
 def main() -> None:
     test_schedule_city_day_accepts_new_kwargs()
+    test_refinement_state_marks_food_budget_ceiling()
+    test_refinement_state_keeps_food_upgrade_open_when_under_budget()
+    test_refinement_uses_previous_budget_when_user_does_not_increase_again()
+    test_refinement_new_budget_overrides_previous_budget()
+    test_refinement_rejects_lower_selected_total_than_previous_plan()
+    test_refinement_radius_controls_food_and_poi_filtering()
+    test_refinement_state_marks_flight_and_hotel_budget_ceilings()
     test_finalize_success_output_fails_when_itinerary_fails()
     test_agent4_normalize_accepts_agent3_city_budget_plan_used()
     test_agent4_normalize_preserves_budget_plan_for_fallback_budget_map()
@@ -2141,6 +2326,7 @@ def main() -> None:
     test_missing_city_hotel_gets_fallback_hotel_and_checkin()
     test_distinct_synthetic_pois_get_transfer_even_with_close_estimated_coords()
     test_evening_transfer_starts_after_dinner_end()
+    test_checkin_after_poi_overlap_is_shifted_after_previous_event()
     test_stale_evening_transfer_is_removed_and_rebuilt()
     test_checkin_transfer_after_drive_does_not_overlap_drive()
     test_agent3_drive_under_4h_skips_flight_selection()

@@ -1,6 +1,7 @@
 ﻿from __future__ import annotations
 
 import json
+import copy
 import math
 import os
 import re
@@ -37,6 +38,32 @@ ROUTER_PROCESS_STARTED_AT = datetime.now().isoformat(timespec="seconds")
 ROUTER_CODE_VERSION = datetime.fromtimestamp(
     Path(__file__).resolve().stat().st_mtime
 ).isoformat(timespec="seconds")
+
+REFINEMENT_CATEGORY_MAP = {
+    "food": "food",
+    "restaurant": "food",
+    "restaurants": "food",
+    "meal": "food",
+    "meals": "food",
+    "attraction": "attractions",
+    "attractions": "attractions",
+    "poi": "attractions",
+    "pois": "attractions",
+    "sightseeing": "attractions",
+    "flight": "flight",
+    "flights": "flight",
+    "transport": "flight",
+    "hotel": "hotel",
+    "hotels": "hotel",
+    "stay": "hotel",
+}
+
+REFINEMENT_BUDGET_KEYS = {
+    "food": ("food", "food_budget"),
+    "attractions": ("attractions", "attractions_budget"),
+    "hotel": ("hotel", "hotel_budget"),
+    "flight": ("transport", None),
+}
 
 
 def _parse_iso_date(value: str | None):
@@ -417,6 +444,141 @@ def _selected_total_from_budget_check(budget_check: dict) -> float:
     return round(total, 2)
 
 
+def _category_budget_spend(budget_check: dict, category: str) -> tuple[float, float]:
+    if category == "food":
+        return (
+            _safe_float(budget_check.get("selected_restaurant_total"), 0.0),
+            _safe_float(budget_check.get("food_budget_input"), 0.0),
+        )
+    if category == "attractions":
+        return (
+            _safe_float(budget_check.get("selected_poi_total"), 0.0),
+            _safe_float(budget_check.get("attractions_budget_input"), 0.0),
+        )
+    if category == "hotel":
+        return (
+            _safe_float(budget_check.get("selected_hotel_total_reference"), 0.0),
+            _safe_float(budget_check.get("hotel_budget_input"), 0.0),
+        )
+    if category == "flight":
+        return (
+            _safe_float(budget_check.get("selected_total_transport_spend"), 0.0),
+            _safe_float(budget_check.get("transport_budget_input"), 0.0),
+        )
+    return 0.0, 0.0
+
+
+def _build_refinement_state(final_output: dict, refinement_context: dict) -> tuple[dict, list[dict]]:
+    previous_state = refinement_context.get("previous_refinement_state") if isinstance(refinement_context, dict) else {}
+    if not isinstance(previous_state, dict):
+        previous_state = {}
+
+    category_ceilings = dict(previous_state.get("categoryCeilings") or previous_state.get("category_ceilings") or {})
+    category_spend = dict(previous_state.get("categorySpend") or previous_state.get("category_spend") or {})
+    target_categories = refinement_context.get("target_categories") or []
+    budget_check = final_output.get("budget_check") or {}
+    budget_plan = final_output.get("budget_plan") or {}
+    total_budget = _safe_float(budget_check.get("total_budget_input"), 0.0)
+    selected_total = _selected_total_from_budget_check(budget_check)
+    statuses: list[dict] = []
+
+    for category in ["food", "attractions", "flight", "hotel"]:
+        spend, budget = _category_budget_spend(budget_check, category)
+        ratio = round(spend / budget, 4) if budget > 0 else 0.0
+        remaining = max(0.0, budget - spend)
+        budget_key, _ = REFINEMENT_BUDGET_KEYS.get(category, (None, None))
+        buffer_left = _safe_float(budget_plan.get("buffer"), 0.0) if isinstance(budget_plan, dict) else 0.0
+        is_ceiling = bool(budget > 0 and (ratio >= 0.98 or (remaining <= max(100.0, budget * 0.02) and buffer_left <= 0)))
+        if is_ceiling:
+            category_ceilings[category] = {
+                "reason": f"{category} is already at the maximum under the current budget.",
+                "spend": round(spend, 2),
+                "budget": round(budget, 2),
+                "ratio": ratio,
+            }
+        elif category in category_ceilings and category in target_categories:
+            category_ceilings.pop(category, None)
+
+        category_spend[category] = {
+            "spend": round(spend, 2),
+            "budget": round(budget, 2),
+            "ratio": ratio,
+            "budget_key": budget_key,
+        }
+
+        if category in target_categories:
+            statuses.append({
+                "category": category,
+                "status": "maxed" if is_ceiling else "upgraded",
+                "message": (
+                    f"{category.title()} is already at the maximum under the current budget."
+                    if is_ceiling
+                    else f"{category.title()} upgraded under the current planning budget."
+                ),
+                "spend": round(spend, 2),
+                "budget": round(budget, 2),
+                "ratio": ratio,
+            })
+
+    state = {
+        "categoryCeilings": category_ceilings,
+        "categorySpend": category_spend,
+        "lastTargetCategories": list(target_categories),
+        "maxActivityRadiusKm": refinement_context.get("max_activity_radius_km"),
+        "allowTotalBudgetIncrease": bool(refinement_context.get("allow_total_budget_increase")),
+        "totalBudget": round(total_budget, 2),
+        "selectedTotal": round(selected_total, 2),
+    }
+    return state, statuses
+
+
+def _build_planning_baseline(final_output: dict, user_request: str) -> dict:
+    budget_check = final_output.get("budget_check") or {}
+    total_budget = _safe_float(budget_check.get("total_budget_input"), 0.0)
+    if total_budget <= 0:
+        total_budget = _safe_float((((final_output.get("trip_summary") or {}).get("budget") or {}).get("total")), 0.0)
+    selected_total = _selected_total_from_budget_check(budget_check)
+    return {
+        "request": str(user_request or "").strip(),
+        "total_budget": round(total_budget, 2) if total_budget > 0 else None,
+        "selected_total": round(selected_total, 2) if selected_total > 0 else None,
+    }
+
+
+def _refinement_non_decrease_error(
+    final_output: dict,
+    refinement_context: dict,
+    rough_budget_check: dict,
+    precheck_warnings: list[str] | None = None,
+) -> dict | None:
+    if not refinement_context:
+        return None
+    previous_selected_total = _safe_float(refinement_context.get("previous_selected_total"), 0.0)
+    if previous_selected_total <= 0:
+        return None
+    budget_check = final_output.get("budget_check") or {}
+    selected_total = _selected_total_from_budget_check(budget_check)
+    if selected_total + 1.0 >= previous_selected_total:
+        return None
+
+    state, statuses = _build_refinement_state(final_output, refinement_context)
+    return {
+        "success": False,
+        "stage": "refinement_non_decrease",
+        "error": (
+            f"Generated refinement would reduce total selected spend from {round(previous_selected_total, 2)} CNY "
+            f"to {round(selected_total, 2)} CNY. Keeping the previous plan instead; increase the budget "
+            "or choose another upgrade target if you want a higher-spec version."
+        ),
+        "trip_summary": final_output.get("trip_summary", {}),
+        "budget_check": budget_check,
+        "rough_budget_check": rough_budget_check,
+        "refinement_state": state,
+        "upgrade_status": statuses,
+        "warnings": (final_output.get("warnings", []) + (precheck_warnings or [])),
+    }
+
+
 def _build_mid_distance_car_rental_plan(parsed: dict, budget_result: dict) -> dict:
     city_days = budget_result.get("city_budget_plan") or _normalize_effective_cities(parsed)
     if not isinstance(city_days, list) or len(city_days) <= 1:
@@ -448,6 +610,168 @@ def _safe_float(value: object, default: float = 0.0) -> float:
         return float(value)
     except (TypeError, ValueError):
         return default
+
+
+def _normalize_refinement_categories(values) -> list[str]:
+    if isinstance(values, str):
+        raw_values = re.split(r"[,/|\s]+", values)
+    elif isinstance(values, list):
+        raw_values = values
+    else:
+        raw_values = []
+
+    categories: list[str] = []
+    for value in raw_values:
+        key = str(value or "").strip().lower()
+        normalized = REFINEMENT_CATEGORY_MAP.get(key)
+        if normalized and normalized not in categories:
+            categories.append(normalized)
+    return categories
+
+
+def _normalize_refinement_context(refinement_context: dict | None) -> dict:
+    if not isinstance(refinement_context, dict):
+        return {}
+    if str(refinement_context.get("mode") or "").lower() != "refine":
+        return {}
+
+    max_radius = _safe_float(refinement_context.get("max_activity_radius_km"), 0.0)
+    if max_radius not in {5.0, 10.0, 15.0}:
+        max_radius = 0.0
+
+    allow_budget_increase = bool(refinement_context.get("allow_total_budget_increase"))
+    new_total_budget = _safe_float(refinement_context.get("new_total_budget"), 0.0)
+    previous_total_budget = _safe_float(refinement_context.get("previous_total_budget"), 0.0)
+    previous_selected_total = _safe_float(refinement_context.get("previous_selected_total"), 0.0)
+
+    return {
+        "mode": "refine",
+        "previous_request": str(refinement_context.get("previous_request") or "").strip(),
+        "followup_message": str(refinement_context.get("followup_message") or "").strip(),
+        "target_categories": _normalize_refinement_categories(refinement_context.get("target_categories")),
+        "allow_total_budget_increase": allow_budget_increase,
+        "new_total_budget": new_total_budget if allow_budget_increase and new_total_budget > 0 else None,
+        "previous_total_budget": previous_total_budget if previous_total_budget > 0 else None,
+        "previous_selected_total": previous_selected_total if previous_selected_total > 0 else None,
+        "max_activity_radius_km": max_radius or None,
+        "previous_refinement_state": (
+            refinement_context.get("previous_refinement_state")
+            if isinstance(refinement_context.get("previous_refinement_state"), dict)
+            else {}
+        ),
+    }
+
+
+def _apply_refinement_to_parsed(parsed: dict, refinement_context: dict) -> dict:
+    if not refinement_context:
+        return parsed
+
+    parsed = copy.deepcopy(parsed)
+    categories = set(refinement_context.get("target_categories") or [])
+    preferences = parsed.setdefault("preferences", {})
+    planning_signals = parsed.setdefault("planning_signals", {})
+
+    new_total_budget = refinement_context.get("new_total_budget")
+    if new_total_budget:
+        budget = parsed.setdefault("budget", {})
+        budget["total"] = int(round(float(new_total_budget)))
+    else:
+        previous_total_budget = refinement_context.get("previous_total_budget")
+        if previous_total_budget:
+            budget = parsed.setdefault("budget", {})
+            budget["total"] = int(round(float(previous_total_budget)))
+
+    if "food" in categories:
+        preferences["food"] = "fine_dining"
+        food_preferences = preferences.get("food_preferences")
+        if not isinstance(food_preferences, list):
+            food_preferences = []
+        lower_food_preferences = [str(x).lower() for x in food_preferences]
+        if "fine_dining" not in lower_food_preferences:
+            food_preferences.append("fine_dining")
+        preferences["food_preferences"] = food_preferences
+        planning_signals["food_priority"] = "high"
+
+    if "attractions" in categories:
+        planning_signals["attraction_intensity"] = "heavy"
+
+    if "flight" in categories:
+        preferences["flight"] = "comfort"
+        preferences["flight_cabin"] = preferences.get("flight_cabin") or "business"
+        planning_signals["flight_priority"] = "high"
+
+    if "hotel" in categories:
+        preferences["hotel"] = "luxury"
+        preferences["hotel_level"] = "luxury"
+        planning_signals["hotel_level"] = "luxury"
+        planning_signals["hotel_priority"] = "high"
+
+    parsed["refinement_context"] = refinement_context
+    return parsed
+
+
+def _scale_city_budget_field(city_budget_plan: list, field: str, new_total: float) -> None:
+    if not city_budget_plan or not field:
+        return
+    current_total = sum(_safe_float(item.get(field), 0.0) for item in city_budget_plan if isinstance(item, dict))
+    total_days = sum(max(1, _safe_int(item.get("days"), 1)) for item in city_budget_plan if isinstance(item, dict)) or 1
+    for item in city_budget_plan:
+        if not isinstance(item, dict):
+            continue
+        if current_total > 0:
+            share = _safe_float(item.get(field), 0.0) / current_total
+        else:
+            share = max(1, _safe_int(item.get("days"), 1)) / total_days
+        item[field] = round(max(0.0, new_total * share), 2)
+
+
+def _apply_refinement_budget_bias(budget_result: dict, refinement_context: dict) -> dict:
+    if not refinement_context or not isinstance(budget_result, dict):
+        return budget_result
+
+    categories = [c for c in refinement_context.get("target_categories", []) if c in REFINEMENT_BUDGET_KEYS]
+    if not categories:
+        return budget_result
+
+    budget_result = copy.deepcopy(budget_result)
+    budget_plan = budget_result.get("budget_plan")
+    if not isinstance(budget_plan, dict):
+        return budget_result
+
+    buffer_value = max(0.0, _safe_float(budget_plan.get("buffer"), 0.0))
+    move_amount = buffer_value * 0.8 if buffer_value > 0 else 0.0
+    if move_amount <= 0 and refinement_context.get("allow_total_budget_increase"):
+        total_budget = _safe_float((budget_result.get("budget") or {}).get("total"), 0.0)
+        plan_total = sum(_safe_float(budget_plan.get(k), 0.0) for k in ["transport", "hotel", "food", "attractions", "buffer"])
+        move_amount = max(0.0, total_budget - plan_total)
+
+    if move_amount <= 0:
+        budget_result.setdefault("allocation_basis", {})["refinement_budget_bias"] = {
+            "applied": False,
+            "reason": "no_buffer_or_new_budget_available",
+            "target_categories": categories,
+        }
+        return budget_result
+
+    per_category = move_amount / max(1, len(categories))
+    for category in categories:
+        budget_key, city_field = REFINEMENT_BUDGET_KEYS[category]
+        budget_plan[budget_key] = round(_safe_float(budget_plan.get(budget_key), 0.0) + per_category, 2)
+        if city_field:
+            _scale_city_budget_field(
+                budget_result.get("city_budget_plan") or [],
+                city_field,
+                _safe_float(budget_plan.get(budget_key), 0.0),
+            )
+
+    budget_plan["buffer"] = round(max(0.0, buffer_value - move_amount), 2)
+    budget_result["recommended_spend"] = dict(budget_plan)
+    budget_result.setdefault("allocation_basis", {})["refinement_budget_bias"] = {
+        "applied": True,
+        "moved_from_buffer": round(move_amount, 2),
+        "target_categories": categories,
+    }
+    return budget_result
 
 
 def _round_up_to_100(value: float) -> int:
@@ -644,9 +968,10 @@ def _finalize_success_output(final_output: dict, user_request: str, auto_open_re
     return final_output
 
 
-def _run_agent2_agent3(parsed: dict) -> tuple[dict | None, dict | None, dict | None, dict]:
+def _run_agent2_agent3(parsed: dict, refinement_context: dict | None = None) -> tuple[dict | None, dict | None, dict | None, dict]:
     started = time.perf_counter()
     budget_result = travel_budget_agent(parsed)
+    budget_result = _apply_refinement_budget_bias(budget_result, refinement_context or {})
     _log_stage("agent2_budget", started)
 
     if budget_result.get("meta", {}).get("error"):
@@ -690,6 +1015,7 @@ def _run_agent2_agent3(parsed: dict) -> tuple[dict | None, dict | None, dict | N
         "destination": parsed.get("destination"),
         "preferences": parsed.get("preferences", {}),
         "planning_signals": parsed.get("planning_signals", {}),
+        "refinement_context": refinement_context or {},
     }
 
     started = time.perf_counter()
@@ -724,12 +1050,14 @@ def _run_agent2_agent3(parsed: dict) -> tuple[dict | None, dict | None, dict | N
     return budget_result, agent3_output, None, budget_result
 
 
-def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dict:
+def run_budget_pipeline(user_request: str, auto_open_report: bool = True, refinement_context: dict | None = None) -> dict:
     """
     Full pipeline: agent1 -> agent2 -> agent3
     Final output: return clean final result only.
     """
-    parsed = travel_requirement_parser_llm_agent(user_request)
+    refinement_context = _normalize_refinement_context(refinement_context)
+    planning_request = refinement_context.get("previous_request") or user_request
+    parsed = travel_requirement_parser_llm_agent(planning_request)
 
     # Agent1 parse failed
     if parsed.get("parse_status") == "failed":
@@ -758,6 +1086,7 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
             "parsed_request": parsed
         }
 
+    parsed = _apply_refinement_to_parsed(parsed, refinement_context)
     parsed = _apply_budget_cap_mode(parsed, user_request)
     rough_budget_check = _run_rough_budget_precheck(parsed)
     rough_status = rough_budget_check.get("status")
@@ -807,7 +1136,7 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
             "Rough budget precheck: core spend (flight + hotel + three meals) exceeded 70% of total budget, so planning switched to lower-cost execution mode before realtime search."
         )
 
-    budget_result, agent3_output, pipeline_error, _ = _run_agent2_agent3(parsed)
+    budget_result, agent3_output, pipeline_error, _ = _run_agent2_agent3(parsed, refinement_context)
     if pipeline_error:
         pipeline_error["rough_budget_check"] = rough_budget_check
         return pipeline_error
@@ -815,6 +1144,8 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
     # Clean final output
     final_output = _clean_final_output(agent3_output, parsed, budget_result)
     final_output["original_request"] = user_request
+    if refinement_context:
+        final_output["refinement_context"] = refinement_context
     final_output["rough_budget_check"] = rough_budget_check
 
     budget_check = final_output.get("budget_check") or {}
@@ -828,15 +1159,25 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
                 parsed,
                 "fit the budget with cheap flights, budget hotels, fewer paid activities, and no comfort upgrades",
             )
-            retry_budget_result, retry_agent3_output, retry_error, _ = _run_agent2_agent3(retry_parsed)
+            retry_budget_result, retry_agent3_output, retry_error, _ = _run_agent2_agent3(retry_parsed, refinement_context)
             if not retry_error:
                 retry_final_output = _clean_final_output(retry_agent3_output, retry_parsed, retry_budget_result)
                 retry_final_output["original_request"] = user_request
+                if refinement_context:
+                    retry_final_output["refinement_context"] = refinement_context
                 retry_budget_check = retry_final_output.get("budget_check") or {}
                 retry_total_budget = float(retry_budget_check.get("total_budget_input") or 0.0)
                 retry_selected_total = _selected_total_from_budget_check(retry_budget_check)
                 final_failed_total = retry_selected_total or final_failed_total
                 if retry_total_budget > 0 and retry_selected_total <= retry_total_budget:
+                    regression_error = _refinement_non_decrease_error(
+                        retry_final_output,
+                        refinement_context,
+                        rough_budget_check,
+                        precheck_warnings,
+                    )
+                    if regression_error:
+                        return regression_error
                     retry_final_output.setdefault("warnings", [])
                     retry_final_output["warnings"].append(
                         "Budget pressure adjustment: the first selected plan exceeded the budget, so the system automatically retried with cheaper flights, budget hotels, fewer paid activities, and no comfort upgrades."
@@ -851,6 +1192,14 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
                         "budget_plan": retry_budget_result.get("budget_plan", {}),
                         "city_budget_plan": retry_budget_result.get("city_budget_plan", []),
                     }
+                    if refinement_context:
+                        retry_state, retry_status = _build_refinement_state(retry_final_output, refinement_context)
+                        retry_final_output["refinement_state"] = retry_state
+                        retry_final_output["upgrade_status"] = retry_status
+                    retry_final_output["planning_baseline"] = _build_planning_baseline(
+                        retry_final_output,
+                        planning_request,
+                    )
                     return _finalize_success_output(retry_final_output, user_request, auto_open_report)
 
         minimum_budget_required = _round_up_to_100(max(_safe_float(final_failed_total, 0.0), float(rough_min_budget)))
@@ -882,7 +1231,20 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True) -> dic
         "city_budget_plan": budget_result.get("city_budget_plan", []),
     }
     final_output.setdefault("warnings", [])
+    regression_error = _refinement_non_decrease_error(
+        final_output,
+        refinement_context,
+        rough_budget_check,
+        precheck_warnings,
+    )
+    if regression_error:
+        return regression_error
     final_output["warnings"].extend(precheck_warnings)
+    if refinement_context:
+        refinement_state, upgrade_status = _build_refinement_state(final_output, refinement_context)
+        final_output["refinement_state"] = refinement_state
+        final_output["upgrade_status"] = upgrade_status
+    final_output["planning_baseline"] = _build_planning_baseline(final_output, planning_request)
 
     return _finalize_success_output(final_output, user_request, auto_open_report)
 

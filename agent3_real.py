@@ -59,6 +59,17 @@ class Agent3Selection:
         self.raw_input = agent2_output or {}
         self.parsed_request = self.raw_input.get("parsed_request", {}) or {}
         self.budget_result = self.raw_input.get("budget_result", {}) or self.raw_input
+        self.refinement_context = (
+            self.raw_input.get("refinement_context")
+            if isinstance(self.raw_input.get("refinement_context"), dict)
+            else {}
+        )
+        self.refinement_targets = {
+            self._normalize_text(category).lower()
+            for category in (self.refinement_context.get("target_categories") or [])
+            if self._normalize_text(category)
+        }
+        self.refinement_mode = self._normalize_text(self.refinement_context.get("mode")).lower() == "refine"
 
         self.city_plan = self.parsed_request.get("city_plan", {}) or {}
         self.city_plan_mode = self._normalize_text(self.city_plan.get("mode")) or "unknown"
@@ -258,6 +269,29 @@ class Agent3Selection:
             "historical centre", "near cathedral", "near station"
         ]
         self.strict_preference_filtering = True
+        if self.refinement_mode:
+            if "food" in self.refinement_targets:
+                self.food_pref = "fine_dining"
+                self.food_level = "premium"
+                self.wants_fine_dining_target = True
+                if "fine_dining" not in self.food_preferences:
+                    self.food_preferences.append("fine_dining")
+                self.restaurant_budget_tolerance = max(self.restaurant_budget_tolerance, 1.25)
+            if "attractions" in self.refinement_targets:
+                self.attraction_intensity = "heavy"
+                self.attraction_priority = "heavy"
+                self.poi_budget_tolerance = max(self.poi_budget_tolerance, 1.20)
+            if "hotel" in self.refinement_targets:
+                self.hotel_pref = "luxury"
+                self.hotel_level = "luxury"
+                self.hotel_level_rich = "luxury"
+                self.hotel_target_level = "luxury"
+                self.hotel_budget_tolerance = max(self.hotel_budget_tolerance, 1.45)
+            if "flight" in self.refinement_targets and not self.flight_cabin_locked:
+                self.flight_pref = "comfort"
+                self.flight_priority = "high"
+                self.flight_type = "business_class"
+                self.flight_relaxed_budget_tolerance = max(self.flight_relaxed_budget_tolerance, 1.45)
         if self.budget_pressure_mode:
             if not self.flight_cabin_locked:
                 self.flight_pref = "cheap"
@@ -822,7 +856,7 @@ class Agent3Selection:
 
     def _candidate_limits_by_days(self, city_days: int) -> Dict[str, int]:
         city_days = max(1, city_days)
-        return {
+        limits = {
             "hotel_candidates": max(6, city_days * 3),
             "restaurant_candidates": max(8, city_days * 4),
             "poi_candidates": max(8, city_days * 4),
@@ -830,6 +864,14 @@ class Agent3Selection:
             "restaurant_selected": self._restaurant_target_count(city_days),
             "poi_selected": self._poi_limit_by_intensity(city_days),
         }
+        if self.refinement_mode:
+            if "hotel" in self.refinement_targets:
+                limits["hotel_candidates"] = max(limits["hotel_candidates"], city_days * 5, 12)
+            if "food" in self.refinement_targets:
+                limits["restaurant_candidates"] = max(limits["restaurant_candidates"], city_days * 6, 14)
+            if "attractions" in self.refinement_targets:
+                limits["poi_candidates"] = max(limits["poi_candidates"], city_days * 6, 14)
+        return limits
 
     # =========================================================
     # airport mapping
@@ -3512,6 +3554,9 @@ class Agent3Selection:
                 + 0.4 * realtime
                 + min(reviews / 1000.0, 0.8)
             )
+            if self.refinement_mode and "hotel" in self.refinement_targets:
+                total_cost = self._safe_float(item.get("estimated_total_cost"), 0.0)
+                score += min(total_cost / 3000.0, 2.0) + min(stars / 5.0, 1.0)
             item["score"] = round(score, 4)
 
             reasons = []
@@ -3529,6 +3574,8 @@ class Agent3Selection:
                 reasons.append(f"hotel stars {stars}")
             if realtime:
                 reasons.append("real-time hotel price available")
+            if self.refinement_mode and "hotel" in self.refinement_targets:
+                reasons.append("prioritizes higher-spec hotel upgrade")
 
             item["why_selected"] = "; ".join(reasons) if reasons else "selected by balanced hotel ranking"
             ranked.append(item)
@@ -3593,6 +3640,10 @@ class Agent3Selection:
                 + 0.5 * budget_fit
                 + min(reviews / 1000.0, 0.8)
             )
+            if self.refinement_mode and "food" in self.refinement_targets:
+                total_cost = self._safe_float(item.get("estimated_total_cost"), 0.0)
+                meal_tier = self._safe_float(item.get("meal_tier_per_person") or item.get("estimated_meal_per_person"), 0.0)
+                score += min(total_cost / 1200.0, 2.0) + min(meal_tier / 500.0, 1.0)
             item["score"] = round(score, 4)
 
             reasons = []
@@ -3614,6 +3665,8 @@ class Agent3Selection:
                 reasons.append("fits city food budget")
             if rating > 0:
                 reasons.append(f"well rated ({rating})")
+            if self.refinement_mode and "food" in self.refinement_targets:
+                reasons.append("prioritizes higher-spend dining upgrade")
 
             item["why_selected"] = "; ".join(reasons) if reasons else "selected by balanced restaurant ranking"
             ranked.append(item)
@@ -3703,6 +3756,10 @@ class Agent3Selection:
                 + 0.5 * budget_fit
                 + min(reviews / 1000.0, 0.8)
             )
+            if self.refinement_mode and "attractions" in self.refinement_targets:
+                total_cost = self._safe_float(item.get("estimated_total_cost"), 0.0)
+                ticket_cost = self._safe_float(item.get("estimated_ticket_per_person"), 0.0)
+                score += min(total_cost / 900.0, 2.0) + min(ticket_cost / 300.0, 1.0)
             item["score"] = round(score, 4)
             item["must_visit_match_score"] = round(must_visit_score, 4)
             item["is_must_visit"] = must_visit_score >= 0.85
@@ -3716,6 +3773,8 @@ class Agent3Selection:
                 reasons.append("fits city attraction budget")
             if rating > 0:
                 reasons.append(f"well rated ({rating})")
+            if self.refinement_mode and "attractions" in self.refinement_targets:
+                reasons.append("prioritizes higher-spend attraction upgrade")
 
             item["why_selected"] = "; ".join(reasons) if reasons else "selected by balanced POI ranking"
             ranked.append(item)

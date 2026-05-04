@@ -418,6 +418,9 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             return
 
         user_request = str(payload.get("message") or payload.get("request") or "").strip()
+        refinement_context = payload.get("refinement_context")
+        if not isinstance(refinement_context, dict):
+            refinement_context = None
         if not user_request:
             _json_response(self, 400, {"success": False, "error": "Message is required.", "request_id": request_id})
             return
@@ -432,7 +435,7 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = run_budget_pipeline(user_request, auto_open_report=False)
+            result = run_budget_pipeline(user_request, auto_open_report=False, refinement_context=refinement_context)
             report_url = _report_url_from_result(result)
             success = bool(result.get("success"))
             response = {
@@ -444,6 +447,9 @@ class TravelApiHandler(BaseHTTPRequestHandler):
                 "warnings": result.get("warnings", []),
                 "trip_summary": result.get("trip_summary", {}),
                 "itinerary_summary": (result.get("itinerary") or {}).get("itinerary_summary", {}),
+                "refinement_state": result.get("refinement_state", {}),
+                "upgrade_status": result.get("upgrade_status", []),
+                "planning_baseline": result.get("planning_baseline", {}),
                 "report": result.get("report", {}),
                 "report_url": report_url,
                 "runtime": {
@@ -452,7 +458,7 @@ class TravelApiHandler(BaseHTTPRequestHandler):
                     "router_runtime": result.get("runtime", {}),
                 },
             }
-            failure_status = 422 if response["stage"] in {"agent1_parse", "agent1_validation", "budget_feasibility"} else 500
+            failure_status = 422 if response["stage"] in {"agent1_parse", "agent1_validation", "budget_feasibility", "refinement_non_decrease"} else 500
             _json_response(self, 200 if success else failure_status, response)
             sys.stdout.write(
                 f"[api] [{request_id}] {parsed.path} finished success={success} stage={response.get('stage')}\n"
