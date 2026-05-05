@@ -53,6 +53,8 @@ AIRPORT_ARRIVAL_BUFFER_MINUTES = 90
 EVENING_RETURN_TARGET_MINUTES = 21 * 60
 LOW_QUALITY_MEAL_COST_FLOOR = 30.0
 LOW_QUALITY_POI_COST_FLOOR = 20.0
+BUDGET_SPEND_UP_TARGET_RATIO = 0.99
+BUDGET_SPEND_UP_MIN_DELTA = 100.0
 HOTEL_DAY_BOUNDARY_TRANSFER_MINUTES = 15
 DEFAULT_INTER_EVENT_TRANSFER_MINUTES = 15
 WALK_TRANSFER_MINUTES = 5
@@ -580,6 +582,11 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
             day.setdefault("warnings", []).append(w)
         validated_plans.append(day)
 
+    budget_spend_up_warnings = _spend_up_lifestyle_costs_for_budget(
+        daily_plans=validated_plans,
+        total_budget=total_budget,
+        normalized=normalized,
+    )
     budget_check = _validate_budget_constraints(
         daily_plans=validated_plans,
         total_budget=total_budget,
@@ -609,6 +616,7 @@ def run_itinerary_agent(router_output: Dict[str, Any]) -> Dict[str, Any]:
     )
     warnings.extend(budget_downgrade_warnings)
     warnings.extend(budget_trim_warnings)
+    warnings.extend(budget_spend_up_warnings)
 
     cost_rollup = _build_cost_rollup(validated_plans)
     itinerary_summary = _build_itinerary_summary(
@@ -648,6 +656,13 @@ def _normalize_agent3_payload(router_output: Dict[str, Any]) -> Dict[str, Any]:
         "trip_summary": trip_summary,
         "country": trip_summary.get("country") or payload.get("country") or parsed_request.get("country"),
         "cost_level": payload.get("cost_level") or agent2_summary.get("cost_level"),
+        "budget_strategy": payload.get("budget_strategy") or agent2_summary.get("budget_strategy"),
+        "budget_status": payload.get("budget_status") or agent2_summary.get("budget_status"),
+        "budget_cap_mode": (
+            payload.get("budget_cap_mode")
+            or parsed_request.get("budget_cap_mode")
+            or trip_summary.get("budget_cap_mode")
+        ),
         "city_date_ranges": payload.get("city_date_ranges", {}) or {},
         "city_budget_plan": city_budget_plan,
         "budget_plan": (
@@ -2390,8 +2405,7 @@ def _fallback_poi_name(day_plan: Dict[str, Any], index: int) -> str:
         "design and gallery lane",
     ]
     theme = themes[((day_index - 1) * 3 + max(0, index - 1)) % len(themes)]
-    day_marker = _normalize_text(day_plan.get("date")) or f"day-{day_index}"
-    return f"{theme.title()} in {city} ({day_marker})"
+    return f"{theme.title()} in {city}"
 
 
 def _schedule_city_day(
@@ -6257,6 +6271,187 @@ def _downgrade_lifestyle_costs_for_budget(
         )
 
     return warnings
+
+
+def _budget_spend_up_suppressed(normalized: Dict[str, Any]) -> bool:
+    if not isinstance(normalized, dict):
+        return False
+    strategy = _normalize_text(normalized.get("budget_strategy")).lower()
+    status = _normalize_text(normalized.get("budget_status")).lower()
+    cap_mode = normalized.get("budget_cap_mode")
+    if isinstance(cap_mode, str):
+        cap_mode = cap_mode.strip().lower() in {"true", "yes", "1", "cap"}
+    return bool(cap_mode) or strategy == "tight" or status in {"over_budget", "infeasible"}
+
+
+def _hotel_spend_up_groups(daily_plans: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    grouped: Dict[Tuple[str, str, str, str], Dict[str, Any]] = {}
+    for day in daily_plans:
+        if not isinstance(day, dict):
+            continue
+        hotel = day.get("hotel") or {}
+        if not isinstance(hotel, dict):
+            continue
+        name = _normalize_text(hotel.get("name"))
+        if not name:
+            continue
+        contribution = _hotel_cost_for_planned_night(day)
+        if contribution <= 0:
+            continue
+        key = (
+            _normalize_text(day.get("city")),
+            name,
+            _normalize_text(day.get("check_in")),
+            _normalize_text(day.get("check_out")),
+        )
+        group = grouped.setdefault(
+            key,
+            {
+                "days": [],
+                "current_total": 0.0,
+                "rollup_contribution": 0.0,
+            },
+        )
+        group["days"].append(day)
+        group["current_total"] = max(
+            _safe_float(group.get("current_total"), 0.0),
+            _safe_float(hotel.get("estimated_total_cost"), 0.0),
+        )
+        group["rollup_contribution"] = round(
+            _safe_float(group.get("rollup_contribution"), 0.0) + contribution,
+            2,
+        )
+    return list(grouped.values())
+
+
+def _allocate_budget_spend_up(amount: float, weights: List[float]) -> List[float]:
+    amount = round(max(0.0, _safe_float(amount, 0.0)), 2)
+    if amount <= 0 or not weights:
+        return []
+    total_weight = sum(max(0.0, _safe_float(weight, 0.0)) for weight in weights)
+    if total_weight <= 0:
+        total_weight = float(len(weights))
+        weights = [1.0 for _ in weights]
+
+    allocated: List[float] = []
+    remaining = amount
+    for index, weight in enumerate(weights):
+        if index == len(weights) - 1:
+            share = remaining
+        else:
+            share = round(amount * max(0.0, _safe_float(weight, 0.0)) / total_weight, 2)
+            share = min(share, remaining)
+        allocated.append(round(share, 2))
+        remaining = round(remaining - share, 2)
+    return allocated
+
+
+def _spend_up_hotels(daily_plans: List[Dict[str, Any]], amount: float) -> float:
+    groups = _hotel_spend_up_groups(daily_plans)
+    if not groups or amount <= 0:
+        return 0.0
+
+    before_total = _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+    allocations = _allocate_budget_spend_up(
+        amount,
+        [_safe_float(group.get("rollup_contribution"), 0.0) for group in groups],
+    )
+    for group, rollup_amount in zip(groups, allocations):
+        if rollup_amount <= 0:
+            continue
+        current_total = _safe_float(group.get("current_total"), 0.0)
+        rollup_contribution = _safe_float(group.get("rollup_contribution"), 0.0)
+        if current_total <= 0 or rollup_contribution <= 0:
+            continue
+        effect_ratio = rollup_contribution / current_total
+        if effect_ratio <= 0:
+            continue
+        hotel_total_increase = round(rollup_amount / effect_ratio, 2)
+        upgraded_total = round(current_total + hotel_total_increase, 2)
+        for day in group.get("days", []):
+            hotel = day.get("hotel") or {}
+            if not isinstance(hotel, dict):
+                continue
+            previous_total = _safe_float(hotel.get("estimated_total_cost"), 0.0)
+            hotel["pre_budget_spend_up_estimated_total_cost"] = round(previous_total, 2)
+            hotel["estimated_total_cost"] = upgraded_total
+            hotel["budget_spend_up_upgrade"] = True
+
+    after_total = _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+    return round(max(0.0, after_total - before_total), 2)
+
+
+def _spend_up_events(daily_plans: List[Dict[str, Any]], amount: float, event_type: str) -> float:
+    if amount <= 0:
+        return 0.0
+    events: List[Dict[str, Any]] = []
+    for day in daily_plans:
+        for event in day.get("events", []) or []:
+            if _normalize_text(event.get("type")) != event_type:
+                continue
+            cost = _safe_float(event.get("cost_estimated"), 0.0)
+            if cost <= 0:
+                continue
+            events.append(event)
+    if not events:
+        return 0.0
+
+    before_total = _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+    allocations = _allocate_budget_spend_up(amount, [_safe_float(event.get("cost_estimated"), 0.0) for event in events])
+    for event, add_amount in zip(events, allocations):
+        if add_amount <= 0:
+            continue
+        old_cost = _safe_float(event.get("cost_estimated"), 0.0)
+        event["pre_budget_spend_up_cost_estimated"] = round(old_cost, 2)
+        event["cost_estimated"] = round(old_cost + add_amount, 2)
+        meta = event.get("meta") if isinstance(event.get("meta"), dict) else {}
+        meta["budget_spend_up_upgrade"] = True
+        event["meta"] = meta
+
+    after_total = _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+    return round(max(0.0, after_total - before_total), 2)
+
+
+def _spend_up_lifestyle_costs_for_budget(
+    daily_plans: List[Dict[str, Any]],
+    total_budget: float,
+    normalized: Dict[str, Any],
+) -> List[str]:
+    if total_budget <= 0 or _budget_spend_up_suppressed(normalized):
+        return []
+
+    current_total = _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+    target_total = round(total_budget * BUDGET_SPEND_UP_TARGET_RATIO, 2)
+    if current_total <= 0 or current_total >= target_total:
+        return []
+
+    shortfall = round(target_total - current_total, 2)
+    if shortfall < BUDGET_SPEND_UP_MIN_DELTA:
+        return []
+
+    upgraded = 0.0
+    upgraded += _spend_up_hotels(daily_plans, shortfall)
+    remaining = round(target_total - _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0), 2)
+    if remaining >= BUDGET_SPEND_UP_MIN_DELTA:
+        upgraded += _spend_up_events(daily_plans, remaining, "meal")
+    remaining = round(target_total - _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0), 2)
+    if remaining >= BUDGET_SPEND_UP_MIN_DELTA:
+        upgraded += _spend_up_events(daily_plans, remaining, "poi")
+
+    final_total = _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+    if final_total > total_budget:
+        _downgrade_lifestyle_costs_for_budget(daily_plans, total_budget)
+        final_total = _safe_float(_build_cost_rollup(daily_plans).get("total_selected_estimated"), 0.0)
+
+    upgraded = round(max(0.0, final_total - current_total), 2)
+    if upgraded <= 0:
+        return []
+    return [
+        (
+            f"Budget utilization upgrade: raised hotel/meal/activity quality estimates by {upgraded} CNY "
+            f"so the final plan uses about {round(final_total / total_budget * 100, 1)}% of the total budget without exceeding the cap."
+        )
+    ]
 
 
 def _build_itinerary_warnings(

@@ -330,6 +330,64 @@ def test_agent4_normalize_preserves_budget_plan_for_fallback_budget_map() -> Non
     _assert(budget_map["Osaka"]["food_budget"] > 0, "Budget map should distribute food budget to Osaka")
 
 
+def test_agent4_spend_up_targets_budget_ceiling() -> None:
+    result = run_itinerary_agent(
+        {
+            "trip_summary": {
+                "origin": "Shanghai",
+                "destination": ["Tokyo"],
+                "country": "japan",
+                "num_people": 1,
+                "duration_days": 2,
+                "budget": {"total": 20000, "currency": "CNY"},
+                "preferences": {},
+            },
+            "city_date_ranges": {
+                "Tokyo": {"check_in": "2026-06-08", "check_out": "2026-06-10", "days": 2},
+            },
+            "city_budget_plan_used": [
+                {"city": "Tokyo", "days": 2, "hotel_budget": 12000, "food_budget": 3000, "attractions_budget": 1000},
+            ],
+            "selected_hotels": [
+                {"city": "Tokyo", "name": "Tokyo Test Hotel", "estimated_total_cost": 2000, "lat": 35.67, "lng": 139.76},
+            ],
+            "selected_restaurants": [
+                {"city": "Tokyo", "name": "Breakfast Cafe", "estimated_total_cost": 300, "recommended_visits": 1, "types": ["cafe"], "lat": 35.671, "lng": 139.761},
+                {"city": "Tokyo", "name": "Lunch Sushi", "estimated_total_cost": 400, "recommended_visits": 1, "lat": 35.672, "lng": 139.762},
+                {"city": "Tokyo", "name": "Dinner Steak", "estimated_total_cost": 500, "recommended_visits": 1, "lat": 35.673, "lng": 139.763},
+            ],
+            "selected_pois": [
+                {"city": "Tokyo", "name": "Tokyo Tower", "estimated_total_cost": 100, "lat": 35.6586, "lng": 139.7454},
+            ],
+            "selected_all_flight_legs": [],
+        }
+    )
+
+    total = (result.get("cost_rollup") or {}).get("total_selected_estimated", 0)
+    _assert(result.get("success") is True, "Agent4 spend-up fixture should generate an itinerary")
+    _assert(19500 <= total <= 20000, "Agent4 should spend up close to the budget ceiling without exceeding it")
+    _assert(
+        (result.get("cost_rollup") or {}).get("hotel_reference", 0) > 2000,
+        "Agent4 should use hotel quality upgrades to close a large remaining budget gap",
+    )
+    _assert(
+        any("Budget utilization upgrade" in warning for warning in result.get("warnings", [])),
+        "Agent4 should explain when it raises quality estimates to use the budget",
+    )
+
+
+def test_fallback_poi_names_do_not_include_date_suffix() -> None:
+    day = {
+        "date": "2026-06-09",
+        "city": "Tokyo",
+        "day_index_in_city": 2,
+    }
+
+    name = _fallback_poi_name(day, 2)
+
+    _assert(name == "Market And Cafe Lane in Tokyo", "Fallback POI names should not include a parenthesized date suffix")
+
+
 def test_parser_and_city_plan_keep_explicit_three_city_nights() -> None:
     prompt = (
         "Plan a 7-day, 6-night multi-city trip from 6-8 to 6-14 in Japan for 1 person, "
@@ -2316,6 +2374,7 @@ def main() -> None:
     test_finalize_success_output_fails_when_itinerary_fails()
     test_agent4_normalize_accepts_agent3_city_budget_plan_used()
     test_agent4_normalize_preserves_budget_plan_for_fallback_budget_map()
+    test_agent4_spend_up_targets_budget_ceiling()
     test_parser_and_city_plan_keep_explicit_three_city_nights()
     test_city_plan_orders_japan_cities_by_gateway()
     test_city_plan_preserves_explicit_sequence_markers()
