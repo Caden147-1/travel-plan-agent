@@ -553,6 +553,11 @@ def _hotel_cost_for_day(day: Dict[str, Any], actual_checkin_dates: Optional[Dict
         return 0.0
     if not _is_hotel_night(day, actual_checkin_dates):
         return 0.0
+    nightly = _safe_float(hotel.get("estimated_nightly_per_room"), 0.0)
+    if nightly <= 0:
+        nightly = _safe_float(hotel.get("realtime_nightly_per_room"), 0.0)
+    if nightly > 0:
+        return nightly
     return _safe_float(hotel.get("estimated_total_cost"), 0.0) / max(1, _hotel_nights(day))
 
 
@@ -579,6 +584,8 @@ def _selection_status_note(status: Any) -> str:
     text = _text(status)
     if not text:
         return ""
+    if "flight_date_far_future" in text:
+        return "The flight date is beyond the usual six-month fare publication window; the system still searched live results, but airlines or the provider may not have released searchable fares yet."
     if "flight_date_outside_booking_window" in text:
         return "No live ticket was selected because the flight date is outside the next-six-month search window."
     if "flight_date_in_past" in text:
@@ -589,6 +596,12 @@ def _selection_status_note(status: Any) -> str:
         return "No live ticket was selected because airport or route information was incomplete."
     if "flight_search_failed" in text:
         return "No live ticket was selected because the flight search request failed."
+    if "direct_unavailable_fallback_to_stop" in text:
+        return "No nonstop flight was available for this leg, so a stop/layover flight was selected."
+    if "direct_over_budget_fallback_to_stop" in text:
+        return "Nonstop flights were available but exceeded the leg transport budget, so a stop/layover flight was selected."
+    if "direct_price_unavailable_fallback_to_stop" in text:
+        return "Nonstop flight pricing was unavailable, so a priced stop/layover flight was allowed."
     return text
 
 
@@ -631,6 +644,10 @@ def _render_day_cards(router_output: Dict[str, Any], currency: str) -> str:
                 time_label = "Needs selection"
             elif raw_event_type == "local_transport" and isinstance(meta, dict) and meta.get("all_day_cost"):
                 time_label = "Daily budget"
+            elif raw_event_type == "flight" and isinstance(meta, dict) and _text(event.get("start")) and _text(event.get("end")):
+                day_offset = int(_safe_float(meta.get("arrival_day_offset"), 0.0))
+                offset_label = f" (+{day_offset} day{'s' if day_offset > 1 else ''})" if day_offset > 0 else ""
+                time_label = f"{_text(event.get('start'))} - {_text(event.get('end'))}{offset_label}"
             elif _text(event.get("start")) and _text(event.get("end")):
                 time_label = f"{_text(event.get('start'))} - {_text(event.get('end'))}"
             else:
@@ -646,6 +663,10 @@ def _render_day_cards(router_output: Dict[str, Any], currency: str) -> str:
             event_note = ""
             if raw_event_type == "flight" and isinstance(meta, dict):
                 note = _text(meta.get("selection_note"))
+                status_text = _text(meta.get("selection_status"))
+                stops = _safe_float(meta.get("stops"), 0.0)
+                if not note and stops > 0 and "direct_" in status_text and "fallback_to_stop" in status_text:
+                    note = _selection_status_note(meta.get("selection_status"))
                 if note:
                     event_note = f"<small class=\"event-note\">{_esc(note)}</small>"
             if raw_event_type in {"flight_unavailable", "transfer_unavailable"} and isinstance(meta, dict):

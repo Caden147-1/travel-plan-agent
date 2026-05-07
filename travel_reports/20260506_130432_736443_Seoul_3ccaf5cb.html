@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Beijing to Seoul</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Beijing -> Seoul</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-06-10 - 2026-06-16</b></div>
+          <div class="request-item"><span>Travelers</span><b>3</b></div>
+          <div class="request-item"><span>Budget</span><b>70000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>standard hotel; hotel features: central; food: local; attractions: historical</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-06-10 - 2026-06-16</strong></div>
+        <div><span>Travelers</span><strong>3</strong></div>
+        <div><span>Budget</span><strong>70000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>69300 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>16409 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>34094 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>14297 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>4500 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>69300 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-06-10 | Seoul</h2></div><strong>15013 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Solaria Nishitetsu Hotel Seoul Myeongdong</strong><span>5682 CNY</span></div><ul class="event-list"><li><span class="time">10:00 - 13:05</span><span class="event-name">Flight Beijing -&gt; Seoul</span><span class="event-type">Flight (Business) x3</span><span class="cost">7311 CNY total</span></li><li><span class="time">13:35 - 13:52</span><span class="event-name">Transfer Gimpo International Airport -&gt; Solaria Nishitetsu Hotel Seoul Myeongdong for check-in</span><span class="event-type">Transfer</span><span class="cost">136 CNY</span></li><li><span class="time">13:52 - 14:07</span><span class="event-name">Check-in Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">14:07 - 14:12</span><span class="event-name">Transfer Solaria Nishitetsu Hotel Seoul Myeongdong -&gt; Seosomun Shrine History Museum</span><span class="event-type">Transfer</span><span class="cost">40 CNY</span></li><li><span class="time">14:12 - 15:42</span><span class="event-name">Seosomun Shrine History Museum</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">15:42 - 15:56</span><span class="event-name">Transfer Seosomun Shrine History Museum -&gt; National Museum of Korea</span><span class="event-type">Transfer</span><span class="cost">112 CNY</span></li><li><span class="time">15:56 - 17:26</span><span class="event-name">National Museum of Korea</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:26 - 18:19</span><span class="event-name">Local area walk near National Museum of Korea before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:19 - 18:33</span><span class="event-name">Transfer Local area walk near National Museum of Korea before dinner -&gt; 황제숯불구이뷔페 2호점ㅣHwangje Charcoal Korean BBQ Buffet Myeongdong Restaurants All you can eatㅣ明洞 皇帝炭火烤肉自助餐 美食 餐廳</span><span class="event-type">Transfer</span><span class="cost">112 CNY</span></li><li><span class="time">18:33 - 19:33</span><span class="event-name">황제숯불구이뷔페 2호점ㅣHwangje Charcoal Korean BBQ Buffet Myeongdong Restaurants All you can eatㅣ明洞 皇帝炭火烤肉自助餐 美食 餐廳</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">19:33 - 19:48</span><span class="event-name">Return to Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-06-11 | Seoul</h2></div><strong>10190 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Solaria Nishitetsu Hotel Seoul Myeongdong</strong><span>5682 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Olive BBQ Chicken Cafe</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Olive BBQ Chicken Cafe -&gt; Gyeongbokgung Palace</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Gyeongbokgung Palace</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Gyeongbokgung Palace before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Gyeongbokgung Palace before lunch -&gt; hansikwangbijib</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">hansikwangbijib</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">13:00 - 15:46</span><span class="event-name">Local area walk near hansikwangbijib before The National Folk Museum of Korea</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:46 - 15:55</span><span class="event-name">Transfer Local area walk near hansikwangbijib before The National Folk Museum of Korea -&gt; The National Folk Museum of Korea</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">15:55 - 17:25</span><span class="event-name">The National Folk Museum of Korea</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:25 - 17:34</span><span class="event-name">Transfer The National Folk Museum of Korea -&gt; Deoksugung Palace</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">17:34 - 19:04</span><span class="event-name">Deoksugung Palace</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">19:04 - 19:09</span><span class="event-name">Transfer Deoksugung Palace -&gt; 설품 덕수궁점</span><span class="event-type">Transfer</span><span class="cost">40 CNY</span></li><li><span class="time">19:09 - 20:09</span><span class="event-name">설품 덕수궁점</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">20:09 - 20:14</span><span class="event-name">Transfer 설품 덕수궁점 -&gt; Dongdaemun History Museum</span><span class="event-type">Transfer</span><span class="cost">40 CNY</span></li><li><span class="time">20:14 - 21:00</span><span class="event-name">Dongdaemun History Museum</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-06-12 | Seoul</h2></div><strong>9270 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Solaria Nishitetsu Hotel Seoul Myeongdong</strong><span>5682 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Olive BBQ Chicken Cafe</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">08:40 - 08:50</span><span class="event-name">Transfer Olive BBQ Chicken Cafe -&gt; War Memorial of Korea</span><span class="event-type">Transfer</span><span class="cost">80 CNY</span></li><li><span class="time">08:50 - 10:20</span><span class="event-name">War Memorial of Korea</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:20 - 11:50</span><span class="event-name">Local area walk near War Memorial of Korea before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:50 - 12:00</span><span class="event-name">Transfer Local area walk near War Memorial of Korea before lunch -&gt; 명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕</span><span class="event-type">Transfer</span><span class="cost">80 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕</span><span class="event-type">Meal</span><span class="cost">566 CNY</span></li><li><span class="time">13:00 - 15:40</span><span class="event-name">Local area walk near 명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕 before Leeum Museum of Art</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:40 - 15:50</span><span class="event-name">Transfer Local area walk near 명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕 before Leeum Museum of Art -&gt; Leeum Museum of Art</span><span class="event-type">Transfer</span><span class="cost">80 CNY</span></li><li><span class="time">15:50 - 17:20</span><span class="event-name">Leeum Museum of Art</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:20 - 17:33</span><span class="event-name">Transfer Leeum Museum of Art -&gt; Seokjojeon (Korean Empire History Museum)</span><span class="event-type">Transfer</span><span class="cost">104 CNY</span></li><li><span class="time">17:33 - 19:03</span><span class="event-name">Seokjojeon (Korean Empire History Museum)</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">19:03 - 19:12</span><span class="event-name">Transfer Seokjojeon (Korean Empire History Museum) -&gt; Yeji Sikdang</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">19:12 - 20:12</span><span class="event-name">Yeji Sikdang</span><span class="event-type">Meal</span><span class="cost">566 CNY</span></li><li><span class="time">20:12 - 20:27</span><span class="event-name">Return to Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-06-13 | Seoul</h2></div><strong>9572 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Solaria Nishitetsu Hotel Seoul Myeongdong</strong><span>5682 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Olive BBQ Chicken Cafe</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Olive BBQ Chicken Cafe -&gt; Seoul Museum of History</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Seoul Museum of History</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Seoul Museum of History before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Seoul Museum of History before lunch -&gt; Wangbijib Myeongdong Central</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Wangbijib Myeongdong Central</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">13:00 - 15:46</span><span class="event-name">Local area walk near Wangbijib Myeongdong Central before National Museum of Korean Contemporary History</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:46 - 15:55</span><span class="event-name">Transfer Local area walk near Wangbijib Myeongdong Central before National Museum of Korean Contemporary History -&gt; National Museum of Korean Contemporary History</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">15:55 - 17:25</span><span class="event-name">National Museum of Korean Contemporary History</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:25 - 17:34</span><span class="event-name">Transfer National Museum of Korean Contemporary History -&gt; Seokpajeong Seoul Art Museum</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">17:34 - 19:04</span><span class="event-name">Seokpajeong Seoul Art Museum</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">19:04 - 19:16</span><span class="event-name">Transfer Seokpajeong Seoul Art Museum -&gt; Ssada Gimbap – Euljiro Entrance (Myeongdong Area)(싸다김밥 을지로입구역점)</span><span class="event-type">Transfer</span><span class="cost">96 CNY</span></li><li><span class="time">19:16 - 20:16</span><span class="event-name">Ssada Gimbap – Euljiro Entrance (Myeongdong Area)(싸다김밥 을지로입구역점)</span><span class="event-type">Meal</span><span class="cost">566 CNY</span></li><li><span class="time">20:16 - 20:31</span><span class="event-name">Return to Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-06-14 | Seoul</h2></div><strong>9954 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Solaria Nishitetsu Hotel Seoul Myeongdong</strong><span>5682 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Olive BBQ Chicken Cafe</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Olive BBQ Chicken Cafe -&gt; Gongpyeong Historic Sites Museum</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Gongpyeong Historic Sites Museum</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Gongpyeong Historic Sites Museum before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Gongpyeong Historic Sites Museum before lunch -&gt; Yangjaeok</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Yangjaeok</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">13:00 - 15:46</span><span class="event-name">Local area walk near Yangjaeok before Dongdaemun History Museum</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:46 - 15:55</span><span class="event-name">Transfer Local area walk near Yangjaeok before Dongdaemun History Museum -&gt; Dongdaemun History Museum</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">15:55 - 17:25</span><span class="event-name">Dongdaemun History Museum</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:25 - 17:34</span><span class="event-name">Transfer Dongdaemun History Museum -&gt; Market And Cafe Lane in Seoul</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">17:34 - 19:04</span><span class="event-name">Market And Cafe Lane in Seoul</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">19:04 - 19:13</span><span class="event-name">Transfer Market And Cafe Lane in Seoul -&gt; Seouljip</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">19:13 - 20:13</span><span class="event-name">Seouljip</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">20:13 - 20:22</span><span class="event-name">Transfer Seouljip -&gt; Deoksugung Palace</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">20:22 - 21:00</span><span class="event-name">Deoksugung Palace</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-06-15 | Seoul</h2></div><strong>8950 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Solaria Nishitetsu Hotel Seoul Myeongdong</strong><span>5682 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Olive BBQ Chicken Cafe</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Olive BBQ Chicken Cafe -&gt; Historic Street Stroll in Seoul</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Historic Street Stroll in Seoul</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 10:24</span><span class="event-name">Transfer Historic Street Stroll in Seoul -&gt; City Viewpoint Walk in Seoul</span><span class="event-type">Transfer</span><span class="cost">40 CNY</span></li><li><span class="time">10:33 - 12:03</span><span class="event-name">City Viewpoint Walk in Seoul</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:03 - 12:12</span><span class="event-name">Transfer City Viewpoint Walk in Seoul -&gt; Jalu</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">12:12 - 13:12</span><span class="event-name">Jalu</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">13:12 - 13:21</span><span class="event-name">Transfer Jalu -&gt; Design And Gallery Lane in Seoul</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">13:21 - 14:51</span><span class="event-name">Design And Gallery Lane in Seoul</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:51 - 18:12</span><span class="event-name">Local area walk near Design And Gallery Lane in Seoul before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:12 - 18:21</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in Seoul before dinner -&gt; Jongsamyook</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">18:21 - 19:21</span><span class="event-name">Jongsamyook</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">19:21 - 19:36</span><span class="event-name">Return to Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-06-16 | Seoul</h2></div><strong>6350 CNY</strong></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop</span><span class="event-type">Transfer</span><span class="cost">120 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Olive BBQ Chicken Cafe</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Olive BBQ Chicken Cafe -&gt; Neighborhood Orientation Walk in Seoul</span><span class="event-type">Transfer</span><span class="cost">72 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Neighborhood Orientation Walk in Seoul</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 10:24</span><span class="event-name">Transfer Neighborhood Orientation Walk in Seoul -&gt; Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Transfer</span><span class="cost">40 CNY</span></li><li><span class="time">10:32 - 10:47</span><span class="event-name">Check-out Solaria Nishitetsu Hotel Seoul Myeongdong</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">10:47 - 11:35</span><span class="event-name">Transfer Solaria Nishitetsu Hotel Seoul Myeongdong -&gt; Incheon International Airport</span><span class="event-type">Transfer</span><span class="cost">384 CNY</span></li><li><span class="time">13:05 - 14:10</span><span class="event-name">Flight Seoul -&gt; Beijing</span><span class="event-type">Flight (Economy) x3</span><span class="cost">4834 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 39.9075, "lng": 116.40323, "day": 0, "date": "", "city": "Beijing", "name": "Start: Beijing", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 37.566, "lng": 126.9784, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Fly Beijing (PEK) -> Seoul (GMP) [Business]", "type": "flight", "time": "", "cost": 7311, "route_point": true}, {"lat": 37.566, "lng": 126.9844, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.2 Transfer Gimpo International Airport -> Solaria Nishitetsu Hotel Seoul Myeongdong for check-in", "type": "transfer", "time": "13:35-13:52", "cost": 136, "estimated_coord": true}, {"lat": 37.562448, "lng": 126.9913684, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.3 Check-in Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "checkin", "time": "13:52-14:07", "cost": 0, "estimated_coord": false}, {"lat": 37.57005292354617, "lng": 126.97397577004112, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.4 Transfer Solaria Nishitetsu Hotel Seoul Myeongdong -> Seosomun Shrine History Museum", "type": "transfer", "time": "14:07-14:12", "cost": 40, "estimated_coord": true}, {"lat": 37.5605541, "lng": 126.96882950000001, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.5 Seosomun Shrine History Museum", "type": "poi", "time": "14:12-15:42", "cost": 300, "estimated_coord": false}, {"lat": 37.56002297807535, "lng": 126.9789246035763, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.6 Transfer Seosomun Shrine History Museum -> National Museum of Korea", "type": "transfer", "time": "15:42-15:56", "cost": 112, "estimated_coord": true}, {"lat": 37.523850599999996, "lng": 126.98647020000001, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.7 National Museum of Korea", "type": "poi", "time": "15:56-17:26", "cost": 300, "estimated_coord": false}, {"lat": 37.527903523546165, "lng": 126.97604597004114, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.8 Local area walk near National Museum of Korea before dinner", "type": "poi", "time": "17:26-18:19", "cost": 0, "estimated_coord": true}, {"lat": 37.57076164960845, "lng": 126.98205057433924, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.9 Transfer Local area walk near National Museum of Korea before dinner -> 황제숯불구이뷔페 2호점ㅣHwangje Charcoal Korean BBQ Buffet Myeongdong Restaurants All you can eatㅣ明洞 皇帝炭火烤肉自助餐 美食 餐廳", "type": "transfer", "time": "18:19-18:33", "cost": 112, "estimated_coord": true}, {"lat": 37.563063899999996, "lng": 126.9851915, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.10 황제숯불구이뷔페 2호점ㅣHwangje Charcoal Korean BBQ Buffet Myeongdong Restaurants All you can eatㅣ明洞 皇帝炭火烤肉自助餐 美食 餐廳", "type": "meal", "time": "18:33-19:33", "cost": 900, "estimated_coord": false}, {"lat": 37.564954810974214, "lng": 126.9724917363041, "day": 1, "date": "2026-06-10", "city": "Seoul", "name": "Day 1.11 Return to Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "transfer", "time": "19:33-19:48", "cost": 120, "estimated_coord": true}, {"lat": 37.56277973592508, "lng": 126.98346259807685, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.1 Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 120, "estimated_coord": true}, {"lat": 37.563781299999995, "lng": 126.9832138, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.2 Olive BBQ Chicken Cafe", "type": "meal", "time": "08:00-08:40", "cost": 900, "estimated_coord": false}, {"lat": 37.5717942519577, "lng": 126.97684223100212, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.3 Transfer Olive BBQ Chicken Cafe -> Gyeongbokgung Palace", "type": "transfer", "time": "08:40-08:49", "cost": 72, "estimated_coord": true}, {"lat": 37.579617, "lng": 126.983041, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.4 Gyeongbokgung Palace", "type": "poi", "time": "08:49-10:19", "cost": 300, "estimated_coord": false}, {"lat": 37.58366992354617, "lng": 126.97261677004113, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.5 Local area walk near Gyeongbokgung Palace before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 37.5606752297081, "lng": 126.97563471134626, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.6 Transfer Local area walk near Gyeongbokgung Palace before lunch -> hansikwangbijib", "type": "transfer", "time": "11:51-12:00", "cost": 72, "estimated_coord": true}, {"lat": 37.562654599999995, "lng": 126.99055489999999, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.7 hansikwangbijib", "type": "meal", "time": "12:00-13:00", "cost": 900, "estimated_coord": false}, {"lat": 37.566707523546164, "lng": 126.98013067004112, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.8 Local area walk near hansikwangbijib before The National Folk Museum of Korea", "type": "poi", "time": "13:00-15:46", "cost": 0, "estimated_coord": true}, {"lat": 37.57011683491762, "lng": 126.98967171993357, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.9 Transfer Local area walk near hansikwangbijib before The National Folk Museum of Korea -> The National Folk Museum of Korea", "type": "transfer", "time": "15:46-15:55", "cost": 72, "estimated_coord": true}, {"lat": 37.5816456, "lng": 126.9789948, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.10 The National Folk Museum of Korea", "type": "poi", "time": "15:55-17:25", "cost": 300, "estimated_coord": false}, {"lat": 37.57057826579106, "lng": 126.96730768363476, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.11 Transfer The National Folk Museum of Korea -> Deoksugung Palace", "type": "transfer", "time": "17:25-17:34", "cost": 72, "estimated_coord": true}, {"lat": 37.5658862, "lng": 126.98090169999999, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.12 Deoksugung Palace", "type": "poi", "time": "17:34-19:04", "cost": 300, "estimated_coord": false}, {"lat": 37.55513139819156, "lng": 126.98348659952518, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.13 Transfer Deoksugung Palace -> 설품 덕수궁점", "type": "transfer", "time": "19:04-19:09", "cost": 40, "estimated_coord": true}, {"lat": 37.5648182, "lng": 126.97629800000001, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.14 설품 덕수궁점", "type": "meal", "time": "19:09-20:09", "cost": 900, "estimated_coord": false}, {"lat": 37.57745013211957, "lng": 126.98199088769587, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.15 Transfer 설품 덕수궁점 -> Dongdaemun History Museum", "type": "transfer", "time": "20:09-20:14", "cost": 40, "estimated_coord": true}, {"lat": 37.5670262, "lng": 127.01744449999998, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.16 Dongdaemun History Museum", "type": "poi", "time": "20:14-21:00", "cost": 300, "estimated_coord": false}, {"lat": 37.55998259595631, "lng": 126.96801776283381, "day": 2, "date": "2026-06-11", "city": "Seoul", "name": "Day 2.17 Return to Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "transfer", "time": "21:00-21:15", "cost": 120, "estimated_coord": true}, {"lat": 37.563423994295334, "lng": 126.99012024720768, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.1 Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 120, "estimated_coord": true}, {"lat": 37.567834223546164, "lng": 126.97278957004113, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.2 Olive BBQ Chicken Cafe", "type": "meal", "time": "08:00-08:40", "cost": 900, "estimated_coord": true}, {"lat": 37.575816351247965, "lng": 126.97149788089231, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.3 Transfer Olive BBQ Chicken Cafe -> War Memorial of Korea", "type": "transfer", "time": "08:40-08:50", "cost": 80, "estimated_coord": true}, {"lat": 37.536986899999995, "lng": 126.98310149999999, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.4 War Memorial of Korea", "type": "poi", "time": "08:50-10:20", "cost": 300, "estimated_coord": false}, {"lat": 37.541039823546164, "lng": 126.97267727004112, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.5 Local area walk near War Memorial of Korea before lunch", "type": "poi", "time": "10:20-11:50", "cost": 0, "estimated_coord": true}, {"lat": 37.55409940727868, "lng": 126.9768586068376, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.6 Transfer Local area walk near War Memorial of Korea before lunch -> 명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕", "type": "transfer", "time": "11:50-12:00", "cost": 80, "estimated_coord": true}, {"lat": 37.5630986, "lng": 126.9895538, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.7 명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕", "type": "meal", "time": "12:00-13:00", "cost": 566, "estimated_coord": false}, {"lat": 37.567151523546165, "lng": 126.97912957004112, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.8 Local area walk near 명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕 before Leeum Museum of Art", "type": "poi", "time": "13:00-15:40", "cost": 0, "estimated_coord": true}, {"lat": 37.577600952551045, "lng": 126.99216291756527, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.9 Transfer Local area walk near 명동맛집 영차떡볶이 | Myeongdong Restaurant Yeongcha Tteokbokki | 明洞 グルメ トッポッキ | 明洞美食 炒年糕 before Leeum Museum of Art -> Leeum Museum of Art", "type": "transfer", "time": "15:40-15:50", "cost": 80, "estimated_coord": true}, {"lat": 37.5379389, "lng": 126.9992749, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.10 Leeum Museum of Art", "type": "poi", "time": "15:50-17:20", "cost": 300, "estimated_coord": false}, {"lat": 37.56674246180609, "lng": 126.9604153190057, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.11 Transfer Leeum Museum of Art -> Seokjojeon (Korean Empire History Museum)", "type": "transfer", "time": "17:20-17:33", "cost": 104, "estimated_coord": true}, {"lat": 37.5663425, "lng": 126.97422340000001, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.12 Seokjojeon (Korean Empire History Museum)", "type": "poi", "time": "17:33-19:03", "cost": 300, "estimated_coord": false}, {"lat": 37.55330410686036, "lng": 126.9911598705866, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.13 Transfer Seokjojeon (Korean Empire History Museum) -> Yeji Sikdang", "type": "transfer", "time": "19:03-19:12", "cost": 72, "estimated_coord": true}, {"lat": 37.564594, "lng": 126.9845345, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.14 Yeji Sikdang", "type": "meal", "time": "19:12-20:12", "cost": 566, "estimated_coord": false}, {"lat": 37.583980721788244, "lng": 126.97756714708746, "day": 3, "date": "2026-06-12", "city": "Seoul", "name": "Day 3.15 Return to Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "transfer", "time": "20:12-20:27", "cost": 120, "estimated_coord": true}, {"lat": 37.55217894380045, "lng": 126.96686837368239, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.1 Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 120, "estimated_coord": true}, {"lat": 37.557804278075345, "lng": 126.97773840357631, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.2 Olive BBQ Chicken Cafe", "type": "meal", "time": "08:00-08:40", "cost": 900, "estimated_coord": true}, {"lat": 37.568401788512176, "lng": 126.9962390417888, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.3 Transfer Olive BBQ Chicken Cafe -> Seoul Museum of History", "type": "transfer", "time": "08:40-08:49", "cost": 72, "estimated_coord": true}, {"lat": 37.5704616, "lng": 126.97651259999999, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.4 Seoul Museum of History", "type": "poi", "time": "08:49-10:19", "cost": 300, "estimated_coord": false}, {"lat": 37.57451452354617, "lng": 126.96608837004112, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.5 Local area walk near Seoul Museum of History before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 37.57627903463608, "lng": 126.9636236186111, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.6 Transfer Local area walk near Seoul Museum of History before lunch -> Wangbijib Myeongdong Central", "type": "transfer", "time": "11:51-12:00", "cost": 72, "estimated_coord": true}, {"lat": 37.5610364, "lng": 126.98838710000001, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.7 Wangbijib Myeongdong Central", "type": "meal", "time": "12:00-13:00", "cost": 900, "estimated_coord": false}, {"lat": 37.56508932354617, "lng": 126.97796287004114, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.8 Local area walk near Wangbijib Myeongdong Central before National Museum of Korean Contemporary History", "type": "poi", "time": "13:00-15:46", "cost": 0, "estimated_coord": true}, {"lat": 37.548439273826105, "lng": 126.98235232795267, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.9 Transfer Local area walk near Wangbijib Myeongdong Central before National Museum of Korean Contemporary History -> National Museum of Korean Contemporary History", "type": "transfer", "time": "15:46-15:55", "cost": 72, "estimated_coord": true}, {"lat": 37.573943199999995, "lng": 126.9779299, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.10 National Museum of Korean Contemporary History", "type": "poi", "time": "15:55-17:25", "cost": 300, "estimated_coord": false}, {"lat": 37.58682470530212, "lng": 126.99033028285832, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.11 Transfer National Museum of Korean Contemporary History -> Seokpajeong Seoul Art Museum", "type": "transfer", "time": "17:25-17:34", "cost": 72, "estimated_coord": true}, {"lat": 37.5948345, "lng": 126.9632499, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.12 Seokpajeong Seoul Art Museum", "type": "poi", "time": "17:34-19:04", "cost": 300, "estimated_coord": false}, {"lat": 37.55870320653779, "lng": 126.9555361244499, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.13 Transfer Seokpajeong Seoul Art Museum -> Ssada Gimbap – Euljiro Entrance (Myeongdong Area)(싸다김밥 을지로입구역점)", "type": "transfer", "time": "19:04-19:16", "cost": 96, "estimated_coord": true}, {"lat": 37.5657256, "lng": 126.98362350000001, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.14 Ssada Gimbap – Euljiro Entrance (Myeongdong Area)(싸다김밥 을지로입구역점)", "type": "meal", "time": "19:16-20:16", "cost": 566, "estimated_coord": false}, {"lat": 37.55593619211094, "lng": 127.00018806486983, "day": 4, "date": "2026-06-13", "city": "Seoul", "name": "Day 4.15 Return to Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "transfer", "time": "20:16-20:31", "cost": 120, "estimated_coord": true}, {"lat": 37.58813832691657, "lng": 126.9691320724358, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.1 Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 120, "estimated_coord": true}, {"lat": 37.56854294960844, "lng": 126.98086437433925, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.2 Olive BBQ Chicken Cafe", "type": "meal", "time": "08:00-08:40", "cost": 900, "estimated_coord": true}, {"lat": 37.54341545816124, "lng": 126.9702797493922, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.3 Transfer Olive BBQ Chicken Cafe -> Gongpyeong Historic Sites Museum", "type": "transfer", "time": "08:40-08:49", "cost": 72, "estimated_coord": true}, {"lat": 37.571844999999996, "lng": 126.9893671, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.4 Gongpyeong Historic Sites Museum", "type": "poi", "time": "08:49-10:19", "cost": 300, "estimated_coord": false}, {"lat": 37.575897923546165, "lng": 126.97894287004112, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.5 Local area walk near Gongpyeong Historic Sites Museum before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 37.57716807528688, "lng": 126.99964321290169, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.6 Transfer Local area walk near Gongpyeong Historic Sites Museum before lunch -> Yangjaeok", "type": "transfer", "time": "11:51-12:00", "cost": 72, "estimated_coord": true}, {"lat": 37.5645473, "lng": 126.98766250000001, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.7 Yangjaeok", "type": "meal", "time": "12:00-13:00", "cost": 900, "estimated_coord": false}, {"lat": 37.56860022354617, "lng": 126.97723827004114, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.8 Local area walk near Yangjaeok before Dongdaemun History Museum", "type": "poi", "time": "13:00-15:46", "cost": 0, "estimated_coord": true}, {"lat": 37.5721144974164, "lng": 126.95519196429369, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.9 Transfer Local area walk near Yangjaeok before Dongdaemun History Museum -> Dongdaemun History Museum", "type": "transfer", "time": "15:46-15:55", "cost": 72, "estimated_coord": true}, {"lat": 37.57107912354617, "lng": 127.00702027004111, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.10 Dongdaemun History Museum", "type": "poi", "time": "15:55-17:25", "cost": 300, "estimated_coord": true}, {"lat": 37.54581461049544, "lng": 126.99138268271771, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.11 Transfer Dongdaemun History Museum -> Market And Cafe Lane in Seoul", "type": "transfer", "time": "17:25-17:34", "cost": 72, "estimated_coord": true}, {"lat": 37.56650092354617, "lng": 126.98094417004113, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.12 Market And Cafe Lane in Seoul", "type": "poi", "time": "17:34-19:04", "cost": 0, "estimated_coord": true}, {"lat": 37.595567213636784, "lng": 126.98347738887193, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.13 Transfer Market And Cafe Lane in Seoul -> Seouljip", "type": "transfer", "time": "19:04-19:13", "cost": 72, "estimated_coord": true}, {"lat": 37.5658763, "lng": 127.0065052, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.14 Seouljip", "type": "meal", "time": "19:13-20:13", "cost": 900, "estimated_coord": false}, {"lat": 37.54762768609002, "lng": 126.95468380128281, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.15 Transfer Seouljip -> Deoksugung Palace", "type": "transfer", "time": "20:13-20:22", "cost": 72, "estimated_coord": true}, {"lat": 37.56993912354617, "lng": 126.97047747004112, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.16 Deoksugung Palace", "type": "poi", "time": "20:22-21:00", "cost": 300, "estimated_coord": true}, {"lat": 37.56352723356798, "lng": 127.00829791675305, "day": 5, "date": "2026-06-14", "city": "Seoul", "name": "Day 5.17 Return to Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "transfer", "time": "21:00-21:15", "cost": 120, "estimated_coord": true}, {"lat": 37.588019009686604, "lng": 126.95802444571498, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.1 Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 120, "estimated_coord": true}, {"lat": 37.56273611097421, "lng": 126.9713055363041, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.2 Olive BBQ Chicken Cafe", "type": "meal", "time": "08:00-08:40", "cost": 900, "estimated_coord": true}, {"lat": 37.536000378992014, "lng": 126.97855079581235, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.3 Transfer Olive BBQ Chicken Cafe -> Historic Street Stroll in Seoul", "type": "transfer", "time": "08:40-08:49", "cost": 72, "estimated_coord": true}, {"lat": 37.55647097807535, "lng": 126.98589300357631, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.4 Historic Street Stroll in Seoul", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 37.58822273098613, "lng": 126.99855316916809, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.5 Transfer Historic Street Stroll in Seoul -> City Viewpoint Walk in Seoul", "type": "transfer", "time": "10:19-10:24", "cost": 40, "estimated_coord": true}, {"lat": 37.56720964960845, "lng": 126.98901897433925, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.6 City Viewpoint Walk in Seoul", "type": "poi", "time": "10:33-12:03", "cost": 0, "estimated_coord": true}, {"lat": 37.56322679694243, "lng": 126.94852845258775, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.7 Transfer City Viewpoint Walk in Seoul -> Jalu", "type": "transfer", "time": "12:03-12:12", "cost": 72, "estimated_coord": true}, {"lat": 37.5624228, "lng": 126.9781987, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.8 Jalu", "type": "meal", "time": "12:12-13:12", "cost": 900, "estimated_coord": false}, {"lat": 37.54786703169698, "lng": 127.00229969582487, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.9 Transfer Jalu -> Design And Gallery Lane in Seoul", "type": "transfer", "time": "13:12-13:21", "cost": 72, "estimated_coord": true}, {"lat": 37.561402810974215, "lng": 126.9794601363041, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.10 Design And Gallery Lane in Seoul", "type": "poi", "time": "13:21-14:51", "cost": 0, "estimated_coord": true}, {"lat": 37.559227735925084, "lng": 126.99043099807686, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.11 Local area walk near Design And Gallery Lane in Seoul before dinner", "type": "poi", "time": "14:51-18:12", "cost": 0, "estimated_coord": true}, {"lat": 37.60141761231285, "lng": 126.97195075678418, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.12 Transfer Local area walk near Design And Gallery Lane in Seoul before dinner -> Jongsamyook", "type": "transfer", "time": "18:12-18:21", "cost": 72, "estimated_coord": true}, {"lat": 37.5728266, "lng": 126.990979, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.13 Jongsamyook", "type": "meal", "time": "18:21-19:21", "cost": 900, "estimated_coord": false}, {"lat": 37.53552767480828, "lng": 126.95923134335928, "day": 6, "date": "2026-06-15", "city": "Seoul", "name": "Day 6.14 Return to Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "transfer", "time": "19:21-19:36", "cost": 120, "estimated_coord": true}, {"lat": 39.91155292354617, "lng": 116.39280577004112, "day": 2, "date": "2026-06-16", "city": "Beijing", "name": "Fly Seoul (ICN) -> Beijing (PEK) [Economy]", "type": "flight", "time": "", "cost": 4834, "route_point": true, "estimated_coord": false}, {"lat": 37.575521245697004, "lng": 127.01311809154284, "day": 7, "date": "2026-06-16", "city": "Seoul", "name": "Day 7.1 Transfer from Solaria Nishitetsu Hotel Seoul Myeongdong to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 120, "estimated_coord": true}, {"lat": 37.560561035925076, "lng": 126.98227639807686, "day": 7, "date": "2026-06-16", "city": "Seoul", "name": "Day 7.2 Olive BBQ Chicken Cafe", "type": "meal", "time": "08:00-08:40", "cost": 900, "estimated_coord": true}, {"lat": 37.58243093170559, "lng": 126.94636838306786, "day": 7, "date": "2026-06-16", "city": "Seoul", "name": "Day 7.3 Transfer Olive BBQ Chicken Cafe -> Neighborhood Orientation Walk in Seoul", "type": "transfer", "time": "08:40-08:49", "cost": 72, "estimated_coord": true}, {"lat": 37.5682422519577, "lng": 126.98381063100213, "day": 7, "date": "2026-06-16", "city": "Seoul", "name": "Day 7.4 Neighborhood Orientation Walk in Seoul", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 37.53224734753502, "lng": 126.99092032154451, "day": 7, "date": "2026-06-16", "city": "Seoul", "name": "Day 7.5 Transfer Neighborhood Orientation Walk in Seoul -> Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "transfer", "time": "10:19-10:24", "cost": 40, "estimated_coord": true}, {"lat": 37.557123229708104, "lng": 126.98260311134626, "day": 7, "date": "2026-06-16", "city": "Seoul", "name": "Day 7.6 Check-out Solaria Nishitetsu Hotel Seoul Myeongdong", "type": "checkout", "time": "10:32-10:47", "cost": 0, "estimated_coord": true}, {"lat": 37.599345567036686, "lng": 126.99196735637483, "day": 7, "date": "2026-06-16", "city": "Seoul", "name": "Day 7.7 Transfer Solaria Nishitetsu Hotel Seoul Myeongdong -> Incheon International Airport", "type": "transfer", "time": "10:47-11:35", "cost": 384, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

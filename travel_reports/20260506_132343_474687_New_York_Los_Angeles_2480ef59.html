@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Beijing to New York, Los Angeles</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Beijing -> New York, Los Angeles</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-06-10 - 2026-06-16</b></div>
+          <div class="request-item"><span>Travelers</span><b>3</b></div>
+          <div class="request-item"><span>Budget</span><b>100000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>premium hotel; hotel features: central; food: local; attractions: historical</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-06-10 - 2026-06-16</strong></div>
+        <div><span>Travelers</span><strong>3</strong></div>
+        <div><span>Budget</span><strong>100000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>99000 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>49377 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>35675 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>11848 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>2100 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>99000 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-06-10 | New York</h2></div><strong>13950 CNY</strong></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Katz&#x27;s Delicatessen</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Katz&#x27;s Delicatessen -&gt; Tenement Museum</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">08:49 - 11:51</span><span class="event-name">Tenement Museum</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Tenement Museum -&gt; Liberty Bagels Wall Street</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Liberty Bagels Wall Street</span><span class="event-type">Meal</span><span class="cost">735 CNY</span></li><li><span class="time">13:00 - 17:51</span><span class="event-name">Local area walk near Liberty Bagels Wall Street before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near Liberty Bagels Wall Street before dinner -&gt; Russ &amp; Daughters</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Russ &amp; Daughters</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">20:05 - 10:00</span><span class="event-name">Flight Beijing -&gt; New York</span><span class="event-type">Flight (Economy) x3</span><span class="cost">10305 CNY total</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-06-11 | New York</h2></div><strong>20182 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Park Central Hotel New York</strong><span>9097 CNY</span></div><ul class="event-list"><li><span class="time">10:30 - 15:00</span><span class="event-name">Transfer JFK Airport -&gt; Park Central Hotel New York for check-in</span><span class="event-type">Transfer</span><span class="cost">8100 CNY</span></li><li><span class="time">15:00 - 15:15</span><span class="event-name">Check-in Park Central Hotel New York</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">15:15 - 15:21</span><span class="event-name">Transfer Park Central Hotel New York -&gt; The Metropolitan Museum of Art</span><span class="event-type">Transfer</span><span class="cost">180 CNY</span></li><li><span class="time">15:21 - 16:51</span><span class="event-name">The Metropolitan Museum of Art</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">16:51 - 17:00</span><span class="event-name">Transfer The Metropolitan Museum of Art -&gt; American Museum of Natural History</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">17:00 - 18:30</span><span class="event-name">American Museum of Natural History</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">18:30 - 18:39</span><span class="event-name">Transfer American Museum of Natural History -&gt; Bagel Shop</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">18:39 - 19:39</span><span class="event-name">Bagel Shop</span><span class="event-type">Meal</span><span class="cost">735 CNY</span></li><li><span class="time">19:39 - 19:45</span><span class="event-name">Transfer Bagel Shop -&gt; Empire State Building</span><span class="event-type">Transfer</span><span class="cost">180 CNY</span></li><li><span class="time">19:45 - 21:00</span><span class="event-name">Empire State Building</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Park Central Hotel New York</span><span class="event-type">Transfer</span><span class="cost">450 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-06-12 | New York</h2></div><strong>14152 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Park Central Hotel New York</strong><span>9097 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Park Central Hotel New York to first stop</span><span class="event-type">Transfer</span><span class="cost">450 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Bagels &amp; Schmear</span><span class="event-type">Meal</span><span class="cost">735 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Bagels &amp; Schmear -&gt; Historic Street Stroll in New York</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Historic Street Stroll in New York</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 10:24</span><span class="event-name">Transfer Historic Street Stroll in New York -&gt; City Viewpoint Walk in New York</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">10:33 - 12:03</span><span class="event-name">City Viewpoint Walk in New York</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:03 - 12:15</span><span class="event-name">Transfer City Viewpoint Walk in New York -&gt; Russ &amp; Daughters</span><span class="event-type">Transfer</span><span class="cost">360 CNY</span></li><li><span class="time">12:15 - 13:15</span><span class="event-name">Russ &amp; Daughters</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">13:15 - 13:30</span><span class="event-name">Transfer Russ &amp; Daughters -&gt; Design And Gallery Lane in New York</span><span class="event-type">Transfer</span><span class="cost">450 CNY</span></li><li><span class="time">13:30 - 15:00</span><span class="event-name">Design And Gallery Lane in New York</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:00 - 18:14</span><span class="event-name">Local area walk near Design And Gallery Lane in New York before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:14 - 18:27</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in New York before dinner -&gt; Katz&#x27;s Delicatessen</span><span class="event-type">Transfer</span><span class="cost">390 CNY</span></li><li><span class="time">18:27 - 19:27</span><span class="event-name">Katz&#x27;s Delicatessen</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">19:27 - 19:42</span><span class="event-name">Return to Park Central Hotel New York</span><span class="event-type">Transfer</span><span class="cost">450 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-06-13 | Los Angeles</h2></div><strong>11359 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Hoxton, Downtown LA</strong><span>5827 CNY</span></div><ul class="event-list"><li><span class="time">13:15 - 13:30</span><span class="event-name">Check-out Park Central Hotel New York</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">13:30 - 14:00</span><span class="event-name">Transfer Park Central Hotel New York -&gt; LaGuardia Airport</span><span class="event-type">Transfer</span><span class="cost">900 CNY</span></li><li><span class="time">15:30 - 23:00</span><span class="event-name">Flight New York -&gt; Los Angeles</span><span class="event-type">Flight (Economy) x3</span><span class="cost">4062 CNY total</span></li><li><span class="time">23:30 - 23:49</span><span class="event-name">Transfer Los Angeles International Airport -&gt; The Hoxton, Downtown LA for check-in</span><span class="event-type">Transfer</span><span class="cost">570 CNY</span></li><li><span class="time">23:49 - 24:04</span><span class="event-name">Check-in The Hoxton, Downtown LA</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-06-14 | Los Angeles</h2></div><strong>11141 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Hoxton, Downtown LA</strong><span>5827 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The Hoxton, Downtown LA</span><span class="event-type">Meal</span><span class="cost">744 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Hotel breakfast cafe at The Hoxton, Downtown LA -&gt; Natural History Museum of Los Angeles County</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Natural History Museum of Los Angeles County</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:19 - 11:46</span><span class="event-name">Local area walk near Natural History Museum of Los Angeles County before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:46 - 12:00</span><span class="event-name">Transfer Local area walk near Natural History Museum of Los Angeles County before lunch -&gt; Tacos La Cuevita</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Tacos La Cuevita</span><span class="event-type">Meal</span><span class="cost">670 CNY</span></li><li><span class="time">13:00 - 15:36</span><span class="event-name">Local area walk near Tacos La Cuevita before The Broad</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:36 - 15:45</span><span class="event-name">Transfer Local area walk near Tacos La Cuevita before The Broad -&gt; The Broad</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">15:45 - 17:15</span><span class="event-name">The Broad</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:15 - 17:24</span><span class="event-name">Transfer The Broad -&gt; Market And Cafe Lane in Los Angeles</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">17:24 - 18:54</span><span class="event-name">Market And Cafe Lane in Los Angeles</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:54 - 19:01</span><span class="event-name">Transfer Market And Cafe Lane in Los Angeles -&gt; Holbox</span><span class="event-type">Transfer</span><span class="cost">210 CNY</span></li><li><span class="time">19:01 - 20:01</span><span class="event-name">Holbox</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">20:01 - 20:08</span><span class="event-name">Transfer Holbox -&gt; Heritage Square Museum</span><span class="event-type">Transfer</span><span class="cost">210 CNY</span></li><li><span class="time">20:08 - 21:00</span><span class="event-name">Heritage Square Museum</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to The Hoxton, Downtown LA</span><span class="event-type">Transfer</span><span class="cost">450 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-06-15 | Los Angeles</h2></div><strong>9521 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Hoxton, Downtown LA</strong><span>5827 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The Hoxton, Downtown LA</span><span class="event-type">Meal</span><span class="cost">744 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at The Hoxton, Downtown LA -&gt; Historic Street Stroll in Los Angeles</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Historic Street Stroll in Los Angeles</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:15 - 10:20</span><span class="event-name">Transfer Historic Street Stroll in Los Angeles -&gt; City Viewpoint Walk in Los Angeles</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">10:25 - 11:55</span><span class="event-name">City Viewpoint Walk in Los Angeles</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:55 - 12:00</span><span class="event-name">Transfer City Viewpoint Walk in Los Angeles -&gt; Tacos La Cuevita</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Tacos La Cuevita</span><span class="event-type">Meal</span><span class="cost">670 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Tacos La Cuevita -&gt; Design And Gallery Lane in Los Angeles</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">13:09 - 14:39</span><span class="event-name">Design And Gallery Lane in Los Angeles</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:39 - 17:53</span><span class="event-name">Local area walk near Design And Gallery Lane in Los Angeles before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:53 - 18:00</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in Los Angeles before dinner -&gt; Holbox</span><span class="event-type">Transfer</span><span class="cost">210 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Holbox</span><span class="event-type">Meal</span><span class="cost">900 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to The Hoxton, Downtown LA</span><span class="event-type">Transfer</span><span class="cost">450 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-06-16 | Los Angeles</h2></div><strong>18694 CNY</strong></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The Hoxton, Downtown LA</span><span class="event-type">Meal</span><span class="cost">744 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at The Hoxton, Downtown LA -&gt; Neighborhood Orientation Walk in Los Angeles</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Neighborhood Orientation Walk in Los Angeles</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:15 - 11:51</span><span class="event-name">Local area walk near Neighborhood Orientation Walk in Los Angeles before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Neighborhood Orientation Walk in Los Angeles before lunch -&gt; Tacos La Cuevita</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Tacos La Cuevita</span><span class="event-type">Meal</span><span class="cost">670 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Tacos La Cuevita -&gt; The Hoxton, Downtown LA</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">14:05 - 14:20</span><span class="event-name">Check-out The Hoxton, Downtown LA</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">14:20 - 14:50</span><span class="event-name">Transfer The Hoxton, Downtown LA -&gt; Los Angeles International Airport</span><span class="event-type">Transfer</span><span class="cost">900 CNY</span></li><li><span class="time">16:20 - 15:00</span><span class="event-name">Flight Los Angeles -&gt; Beijing</span><span class="event-type">Flight (Economy) x3</span><span class="cost">15690 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 39.9075, "lng": 116.40323, "day": 0, "date": "", "city": "Beijing", "name": "Start: Beijing", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 40.71427, "lng": -74.00597, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Fly Beijing (PKX) -> New York (JFK) [Economy]", "type": "flight", "time": "", "cost": 10305, "route_point": true}, {"lat": 40.722232999999996, "lng": -73.98142899999999, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.1 Katz's Delicatessen", "type": "meal", "time": "08:00-08:40", "cost": 900, "estimated_coord": false}, {"lat": 40.71427, "lng": -73.99997, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.2 Transfer Katz's Delicatessen -> Tenement Museum", "type": "transfer", "time": "08:40-08:49", "cost": 270, "estimated_coord": true}, {"lat": 40.718818, "lng": -73.9900876, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.3 Tenement Museum", "type": "poi", "time": "08:49-11:51", "cost": 300, "estimated_coord": false}, {"lat": 40.71832292354617, "lng": -74.01039422995888, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.4 Transfer Tenement Museum -> Liberty Bagels Wall Street", "type": "transfer", "time": "11:51-12:00", "cost": 270, "estimated_coord": true}, {"lat": 40.70587150000001, "lng": -74.0069819, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.5 Liberty Bagels Wall Street", "type": "meal", "time": "12:00-13:00", "cost": 735, "estimated_coord": false}, {"lat": 40.70992442354618, "lng": -74.01740612995887, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.6 Local area walk near Liberty Bagels Wall Street before dinner", "type": "poi", "time": "13:00-17:51", "cost": 0, "estimated_coord": true}, {"lat": 40.70829297807535, "lng": -74.0054453964237, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.7 Transfer Local area walk near Liberty Bagels Wall Street before dinner -> Russ & Daughters", "type": "transfer", "time": "17:51-18:00", "cost": 270, "estimated_coord": true}, {"lat": 40.7225803, "lng": -73.9823134, "day": 1, "date": "2026-06-10", "city": "New York", "name": "Day 1.8 Russ & Daughters", "type": "meal", "time": "18:00-19:00", "cost": 900, "estimated_coord": false}, {"lat": 40.719031649608446, "lng": -74.00231942566076, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.1 Transfer JFK Airport -> Park Central Hotel New York for check-in", "type": "transfer", "time": "10:30-15:00", "cost": 8100, "estimated_coord": true}, {"lat": 40.7645958, "lng": -73.9749508, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.2 Check-in Park Central Hotel New York", "type": "checkin", "time": "15:00-15:15", "cost": 0, "estimated_coord": false}, {"lat": 40.71322481097421, "lng": -74.0118782636959, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.3 Transfer Park Central Hotel New York -> The Metropolitan Museum of Art", "type": "transfer", "time": "15:15-15:21", "cost": 180, "estimated_coord": true}, {"lat": 40.7794366, "lng": -73.963244, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.4 The Metropolitan Museum of Art", "type": "poi", "time": "15:21-16:51", "cost": 300, "estimated_coord": false}, {"lat": 40.71104973592508, "lng": -74.00090740192314, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.5 Transfer The Metropolitan Museum of Art -> American Museum of Natural History", "type": "transfer", "time": "16:51-17:00", "cost": 270, "estimated_coord": true}, {"lat": 40.7813241, "lng": -73.9739882, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.6 American Museum of Natural History", "type": "poi", "time": "17:00-18:30", "cost": 300, "estimated_coord": false}, {"lat": 40.720064251957695, "lng": -74.00752776899787, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.7 Transfer American Museum of Natural History -> Bagel Shop", "type": "transfer", "time": "18:30-18:39", "cost": 270, "estimated_coord": true}, {"lat": 40.7830387, "lng": -73.95064599999999, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.8 Bagel Shop", "type": "meal", "time": "18:39-19:39", "cost": 735, "estimated_coord": false}, {"lat": 40.7089452297081, "lng": -74.00873528865374, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.9 Transfer Bagel Shop -> Empire State Building", "type": "transfer", "time": "19:39-19:45", "cost": 180, "estimated_coord": true}, {"lat": 40.7484405, "lng": -73.98566439999999, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.10 Empire State Building", "type": "poi", "time": "19:45-21:00", "cost": 300, "estimated_coord": false}, {"lat": 40.71838683491762, "lng": -73.99469828006643, "day": 2, "date": "2026-06-11", "city": "New York", "name": "Day 2.11 Return to Park Central Hotel New York", "type": "transfer", "time": "21:00-21:15", "cost": 450, "estimated_coord": true}, {"lat": 40.71884826579106, "lng": -74.01706231636524, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.1 Transfer from Park Central Hotel New York to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 450, "estimated_coord": true}, {"lat": 40.7429217, "lng": -73.9833436, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.2 Bagels & Schmear", "type": "meal", "time": "08:00-08:40", "cost": 735, "estimated_coord": false}, {"lat": 40.70340139819156, "lng": -74.00088340047482, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.3 Transfer Bagels & Schmear -> Historic Street Stroll in New York", "type": "transfer", "time": "08:40-08:49", "cost": 270, "estimated_coord": true}, {"lat": 40.76864872354617, "lng": -73.98537502995887, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.4 Historic Street Stroll in New York", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 40.72572013211957, "lng": -74.00237911230413, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.5 Transfer Historic Street Stroll in New York -> City Viewpoint Walk in New York", "type": "transfer", "time": "10:19-10:24", "cost": 150, "estimated_coord": true}, {"lat": 40.75861877807535, "lng": -73.98042619642369, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.6 City Viewpoint Walk in New York", "type": "poi", "time": "10:33-12:03", "cost": 0, "estimated_coord": true}, {"lat": 40.70825259595631, "lng": -74.01635223716619, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.7 Transfer City Viewpoint Walk in New York -> Russ & Daughters", "type": "transfer", "time": "12:03-12:15", "cost": 360, "estimated_coord": true}, {"lat": 40.726633223546166, "lng": -73.99273762995887, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.8 Russ & Daughters", "type": "meal", "time": "12:15-13:15", "cost": 900, "estimated_coord": true}, {"lat": 40.71169399429533, "lng": -73.99424975279231, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.9 Transfer Russ & Daughters -> Design And Gallery Lane in New York", "type": "transfer", "time": "13:15-13:30", "cost": 450, "estimated_coord": true}, {"lat": 40.76935744960845, "lng": -73.97730022566076, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.10 Design And Gallery Lane in New York", "type": "poi", "time": "13:30-15:00", "cost": 0, "estimated_coord": true}, {"lat": 40.763550610974214, "lng": -73.9868590636959, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.11 Local area walk near Design And Gallery Lane in New York before dinner", "type": "poi", "time": "15:00-18:14", "cost": 0, "estimated_coord": true}, {"lat": 40.72408635124796, "lng": -74.01287211910768, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.12 Transfer Local area walk near Design And Gallery Lane in New York before dinner -> Katz's Delicatessen", "type": "transfer", "time": "18:14-18:27", "cost": 390, "estimated_coord": true}, {"lat": 40.726285923546165, "lng": -73.99185322995886, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.13 Katz's Delicatessen", "type": "meal", "time": "18:27-19:27", "cost": 900, "estimated_coord": true}, {"lat": 40.702369407278674, "lng": -74.0075113931624, "day": 3, "date": "2026-06-12", "city": "New York", "name": "Day 3.14 Return to Park Central Hotel New York", "type": "transfer", "time": "19:27-19:42", "cost": 450, "estimated_coord": true}, {"lat": 34.05223, "lng": -118.24368, "day": 2, "date": "2026-06-13", "city": "Los Angeles", "name": "Fly New York (LGA) -> Los Angeles (LAX) [Economy]", "type": "flight", "time": "", "cost": 4062, "route_point": true}, {"lat": 40.76137553592508, "lng": -73.97588820192314, "day": 4, "date": "2026-06-13", "city": "Los Angeles", "name": "Day 4.1 Check-out Park Central Hotel New York", "type": "checkout", "time": "13:15-13:30", "cost": 0, "estimated_coord": true}, {"lat": 34.05223, "lng": -118.23768, "day": 4, "date": "2026-06-13", "city": "Los Angeles", "name": "Day 4.2 Transfer Park Central Hotel New York -> LaGuardia Airport", "type": "transfer", "time": "13:30-14:00", "cost": 900, "estimated_coord": true}, {"lat": 34.05628292354617, "lng": -118.24810422995887, "day": 4, "date": "2026-06-13", "city": "Los Angeles", "name": "Day 4.4 Transfer Los Angeles International Airport -> The Hoxton, Downtown LA for check-in", "type": "transfer", "time": "23:30-23:49", "cost": 570, "estimated_coord": true}, {"lat": 34.0397452, "lng": -118.2525327, "day": 4, "date": "2026-06-13", "city": "Los Angeles", "name": "Day 4.5 Check-in The Hoxton, Downtown LA", "type": "checkin", "time": "23:49-24:04", "cost": 0, "estimated_coord": false}, {"lat": 34.04379812354617, "lng": -118.26295692995888, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.1 Hotel breakfast cafe at The Hoxton, Downtown LA", "type": "meal", "time": "08:00-08:40", "cost": 744, "estimated_coord": true}, {"lat": 34.04625297807535, "lng": -118.24315539642369, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.2 Transfer Hotel breakfast cafe at The Hoxton, Downtown LA -> Natural History Museum of Los Angeles County", "type": "transfer", "time": "08:40-08:49", "cost": 270, "estimated_coord": true}, {"lat": 34.0171448, "lng": -118.28266349999998, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.3 Natural History Museum of Los Angeles County", "type": "poi", "time": "08:49-10:19", "cost": 300, "estimated_coord": false}, {"lat": 34.021197723546166, "lng": -118.29308772995886, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.4 Local area walk near Natural History Museum of Los Angeles County before lunch", "type": "poi", "time": "10:19-11:46", "cost": 0, "estimated_coord": true}, {"lat": 34.05699164960845, "lng": -118.24002942566075, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.5 Transfer Local area walk near Natural History Museum of Los Angeles County before lunch -> Tacos La Cuevita", "type": "transfer", "time": "11:46-12:00", "cost": 420, "estimated_coord": true}, {"lat": 34.0460965, "lng": -118.2519172, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.6 Tacos La Cuevita", "type": "meal", "time": "12:00-13:00", "cost": 670, "estimated_coord": false}, {"lat": 34.050149423546166, "lng": -118.26234142995887, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.7 Local area walk near Tacos La Cuevita before The Broad", "type": "poi", "time": "13:00-15:36", "cost": 0, "estimated_coord": true}, {"lat": 34.05118481097421, "lng": -118.2495882636959, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.8 Transfer Local area walk near Tacos La Cuevita before The Broad -> The Broad", "type": "transfer", "time": "15:36-15:45", "cost": 270, "estimated_coord": true}, {"lat": 34.0545021, "lng": -118.25018019999999, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.9 The Broad", "type": "poi", "time": "15:45-17:15", "cost": 300, "estimated_coord": false}, {"lat": 34.04900973592508, "lng": -118.23861740192314, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.10 Transfer The Broad -> Market And Cafe Lane in Los Angeles", "type": "transfer", "time": "17:15-17:24", "cost": 270, "estimated_coord": true}, {"lat": 34.03376817807535, "lng": -118.2580080964237, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.11 Market And Cafe Lane in Los Angeles", "type": "poi", "time": "17:24-18:54", "cost": 0, "estimated_coord": true}, {"lat": 34.0580242519577, "lng": -118.24523776899787, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.12 Transfer Market And Cafe Lane in Los Angeles -> Holbox", "type": "transfer", "time": "18:54-19:01", "cost": 210, "estimated_coord": true}, {"lat": 34.017356, "lng": -118.272405, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.13 Holbox", "type": "meal", "time": "19:01-20:01", "cost": 900, "estimated_coord": false}, {"lat": 34.0469052297081, "lng": -118.24644528865373, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.14 Transfer Holbox -> Heritage Square Museum", "type": "transfer", "time": "20:01-20:08", "cost": 210, "estimated_coord": true}, {"lat": 34.0882497, "lng": -118.2079756, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.15 Heritage Square Museum", "type": "poi", "time": "20:08-21:00", "cost": 300, "estimated_coord": false}, {"lat": 34.05634683491762, "lng": -118.23240828006642, "day": 5, "date": "2026-06-14", "city": "Los Angeles", "name": "Day 5.16 Return to The Hoxton, Downtown LA", "type": "transfer", "time": "21:00-21:15", "cost": 450, "estimated_coord": true}, {"lat": 34.044506849608446, "lng": -118.25488212566076, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.1 Hotel breakfast cafe at The Hoxton, Downtown LA", "type": "meal", "time": "08:00-08:40", "cost": 744, "estimated_coord": true}, {"lat": 34.05680826579106, "lng": -118.25477231636523, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.2 Transfer Hotel breakfast cafe at The Hoxton, Downtown LA -> Historic Street Stroll in Los Angeles", "type": "transfer", "time": "08:40-08:45", "cost": 150, "estimated_coord": true}, {"lat": 34.03870001097421, "lng": -118.2644409636959, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.3 Historic Street Stroll in Los Angeles", "type": "poi", "time": "08:45-10:15", "cost": 0, "estimated_coord": true}, {"lat": 34.04136139819156, "lng": -118.23859340047481, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.4 Transfer Historic Street Stroll in Los Angeles -> City Viewpoint Walk in Los Angeles", "type": "transfer", "time": "10:15-10:20", "cost": 150, "estimated_coord": true}, {"lat": 34.03652493592508, "lng": -118.25347010192314, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.5 City Viewpoint Walk in Los Angeles", "type": "poi", "time": "10:25-11:55", "cost": 0, "estimated_coord": true}, {"lat": 34.06368013211957, "lng": -118.24008911230412, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.6 Transfer City Viewpoint Walk in Los Angeles -> Tacos La Cuevita", "type": "transfer", "time": "11:55-12:00", "cost": 150, "estimated_coord": true}, {"lat": 34.04011947807535, "lng": -118.25739259642368, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.7 Tacos La Cuevita", "type": "meal", "time": "12:00-13:00", "cost": 670, "estimated_coord": true}, {"lat": 34.04621259595631, "lng": -118.25406223716618, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.8 Transfer Tacos La Cuevita -> Design And Gallery Lane in Los Angeles", "type": "transfer", "time": "13:00-13:09", "cost": 270, "estimated_coord": true}, {"lat": 34.045539451957694, "lng": -118.26009046899787, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.9 Design And Gallery Lane in Los Angeles", "type": "poi", "time": "13:09-14:39", "cost": 0, "estimated_coord": true}, {"lat": 34.0344204297081, "lng": -118.26129798865374, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.10 Local area walk near Design And Gallery Lane in Los Angeles before dinner", "type": "poi", "time": "14:39-17:53", "cost": 0, "estimated_coord": true}, {"lat": 34.04965399429533, "lng": -118.2319597527923, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.11 Transfer Local area walk near Design And Gallery Lane in Los Angeles before dinner -> Holbox", "type": "transfer", "time": "17:53-18:00", "cost": 210, "estimated_coord": true}, {"lat": 34.02140892354617, "lng": -118.28282922995888, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.12 Holbox", "type": "meal", "time": "18:00-19:00", "cost": 900, "estimated_coord": true}, {"lat": 34.062046351247965, "lng": -118.25058211910768, "day": 6, "date": "2026-06-15", "city": "Los Angeles", "name": "Day 6.13 Return to The Hoxton, Downtown LA", "type": "transfer", "time": "19:00-19:15", "cost": 450, "estimated_coord": true}, {"lat": 39.91155292354617, "lng": 116.39280577004112, "day": 3, "date": "2026-06-16", "city": "Beijing", "name": "Fly Los Angeles (LAX) -> Beijing (PKX) [Economy]", "type": "flight", "time": "", "cost": 15690, "route_point": true, "estimated_coord": false}, {"lat": 34.043862034917616, "lng": -118.24726098006643, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.1 Hotel breakfast cafe at The Hoxton, Downtown LA", "type": "meal", "time": "08:00-08:40", "cost": 744, "estimated_coord": true}, {"lat": 34.040329407278676, "lng": -118.2452213931624, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.2 Transfer Hotel breakfast cafe at The Hoxton, Downtown LA -> Neighborhood Orientation Walk in Los Angeles", "type": "transfer", "time": "08:40-08:45", "cost": 150, "estimated_coord": true}, {"lat": 34.04432346579106, "lng": -118.26962501636524, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.3 Neighborhood Orientation Walk in Los Angeles", "type": "poi", "time": "08:45-10:15", "cost": 0, "estimated_coord": true}, {"lat": 34.02887659819156, "lng": -118.25344610047482, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.4 Local area walk near Neighborhood Orientation Walk in Los Angeles before lunch", "type": "poi", "time": "10:15-11:51", "cost": 0, "estimated_coord": true}, {"lat": 34.063830952551044, "lng": -118.22991708243472, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.5 Transfer Local area walk near Neighborhood Orientation Walk in Los Angeles before lunch -> Tacos La Cuevita", "type": "transfer", "time": "11:51-12:00", "cost": 270, "estimated_coord": true}, {"lat": 34.050858149608445, "lng": -118.25426662566075, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.6 Tacos La Cuevita", "type": "meal", "time": "12:00-13:00", "cost": 670, "estimated_coord": true}, {"lat": 34.05297246180609, "lng": -118.26166468099429, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.7 Transfer Tacos La Cuevita -> The Hoxton, Downtown LA", "type": "transfer", "time": "13:00-13:09", "cost": 270, "estimated_coord": true}, {"lat": 34.05119533211957, "lng": -118.25494181230412, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.8 Check-out The Hoxton, Downtown LA", "type": "checkout", "time": "14:05-14:20", "cost": 0, "estimated_coord": true}, {"lat": 34.03953410686036, "lng": -118.23092012941339, "day": 7, "date": "2026-06-16", "city": "Los Angeles", "name": "Day 7.9 Transfer The Hoxton, Downtown LA -> Los Angeles International Airport", "type": "transfer", "time": "14:20-14:50", "cost": 900, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

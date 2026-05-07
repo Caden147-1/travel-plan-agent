@@ -16,6 +16,7 @@ CITY_CENTROIDS_PATH = BASE_DIR / "cities15000.txt"
 AIRPORT_MAPPING_PATH = BASE_DIR / "global_airports.json"
 GOOGLE_DISTANCE_MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json"
 NEARBY_AIRPORT_RADIUS_KM = 220.0
+DEFAULT_COUNTRY_CITY_DAYS = 2
 
 
 COUNTRY_NAME_ALIASES = {
@@ -200,6 +201,27 @@ def _allocate_days_by_ratio(total_days: int, items: List[Dict[str, Any]]) -> Lis
     return result
 
 
+def _allocate_default_country_city_days(total_days: int, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    result: List[Dict[str, Any]] = []
+    if not items:
+        return result
+
+    total_days = max(1, total_days)
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        city_name = _normalize_text(item.get("city"))
+        if not city_name:
+            continue
+        result.append({
+            "city": city_name,
+            "days": min(DEFAULT_COUNTRY_CITY_DAYS, total_days),
+            "source": _normalize_text(item.get("source")) or "country_default",
+        })
+
+    return result
+
+
 def recommend_cities_by_country(country: str, duration_days: int, db: dict):
     """
     Recommend country default cities based on trip duration.
@@ -331,7 +353,8 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
 
     # 1) Highest priority: explicit city_plan
     if isinstance(planned_cities, list) and planned_cities:
-        explicit_mode = _normalize_text(city_plan.get("mode")) in {"user_specified", "user_explicit_city_days"}
+        city_plan_mode = _normalize_text(city_plan.get("mode"))
+        explicit_mode = city_plan_mode in {"user_specified", "user_explicit_city_days"}
         trimmed_planned_cities = planned_cities if explicit_mode else _trim_items(planned_cities, max_city_count)
 
         ratio_items: List[Dict[str, Any]] = []
@@ -377,6 +400,16 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
 
         if direct_explicit_nights and len(direct_explicit_nights) == len(ratio_items):
             return direct_explicit_nights
+
+        if city_plan_mode == "country_recommendation" and all_have_days:
+            return [
+                {
+                    "city": item["city"],
+                    "days": max(1, _safe_int(item["days_ratio"], DEFAULT_COUNTRY_CITY_DAYS)),
+                    "source": item["source"],
+                }
+                for item in ratio_items
+            ]
 
         if ratio_items:
             if all_have_days and sum(explicit_day_values) > 0:
@@ -466,7 +499,7 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
             for item in normalized_default_items:
                 item["days_ratio"] = item["days_ratio"] / total_ratio
 
-        return _allocate_days_by_ratio(total_days, normalized_default_items)
+        return _allocate_default_country_city_days(total_days, normalized_default_items)
 
     return []
 
@@ -1070,7 +1103,7 @@ def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
         )
 
         city_plan["mode"] = "country_recommendation"
-        city_plan["cities"] = _allocate_days_by_ratio(
+        city_plan["cities"] = _allocate_default_country_city_days(
             duration_days,
             [
                 {
@@ -1135,7 +1168,7 @@ def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
         )
 
         city_plan["mode"] = "country_recommendation"
-        city_plan["cities"] = _allocate_days_by_ratio(
+        city_plan["cities"] = _allocate_default_country_city_days(
             duration_days,
             [
                 {

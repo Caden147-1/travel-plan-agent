@@ -16,10 +16,14 @@ interface Message {
 interface PlanResponse {
   request_id?: string
   success: boolean
+  stage?: string
   error?: string
   guidance?: string
   warnings?: string[]
   report_url?: string
+  minimum_budget_required?: number
+  recoverable_budget_request_id?: string
+  recoverable_estimated_total?: number
   trip_summary?: {
     origin?: string
     destination?: string[]
@@ -67,6 +71,10 @@ interface HistoryItem {
   planningBaselineRequest?: string
   planningBudgetTotal?: number
   planningSelectedTotal?: number
+  recoverableBudgetRequestId?: string
+  recoverableEstimatedTotal?: number
+  recoverableMinimumBudgetRequired?: number
+  lastFailureStage?: string
 }
 
 type RefinementCategory = "food" | "attractions" | "flight" | "hotel"
@@ -284,12 +292,11 @@ export function ChatInterface() {
 
   async function handleSubmit(e: FormEvent | KeyboardEvent) {
     e.preventDefault()
-    if (isActiveLoading && activeConversationId) {
+    const request = input.trim()
+    if (isActiveLoading && activeConversationId && !request) {
       handleStopThinking()
       return
     }
-
-    const request = input.trim()
     if (!request) return
 
     const previousDraftKey = currentDraftKey
@@ -302,12 +309,46 @@ export function ChatInterface() {
       content: request,
     }
     const submittedMessages = [...previousMessages, userMessage]
-    let plannerRequest = buildPlannerRequest(submittedMessages)
+    const publicTransportConfirmation = existingHistory
+      ? isPublicIntercityTransportConfirmation(request, existingHistory)
+      : false
+    let plannerRequest = publicTransportConfirmation
+      ? buildPublicIntercityTransportRequest(existingHistory!)
+      : buildPlannerRequest(submittedMessages)
+    const budgetRecovery = existingHistory ? buildFastBudgetRecovery(request, existingHistory) : null
+    if (budgetRecovery) {
+      const budgetAboveRecoveredMinimum =
+        budgetRecovery.newTotalBudget !== undefined
+        && existingHistory?.recoverableMinimumBudgetRequired !== undefined
+        && budgetRecovery.newTotalBudget > existingHistory.recoverableMinimumBudgetRequired
+      const budgetOverride = budgetRecovery.newTotalBudget
+        ? `Use ${budgetRecovery.newTotalBudget} CNY as the new complete total budget. This replaces any earlier total budget.`
+        : "Apply the user's updated budget constraints below."
+      const onlyBudgetIncrease =
+        budgetRecovery.actions.length === 1 && budgetRecovery.actions.includes("increase_budget")
+      plannerRequest = [
+        getPlanningBaselineRequest(existingHistory!),
+        "",
+        budgetOverride,
+        onlyBudgetIncrease || budgetAboveRecoveredMinimum
+          ? "Rerun the full planning pipeline with the new budget. Do not reuse the previous constrained recovery plan."
+          : "Apply only the requested budget recovery changes. Do not upgrade unrelated hotels, restaurants, attractions, flights, or local transport just because the total budget changed.",
+        `The user changed the budget constraints after the previous budget result: ${request}`,
+      ].join("\n")
+    }
+    const budgetFailureRevision = !budgetRecovery && existingHistory
+      ? buildBudgetFailureRevisionRequest(request, existingHistory)
+      : null
+    if (budgetFailureRevision) {
+      plannerRequest = budgetFailureRevision
+    }
     let refinementContext: RefinementContext | null = null
     let nextPendingRefinement: PendingRefinement | undefined
     let directAssistantContent = ""
 
-    if (existingHistory?.pendingRefinement) {
+    if (budgetRecovery) {
+      nextPendingRefinement = undefined
+    } else if (existingHistory?.pendingRefinement) {
       const resolved = resolvePendingRefinement(existingHistory.pendingRefinement, request, existingHistory)
       if (resolved.rejection) {
         directAssistantContent = resolved.rejection
@@ -332,7 +373,7 @@ export function ChatInterface() {
       }
     }
 
-    const requestValidationError = refinementContext ? "" : validateRequest(plannerRequest)
+    const requestValidationError = refinementContext || budgetRecovery || budgetFailureRevision ? "" : validateRequest(plannerRequest)
 
     setActiveConversation(historyId)
     clearDraft(previousDraftKey)
@@ -419,7 +460,7 @@ export function ChatInterface() {
         return
       }
 
-      if (!refinementContext) {
+      if (!refinementContext && !budgetRecovery && !budgetFailureRevision) {
         const guidanceResponse = await fetch(`${apiBase}/api/guidance`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -468,6 +509,13 @@ export function ChatInterface() {
         body: JSON.stringify({
           message: plannerRequest,
           ...(refinementContext ? { refinement_context: refinementContext } : {}),
+          ...(budgetRecovery
+            ? {
+                budget_recovery_actions: budgetRecovery.actions,
+                ...(budgetRecovery.newTotalBudget ? { new_total_budget: budgetRecovery.newTotalBudget } : {}),
+                ...(budgetRecovery.requestId ? { recover_budget_request_id: budgetRecovery.requestId } : {}),
+              }
+            : {}),
         }),
         signal: abortController.signal,
       })
@@ -493,6 +541,13 @@ export function ChatInterface() {
                   summary: guidance,
                   status: "error",
                   error: data.error || "Planning failed.",
+                  recoverableBudgetRequestId: data.recoverable_budget_request_id || item.recoverableBudgetRequestId,
+                  recoverableEstimatedTotal: data.recoverable_estimated_total || item.recoverableEstimatedTotal,
+                  recoverableMinimumBudgetRequired: data.minimum_budget_required || item.recoverableMinimumBudgetRequired,
+                  lastFailureStage: data.stage || item.lastFailureStage,
+                  planningBaselineRequest: data.planning_baseline?.request || plannerRequest || item.planningBaselineRequest,
+                  planningBudgetTotal: data.planning_baseline?.total_budget || data.trip_summary?.budget?.total || item.planningBudgetTotal,
+                  planningSelectedTotal: data.planning_baseline?.selected_total || data.itinerary_summary?.estimated_total_cost || item.planningSelectedTotal,
                   updatedAt: new Date().toISOString(),
                 }
               : item,
@@ -525,6 +580,10 @@ export function ChatInterface() {
                 planningBaselineRequest: data.planning_baseline?.request || plannerRequest,
                 planningBudgetTotal: data.planning_baseline?.total_budget || data.trip_summary?.budget?.total || item.planningBudgetTotal,
                 planningSelectedTotal: data.planning_baseline?.selected_total || data.itinerary_summary?.estimated_total_cost || item.planningSelectedTotal,
+                recoverableBudgetRequestId: undefined,
+                recoverableEstimatedTotal: undefined,
+                recoverableMinimumBudgetRequired: undefined,
+                lastFailureStage: undefined,
                 pendingRefinement: undefined,
                 status: "ready",
                 updatedAt: new Date().toISOString(),
@@ -563,7 +622,11 @@ export function ChatInterface() {
         return
       }
 
-      const message = error instanceof Error ? error.message : "Unknown error."
+      const rawMessage = error instanceof Error ? error.message : "Unknown error."
+      const message =
+        rawMessage === "Load failed" || rawMessage === "Failed to fetch"
+          ? `Cannot reach the TravelAI API at ${apiBase}. Please start the backend with python3.13 main.py and keep that terminal running.`
+          : rawMessage
       const errorSummary = `The plan could not be generated.\n\n${message}`
       const nextMessages: Message[] = [
         ...submittedMessages,
@@ -659,7 +722,7 @@ export function ChatInterface() {
   function handleKeyDown(e: KeyboardEvent) {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault()
-      if (isActiveLoading) {
+      if (isActiveLoading && !input.trim()) {
         handleStopThinking()
         return
       }
@@ -843,10 +906,10 @@ export function ChatInterface() {
                 size="icon"
                 disabled={!input.trim() && !isActiveLoading}
                 className="flex-shrink-0 h-10 w-10 rounded-lg"
-                aria-label={isActiveLoading ? "Stop thinking" : "Send message"}
-                title={isActiveLoading ? "Stop" : "Send"}
+                aria-label={isActiveLoading && !input.trim() ? "Stop thinking" : "Send message"}
+                title={isActiveLoading && !input.trim() ? "Stop" : "Send"}
               >
-                {isActiveLoading ? <X className="h-4 w-4" /> : <Send className="h-4 w-4" />}
+                {isActiveLoading && !input.trim() ? <X className="h-4 w-4" /> : <Send className="h-4 w-4" />}
               </Button>
             </div>
             <p className="text-xs text-center text-muted-foreground mt-2">
@@ -872,6 +935,10 @@ function normalizeHistoryItem(item: HistoryItem): HistoryItem {
     planningBaselineRequest: item.planningBaselineRequest,
     planningBudgetTotal: item.planningBudgetTotal,
     planningSelectedTotal: item.planningSelectedTotal,
+    recoverableBudgetRequestId: item.recoverableBudgetRequestId,
+    recoverableEstimatedTotal: item.recoverableEstimatedTotal,
+    recoverableMinimumBudgetRequired: item.recoverableMinimumBudgetRequired,
+    lastFailureStage: item.lastFailureStage,
   }
 }
 
@@ -1160,6 +1227,202 @@ function buildRefinementContext(
 
 function getPlanningBaselineRequest(historyItem: HistoryItem): string {
   return historyItem.planningBaselineRequest || historyItem.request
+}
+
+function isBudgetFailureContext(historyItem: HistoryItem): boolean {
+  const previousText = [
+    historyItem.error,
+    historyItem.summary,
+    ...(historyItem.messages || []).map((message) => message.content),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase()
+  return (
+    historyItem.lastFailureStage === "budget_feasibility"
+    || /(budget_feasibility|over budget|above your.*budget|budget is.*too low|core expenses|minimum.*budget|预算.*不够|超.*预算|最低.*预算)/.test(previousText)
+  )
+}
+
+function isBudgetFailureStructuralRevision(text: string): boolean {
+  const value = text.toLowerCase()
+  return (
+    /\b(shorten|shorter|fewer days?|reduce.*days?|cut.*days?)\b|\b\d+\s*days?\s+instead of\s+\d+\s*days?\b|缩短|少.*天|改成.*天/.test(value)
+    || /\b(change|shift|move|try|use)\b.{0,24}\b(date|dates|departure|departing|start|leave|leaving)\b|different dates?|new dates?|改日期|换日期|调整日期|换时间|改时间/.test(value)
+  )
+}
+
+function parseTargetDurationDays(text: string): number | null {
+  const value = text.toLowerCase()
+  const patterns = [
+    /\b(?:shorten|shorter|reduce|cut|change|make|set).*?\b(?:to|as)\s*(\d{1,2})\s*days?\b/,
+    /\b(\d{1,2})\s*days?\s+instead of\s+\d{1,2}\s*days?\b/,
+    /改成\s*(\d{1,2})\s*天/,
+    /缩短.*?(\d{1,2})\s*天/,
+  ]
+  for (const pattern of patterns) {
+    const match = value.match(pattern)
+    if (!match) continue
+    const days = Number(match[1])
+    if (Number.isInteger(days) && days >= 1 && days <= 60) return days
+  }
+  return null
+}
+
+function addDaysToIsoDate(isoDate: string, daysToAdd: number): string | null {
+  const match = isoDate.match(/^(\d{4})-(\d{2})-(\d{2})$/)
+  if (!match) return null
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])))
+  if (Number.isNaN(date.getTime())) return null
+  date.setUTCDate(date.getUTCDate() + daysToAdd)
+  return [
+    date.getUTCFullYear(),
+    String(date.getUTCMonth() + 1).padStart(2, "0"),
+    String(date.getUTCDate()).padStart(2, "0"),
+  ].join("-")
+}
+
+function applyDurationOverrideToBaseline(baseline: string, targetDays: number): {
+  request: string
+  startDate?: string
+  endDate?: string
+} {
+  const matches = [...baseline.matchAll(/\b(20\d{2}-\d{2}-\d{2})\b/g)]
+  if (matches.length < 2) return { request: baseline }
+
+  const startDate = matches[0][1]
+  const oldEndMatch = matches[1]
+  const oldEndDate = oldEndMatch[1]
+  const oldEndIndex = oldEndMatch.index
+  const newEndDate = addDaysToIsoDate(startDate, targetDays - 1)
+  if (!newEndDate || oldEndIndex === undefined || newEndDate === oldEndDate) {
+    return { request: baseline, startDate, endDate: newEndDate || oldEndDate }
+  }
+
+  return {
+    request: `${baseline.slice(0, oldEndIndex)}${newEndDate}${baseline.slice(oldEndIndex + oldEndDate.length)}`,
+    startDate,
+    endDate: newEndDate,
+  }
+}
+
+function buildBudgetFailureRevisionRequest(request: string, historyItem: HistoryItem): string | null {
+  const baseline = getPlanningBaselineRequest(historyItem)
+  if (!baseline || !isBudgetFailureContext(historyItem) || !isBudgetFailureStructuralRevision(request)) return null
+  const targetDays = parseTargetDurationDays(request)
+  const durationOverride = targetDays ? applyDurationOverrideToBaseline(baseline, targetDays) : { request: baseline }
+  const overrideLines = targetDays
+    ? [
+        `Hard override: the trip must be exactly ${targetDays} days total.`,
+        durationOverride.startDate && durationOverride.endDate
+          ? `Use ${durationOverride.startDate} as the start date and ${durationOverride.endDate} as the end date. Ignore any previous end date that conflicts.`
+          : "Replace any earlier trip length or end date that conflicts with this duration.",
+      ]
+    : []
+
+  return [
+    durationOverride.request,
+    "",
+    ...overrideLines,
+    ...(overrideLines.length ? [""] : []),
+    "The previous attempt failed budget feasibility. Apply only this latest structural revision to the same trip, replacing any conflicting earlier details:",
+    request,
+    "",
+    "Ignore earlier budget-failure option replies that are not repeated in this latest revision.",
+  ].join("\n")
+}
+
+function isAffirmativeReply(text: string): boolean {
+  const value = text.trim().toLowerCase()
+  return /^(yes|y|ok|okay|sure|agree|accepted?|confirm|confirmed|可以|同意|确认|好的|好|行|是|对)$/.test(value)
+}
+
+function isPublicIntercityTransportConfirmation(request: string, historyItem: HistoryItem): boolean {
+  if (!isAffirmativeReply(request)) return false
+  const lastAssistant = [...(historyItem.messages || [])].reverse().find((message) => message.role === "assistant")
+  const content = renderMessageContent(lastAssistant?.content || "").toLowerCase()
+  return (
+    /remove car rentals?|remove car rental|instead of rental cars|instead of renting cars|use public intercity transport/.test(content)
+    || /trains? or buses?|trains? or flights/.test(content)
+  )
+}
+
+function buildPublicIntercityTransportRequest(historyItem: HistoryItem): string {
+  return [
+    getPlanningBaselineRequest(historyItem),
+    "",
+    "The user confirmed: remove rental cars and use public intercity transport between cities. Do not use rental cars. Use trains, buses, or flights between cities as needed to stay within budget.",
+  ].join("\n")
+}
+
+type FastBudgetRecoveryAction =
+  | "increase_budget"
+  | "lower_hotels"
+  | "lower_food"
+  | "remove_paid_attractions"
+  | "use_public_transport"
+
+function buildFastBudgetRecovery(
+  request: string,
+  historyItem: HistoryItem,
+): { requestId?: string; actions: FastBudgetRecoveryAction[]; newTotalBudget?: number } | null {
+  const previousText = [
+    historyItem.error,
+    historyItem.summary,
+    ...(historyItem.messages || []).map((message) => message.content),
+  ]
+    .filter(Boolean)
+    .join("\n")
+    .toLowerCase()
+  const looksLikeBudgetFailure =
+    /(budget_feasibility|over budget|above your.*budget|budget is.*too low|core expenses|minimum.*budget|预算.*不够|超.*预算|最低.*预算)/.test(
+      previousText,
+    )
+  const canRetryBudgetPrecheck =
+    (historyItem.lastFailureStage === "budget_feasibility" || looksLikeBudgetFailure)
+    && Boolean(getPlanningBaselineRequest(historyItem))
+  if (!historyItem.recoverableBudgetRequestId && !canRetryBudgetPrecheck) return null
+  const value = request.toLowerCase()
+  const actions: FastBudgetRecoveryAction[] = []
+  const add = (action: FastBudgetRecoveryAction) => {
+    if (!actions.includes(action)) actions.push(action)
+  }
+
+  const amount = parseLargestNumber(value)
+  if (
+    amount !== undefined
+    && amount >= 1000
+    && /(budget|rmb|cny|yuan|increase|raise|to\s*\d|new total|预算|提高|增加|加到|改到|换成|人民币|元)/.test(value)
+  ) {
+    add("increase_budget")
+  }
+  if (/(budget hotel|cheaper hotel|lower.*hotel|worse.*hotel|less nice.*hotel|不要那么好的酒店|酒店.*便宜|酒店.*降级|普通酒店|经济酒店|便宜酒店)/.test(value)) {
+    add("lower_hotels")
+  }
+  if (/(cheaper food|cheaper restaurant|lower.*food|lower.*meal|budget meal|local meal|不要那么好的(食物|餐厅|饭)|餐厅.*便宜|食物.*便宜|吃.*便宜|普通餐|当地小吃|便宜餐)/.test(value)) {
+    add("lower_food")
+  }
+  if (/(remove paid|free attraction|no paid attraction|skip paid|不要付费|去掉付费|免费景点|不要门票|去掉门票|不买门票)/.test(value)) {
+    add("remove_paid_attractions")
+  }
+  if (/(public transport|public transit|train|bus|coach|no rental|remove rental|without rental|公交|公共交通|火车|大巴|巴士|不要租车|不用租车|去掉租车)/.test(value)) {
+    add("use_public_transport")
+  }
+
+  if (!actions.length) return null
+  const budgetAboveRecoveredMinimum =
+    amount !== undefined
+    && historyItem.recoverableMinimumBudgetRequired !== undefined
+    && amount > historyItem.recoverableMinimumBudgetRequired
+  const shouldUseRecoverablePlan = Boolean(historyItem.recoverableBudgetRequestId)
+    && !(actions.length === 1 && actions.includes("increase_budget"))
+    && !budgetAboveRecoveredMinimum
+
+  return {
+    ...(shouldUseRecoverablePlan ? { requestId: historyItem.recoverableBudgetRequestId } : {}),
+    actions,
+    ...(amount !== undefined && actions.includes("increase_budget") ? { newTotalBudget: amount } : {}),
+  }
 }
 
 function buildRefinementStart(request: string, historyItem?: HistoryItem | null): {

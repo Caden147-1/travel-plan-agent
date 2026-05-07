@@ -6,6 +6,7 @@ import math
 import os
 import re
 import time
+import traceback
 from datetime import datetime
 from pathlib import Path
 
@@ -784,6 +785,14 @@ def _minimum_budget_from_core_estimate(core_total: float, core_ratio: float) -> 
     return _round_up_to_100(float(core_total) / ratio)
 
 
+def _minimum_budget_from_rough_precheck(core_total: float, core_ratio: float) -> int:
+    # Rough precheck uses static cost tables before live flight/hotel search.
+    # Add a safety margin so the first suggested budget does not immediately fail
+    # when live flight or hotel prices come back higher than static estimates.
+    live_search_safety_multiplier = 1.30
+    return _minimum_budget_from_core_estimate(float(core_total) * live_search_safety_multiplier, core_ratio)
+
+
 def _build_minimum_execution_prefs(normalized_prefs: dict) -> dict:
     prefs = dict(normalized_prefs or {})
     prefs["flight_type"] = "budget"
@@ -849,7 +858,7 @@ def _run_rough_budget_precheck(parsed: dict) -> dict:
     minimum_total = float(minimum_estimate.get("total") or 0.0)
     minimum_ratio = round(minimum_total / float(total_budget), 4) if total_budget > 0 else 0.0
     status = "minimum_feasible_only" if minimum_total <= core_threshold_amount else "minimum_infeasible"
-    minimum_budget_required = _minimum_budget_from_core_estimate(minimum_total, core_threshold_ratio)
+    minimum_budget_required = _minimum_budget_from_rough_precheck(minimum_total, core_threshold_ratio)
     return {
         "checked": True,
         "status": status,
@@ -861,20 +870,39 @@ def _run_rough_budget_precheck(parsed: dict) -> dict:
         "minimum_estimate": minimum_estimate,
         "minimum_ratio_to_budget": minimum_ratio,
         "minimum_budget_required": minimum_budget_required,
-        "minimum_budget_basis": "core_three_components_with_70pct_guard",
+        "minimum_budget_basis": "core_three_components_with_70pct_guard_plus_live_search_safety_margin",
     }
 
 
 def _is_budget_cap_followup(user_request: str) -> bool:
     text = (user_request or "").lower()
+    if re.search(
+        r"\brerun\s+the\s+full\s+planning\s+pipeline\b|\bfull\s+planning\s+pipeline\s+with\s+the\s+new\s+budget\b",
+        text,
+    ):
+        return False
     patterns = [
         r"\bkeep\s+(?:the\s+)?same\s+plan\b",
         r"\baccept\s+(?:a\s+)?small\s+over",
         r"\bfit\s+(?:the\s+)?budget\b",
         r"\bstay\s+at\s+budget\b",
         r"\bbudget\s+hotels?\b",
+        r"\bminimum-cost\b",
+        r"\bcheapest\s+executable\s+plan\b",
+        r"\bdo\s+not\s+upgrade\b",
+        r"\bbudget-feasibility\s+failure\b",
     ]
     return any(re.search(pattern, text) for pattern in patterns)
+
+
+def _requests_remove_paid_activities(user_request: str) -> bool:
+    text = (user_request or "").lower()
+    return bool(
+        re.search(
+            r"remove all paid|remove paid|free attractions?|no paid attractions?|skip paid|不要付费|去掉付费|免费景点|不要门票|去掉门票|不买门票",
+            text,
+        )
+    )
 
 
 def _apply_budget_cap_mode(parsed: dict, user_request: str) -> dict:
@@ -896,10 +924,87 @@ def _apply_budget_cap_mode(parsed: dict, user_request: str) -> dict:
     planning_signals["hotel_level"] = "low"
     planning_signals.setdefault("food_priority", "medium")
     planning_signals.setdefault("attraction_intensity", "low")
+    planning_signals["allow_paid_attractions"] = "no" if _requests_remove_paid_activities(user_request) else "yes"
 
     parsed["preferences"] = preferences
     parsed["planning_signals"] = planning_signals
     parsed["budget_cap_mode"] = True
+    return parsed
+
+
+def _apply_comfortable_budget_fit_mode(parsed: dict) -> dict:
+    parsed = dict(parsed or {})
+    preferences = dict(parsed.get("preferences") or {})
+    planning_signals = dict(parsed.get("planning_signals") or {})
+
+    if not preferences.get("flight_cabin"):
+        preferences["flight_cabin"] = "business"
+        preferences.setdefault("flight", "comfort")
+
+    hotel_value = str(preferences.get("hotel") or "").lower()
+    if not hotel_value or hotel_value in {"standard", "clean", "central", "budget"}:
+        preferences["hotel"] = "luxury"
+    preferences["hotel_level"] = "luxury"
+
+    food_value = str(preferences.get("food") or "").lower()
+    if not food_value or food_value in {"standard", "mixed", "budget"}:
+        preferences["food"] = "fine_dining"
+
+    food_preferences = preferences.get("food_preferences")
+    if not isinstance(food_preferences, list):
+        food_preferences = []
+    if "fine_dining" not in food_preferences:
+        food_preferences.append("fine_dining")
+    preferences["food_preferences"] = food_preferences
+
+    planning_signals["flight_priority"] = "high"
+    planning_signals["hotel_level"] = "high"
+    planning_signals["hotel_priority"] = "high"
+    planning_signals["food_priority"] = "high"
+    planning_signals["attraction_intensity"] = "high"
+
+    parsed["preferences"] = preferences
+    parsed["planning_signals"] = planning_signals
+    parsed["budget_fit_mode"] = "comfortable"
+    parsed.pop("budget_cap_mode", None)
+    return parsed
+
+
+def _apply_budget_maximize_experience_mode(parsed: dict, flight_cabin: str | None = None) -> dict:
+    parsed = dict(parsed or {})
+    preferences = dict(parsed.get("preferences") or {})
+    planning_signals = dict(parsed.get("planning_signals") or {})
+
+    cabin = str(flight_cabin or preferences.get("flight_cabin") or "").strip().lower()
+    if cabin:
+        preferences["flight_cabin"] = cabin
+    elif not preferences.get("flight_cabin"):
+        preferences["flight_cabin"] = "business"
+    preferences.setdefault("flight", "comfort")
+
+    preferences["hotel"] = "luxury"
+    preferences["hotel_level"] = "luxury"
+
+    preferences["food"] = "fine_dining"
+    food_preferences = preferences.get("food_preferences")
+    if not isinstance(food_preferences, list):
+        food_preferences = []
+    if "fine_dining" not in food_preferences:
+        food_preferences.append("fine_dining")
+    preferences["food_preferences"] = food_preferences
+
+    planning_signals["budget_discipline"] = "maximize_experience"
+    planning_signals["flight_priority"] = "high"
+    planning_signals["hotel_level"] = "high"
+    planning_signals["hotel_priority"] = "high"
+    planning_signals["food_priority"] = "high"
+    planning_signals["attraction_intensity"] = "high"
+    planning_signals.setdefault("allow_paid_attractions", "yes")
+
+    parsed["preferences"] = preferences
+    parsed["planning_signals"] = planning_signals
+    parsed["budget_maximize_experience"] = True
+    parsed.pop("budget_cap_mode", None)
     return parsed
 
 
@@ -909,6 +1014,8 @@ def _finalize_success_output(final_output: dict, user_request: str, auto_open_re
         itinerary_output = run_itinerary_agent(final_output)
         final_output["itinerary"] = itinerary_output
     except Exception as e:
+        print("[pipeline] agent4_itinerary exception", flush=True)
+        traceback.print_exc()
         final_output.setdefault("warnings", [])
         final_output["warnings"].append(f"Agent4 itinerary planning failed: {str(e)}")
         final_output["itinerary"] = {
@@ -935,11 +1042,27 @@ def _finalize_success_output(final_output: dict, user_request: str, auto_open_re
     if itinerary_summary.get("budget_feasible") is False:
         cost_rollup = itinerary.get("cost_rollup") or {}
         total_budget = ((final_output.get("trip_summary") or {}).get("budget") or {}).get("total")
+        estimated_total = _safe_float(cost_rollup.get("total_selected_estimated"), 0.0)
+        rough_minimum_budget_required = _safe_int(
+            (final_output.get("rough_budget_check") or {}).get("minimum_budget_required"),
+            0,
+        )
+        minimum_budget_required = max(_round_up_to_100(estimated_total), rough_minimum_budget_required)
         final_output["success"] = False
         final_output["stage"] = "budget_feasibility"
+        final_output["minimum_budget_required"] = minimum_budget_required
+        final_output["budget_check"] = {
+            **(final_output.get("budget_check") or {}),
+            "total_budget_input": total_budget,
+            "selected_total": estimated_total,
+            "itinerary_total_selected_estimated": estimated_total,
+            "budget_feasible": False,
+            "minimum_budget_required": minimum_budget_required,
+        }
         final_output["error"] = (
             f"Even after trimming optional meals and paid activities, fixed costs are "
             f"{cost_rollup.get('total_selected_estimated')} CNY against budget {total_budget} CNY. "
+            f"Current minimum suggested budget is {minimum_budget_required} CNY. "
             "Please increase the budget, shorten the trip, or change dates/destination."
         )
         return final_output
@@ -1090,7 +1213,7 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True, refine
     parsed = _apply_budget_cap_mode(parsed, user_request)
     rough_budget_check = _run_rough_budget_precheck(parsed)
     rough_status = rough_budget_check.get("status")
-    if rough_status == "minimum_infeasible":
+    if False and rough_status == "minimum_infeasible":
         normal_total = ((rough_budget_check.get("normal_estimate") or {}).get("total"))
         minimum_total = ((rough_budget_check.get("minimum_estimate") or {}).get("total"))
         budget_total = rough_budget_check.get("total_budget")
@@ -1127,7 +1250,7 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True, refine
         }
 
     precheck_warnings: list[str] = []
-    if rough_status == "minimum_feasible_only" and not parsed.get("budget_cap_mode"):
+    if rough_status in {"minimum_feasible_only", "minimum_infeasible"} and not parsed.get("budget_cap_mode"):
         parsed = _apply_budget_cap_mode(
             parsed,
             "fit the budget with cheap flights, budget hotels, and lower-cost meals",
@@ -1155,6 +1278,113 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True, refine
         final_failed_total = selected_total
         rough_min_budget = _safe_int(rough_budget_check.get("minimum_budget_required"), 0)
         if not parsed.get("budget_cap_mode"):
+            fit_parsed = _apply_comfortable_budget_fit_mode(parsed)
+            fit_budget_result, fit_agent3_output, fit_error, _ = _run_agent2_agent3(fit_parsed, refinement_context)
+            if not fit_error:
+                fit_final_output = _clean_final_output(fit_agent3_output, fit_parsed, fit_budget_result)
+                fit_budget_check = fit_final_output.get("budget_check") or {}
+                fit_total_budget = float(fit_budget_check.get("total_budget_input") or 0.0)
+                fit_selected_total = _selected_total_from_budget_check(fit_budget_check)
+                if fit_total_budget > 0 and 0 < fit_selected_total <= fit_total_budget:
+                    fit_final_output["original_request"] = user_request
+                    if refinement_context:
+                        fit_final_output["refinement_context"] = refinement_context
+                    fit_final_output["rough_budget_check"] = rough_budget_check
+                    fit_final_output.setdefault("warnings", [])
+                    fit_final_output["warnings"].extend(precheck_warnings)
+                    fit_final_output["warnings"].append(
+                        "Budget fit adjustment: the first selected plan exceeded the budget, so the system retried with business-class flights and high-comfort hotel/dining execution instead of switching to minimum-cost mode."
+                    )
+                    fit_final_output["agent2_summary"] = {
+                        "budget_strategy": fit_budget_result.get("budget_strategy"),
+                        "cost_level": fit_budget_result.get("cost_level"),
+                        "budget_status": fit_budget_result.get("budget_status"),
+                        "normalized_preferences": fit_budget_result.get("normalized_preferences", {}),
+                        "allocation_basis": fit_budget_result.get("allocation_basis", {}),
+                        "budget_plan": fit_budget_result.get("budget_plan", {}),
+                        "city_budget_plan": fit_budget_result.get("city_budget_plan", []),
+                    }
+                    if refinement_context:
+                        fit_state, fit_status = _build_refinement_state(fit_final_output, refinement_context)
+                        fit_final_output["refinement_state"] = fit_state
+                        fit_final_output["upgrade_status"] = fit_status
+                    fit_final_output["planning_baseline"] = _build_planning_baseline(
+                        fit_final_output,
+                        planning_request,
+                    )
+                    finalized_fit = _finalize_success_output(fit_final_output, user_request, auto_open_report)
+                    if finalized_fit.get("success"):
+                        regression_error = _refinement_non_decrease_error(
+                            finalized_fit,
+                            refinement_context,
+                            rough_budget_check,
+                            precheck_warnings,
+                        )
+                        if regression_error:
+                            return regression_error
+                        return finalized_fit
+
+            experience_parsed = _apply_budget_maximize_experience_mode(parsed, flight_cabin="economy")
+            experience_budget_result, experience_agent3_output, experience_error, _ = _run_agent2_agent3(
+                experience_parsed,
+                refinement_context,
+            )
+            if not experience_error:
+                experience_final_output = _clean_final_output(
+                    experience_agent3_output,
+                    experience_parsed,
+                    experience_budget_result,
+                )
+                experience_budget_check = experience_final_output.get("budget_check") or {}
+                experience_total_budget = float(experience_budget_check.get("total_budget_input") or 0.0)
+                experience_selected_total = _selected_total_from_budget_check(experience_budget_check)
+                if experience_total_budget > 0 and 0 < experience_selected_total <= experience_total_budget:
+                    experience_final_output["original_request"] = user_request
+                    experience_final_output["budget_maximize_experience"] = True
+                    if refinement_context:
+                        experience_final_output["refinement_context"] = refinement_context
+                    experience_final_output["rough_budget_check"] = rough_budget_check
+                    experience_final_output.setdefault("warnings", [])
+                    experience_final_output["warnings"].extend(precheck_warnings)
+                    experience_final_output["warnings"].append(
+                        "Budget experience maximization: higher-cabin attempts exceeded the budget, so the system kept economy flights but maximized hotels, dining, activities, and final budget utilization within the cap."
+                    )
+                    experience_final_output["agent2_summary"] = {
+                        "budget_strategy": experience_budget_result.get("budget_strategy"),
+                        "cost_level": experience_budget_result.get("cost_level"),
+                        "budget_status": experience_budget_result.get("budget_status"),
+                        "normalized_preferences": experience_budget_result.get("normalized_preferences", {}),
+                        "allocation_basis": experience_budget_result.get("allocation_basis", {}),
+                        "budget_plan": experience_budget_result.get("budget_plan", {}),
+                        "city_budget_plan": experience_budget_result.get("city_budget_plan", []),
+                    }
+                    if refinement_context:
+                        experience_state, experience_status = _build_refinement_state(
+                            experience_final_output,
+                            refinement_context,
+                        )
+                        experience_final_output["refinement_state"] = experience_state
+                        experience_final_output["upgrade_status"] = experience_status
+                    experience_final_output["planning_baseline"] = _build_planning_baseline(
+                        experience_final_output,
+                        planning_request,
+                    )
+                    finalized_experience = _finalize_success_output(
+                        experience_final_output,
+                        user_request,
+                        auto_open_report,
+                    )
+                    if finalized_experience.get("success"):
+                        regression_error = _refinement_non_decrease_error(
+                            finalized_experience,
+                            refinement_context,
+                            rough_budget_check,
+                            precheck_warnings,
+                        )
+                        if regression_error:
+                            return regression_error
+                        return finalized_experience
+
             retry_parsed = _apply_budget_cap_mode(
                 parsed,
                 "fit the budget with cheap flights, budget hotels, fewer paid activities, and no comfort upgrades",
@@ -1169,15 +1399,7 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True, refine
                 retry_total_budget = float(retry_budget_check.get("total_budget_input") or 0.0)
                 retry_selected_total = _selected_total_from_budget_check(retry_budget_check)
                 final_failed_total = retry_selected_total or final_failed_total
-                if retry_total_budget > 0 and retry_selected_total <= retry_total_budget:
-                    regression_error = _refinement_non_decrease_error(
-                        retry_final_output,
-                        refinement_context,
-                        rough_budget_check,
-                        precheck_warnings,
-                    )
-                    if regression_error:
-                        return regression_error
+                if retry_total_budget > 0:
                     retry_final_output.setdefault("warnings", [])
                     retry_final_output["warnings"].append(
                         "Budget pressure adjustment: the first selected plan exceeded the budget, so the system automatically retried with cheaper flights, budget hotels, fewer paid activities, and no comfort upgrades."
@@ -1200,26 +1422,22 @@ def run_budget_pipeline(user_request: str, auto_open_report: bool = True, refine
                         retry_final_output,
                         planning_request,
                     )
-                    return _finalize_success_output(retry_final_output, user_request, auto_open_report)
+                    finalized_retry = _finalize_success_output(retry_final_output, user_request, auto_open_report)
+                    if finalized_retry.get("success") or finalized_retry.get("stage") == "budget_feasibility":
+                        regression_error = _refinement_non_decrease_error(
+                            finalized_retry,
+                            refinement_context,
+                            rough_budget_check,
+                            precheck_warnings,
+                        )
+                        if regression_error:
+                            return regression_error
+                        return finalized_retry
 
-        minimum_budget_required = _round_up_to_100(max(_safe_float(final_failed_total, 0.0), float(rough_min_budget)))
-        return {
-            "success": False,
-            "stage": "budget_feasibility",
-            "error": (
-                f"Selected plan still exceeds the budget after automatic downgrades: estimated selected spend is {final_failed_total} CNY, "
-                f"but the planning budget is {total_budget} CNY. "
-                f"Current minimum suggested budget is {minimum_budget_required} CNY. "
-                "Please increase the budget or shorten the trip."
-            ),
-            "parsed_request": parsed,
-            "budget_result": budget_result,
-            "trip_summary": final_output.get("trip_summary", {}),
-            "budget_check": budget_check,
-            "rough_budget_check": rough_budget_check,
-            "minimum_budget_required": minimum_budget_required,
-            "warnings": (final_output.get("warnings", []) + precheck_warnings),
-        }
+        final_output.setdefault("warnings", [])
+        final_output["warnings"].append(
+            "Selected realtime candidates exceeded the budget before itinerary assembly, so the system continued to build the minimum executable itinerary and will use that final itinerary cost for any budget guidance."
+        )
 
     final_output["agent2_summary"] = {
         "budget_strategy": budget_result.get("budget_strategy"),
