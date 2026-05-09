@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Guangzhou to Dubai</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Guangzhou -> Dubai</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-12-20 - 2026-12-27</b></div>
+          <div class="request-item"><span>Travelers</span><b>2</b></div>
+          <div class="request-item"><span>Budget</span><b>120000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>luxury hotel; food: fine_dining; attractions: mixed</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-12-20 - 2026-12-27</strong></div>
+        <div><span>Travelers</span><strong>2</strong></div>
+        <div><span>Budget</span><strong>120000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>118800 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>39861 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>46730 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>29369 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>2840 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>118800 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-12-20 | Dubai</h2></div><strong>22676 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Banyan Tree Dubai</strong><span>6676 CNY</span></div><ul class="event-list"><li><span class="time">09:30 - 18:08</span><span class="event-name">Flight Guangzhou -&gt; Dubai</span><span class="event-type">Flight (Business) x2</span><span class="cost">16000 CNY total</span></li><li><span class="time">19:38 - 19:53</span><span class="event-name">Check-in Banyan Tree Dubai</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-12-21 | Dubai</h2></div><strong>13860 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Banyan Tree Dubai</strong><span>6676 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Banyan Tree Dubai to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">The MAINE Land Brasserie Restaurant, Business Bay Dubai</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">08:40 - 09:02</span><span class="event-name">Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -&gt; illusion City - illusion museum Dubai</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">09:02 - 10:32</span><span class="event-name">illusion City - illusion museum Dubai</span><span class="event-type">Poi</span><span class="cost">200 CNY</span></li><li><span class="time">10:32 - 11:43</span><span class="event-name">Transfer illusion City - illusion museum Dubai -&gt; Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai</span><span class="event-type">Transfer</span><span class="cost">497 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai</span><span class="event-type">Meal</span><span class="cost">1467 CNY</span></li><li><span class="time">13:00 - 14:10</span><span class="event-name">Transfer Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai -&gt; Ain Dubai</span><span class="event-type">Transfer</span><span class="cost">490 CNY</span></li><li><span class="time">14:10 - 15:40</span><span class="event-name">Ain Dubai</span><span class="event-type">Poi</span><span class="cost">120 CNY</span></li><li><span class="time">15:40 - 15:53</span><span class="event-name">Transfer Ain Dubai -&gt; The View Palm Jumeirah</span><span class="event-type">Transfer</span><span class="cost">91 CNY</span></li><li><span class="time">17:03 - 18:33</span><span class="event-name">The View Palm Jumeirah</span><span class="event-type">Poi</span><span class="cost">140 CNY</span></li><li><span class="time">18:33 - 18:49</span><span class="event-name">Transfer The View Palm Jumeirah -&gt; DREAM Dinner Show Dubai</span><span class="event-type">Transfer</span><span class="cost">112 CNY</span></li><li><span class="time">18:49 - 19:49</span><span class="event-name">DREAM Dinner Show Dubai</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">19:49 - 20:05</span><span class="event-name">Transfer DREAM Dinner Show Dubai -&gt; Artefactum Gallery Dubai</span><span class="event-type">Transfer</span><span class="cost">112 CNY</span></li><li><span class="time">20:05 - 21:00</span><span class="event-name">Artefactum Gallery Dubai</span><span class="event-type">Poi</span><span class="cost">220 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Banyan Tree Dubai</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-12-22 | Dubai</h2></div><strong>13138 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Banyan Tree Dubai</strong><span>6676 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Banyan Tree Dubai to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">The MAINE Land Brasserie Restaurant, Business Bay Dubai</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">08:40 - 09:34</span><span class="event-name">Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -&gt; Dubai Marina Walk</span><span class="event-type">Transfer</span><span class="cost">378 CNY</span></li><li><span class="time">09:34 - 11:04</span><span class="event-name">Dubai Marina Walk</span><span class="event-type">Poi</span><span class="cost">140 CNY</span></li><li><span class="time">11:04 - 11:13</span><span class="event-name">Transfer Dubai Marina Walk -&gt; Dinner In The Sky</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Dinner In The Sky</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">13:00 - 13:34</span><span class="event-name">Transfer Dinner In The Sky -&gt; Zawyeh Gallery, Dubai</span><span class="event-type">Transfer</span><span class="cost">238 CNY</span></li><li><span class="time">13:34 - 15:04</span><span class="event-name">Zawyeh Gallery, Dubai</span><span class="event-type">Poi</span><span class="cost">180 CNY</span></li><li><span class="time">15:04 - 17:32</span><span class="event-name">Local area walk near Zawyeh Gallery, Dubai before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:32 - 18:00</span><span class="event-name">Transfer Local area walk near Zawyeh Gallery, Dubai before dinner -&gt; Trèsind Dubai</span><span class="event-type">Transfer</span><span class="cost">196 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Trèsind Dubai</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Banyan Tree Dubai</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-12-23 | Dubai</h2></div><strong>11479 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Banyan Tree Dubai</strong><span>6676 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Banyan Tree Dubai to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">The MAINE Land Brasserie Restaurant, Business Bay Dubai</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -&gt; Burj Khalifa</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Burj Khalifa</span><span class="event-type">Poi</span><span class="cost">140 CNY</span></li><li><span class="time">10:19 - 10:28</span><span class="event-name">Transfer Burj Khalifa -&gt; KidZania Dubai</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">10:28 - 11:51</span><span class="event-name">KidZania Dubai</span><span class="event-type">Poi</span><span class="cost">120 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer KidZania Dubai -&gt; Social House</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Social House</span><span class="event-type">Meal</span><span class="cost">1156 CNY</span></li><li><span class="time">13:00 - 13:05</span><span class="event-name">Transfer Social House -&gt; ARTE MUSEUM DUBAI</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">14:23 - 15:53</span><span class="event-name">ARTE MUSEUM DUBAI</span><span class="event-type">Poi</span><span class="cost">200 CNY</span></li><li><span class="time">15:53 - 17:51</span><span class="event-name">Local area walk near ARTE MUSEUM DUBAI before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near ARTE MUSEUM DUBAI before dinner -&gt; The Tap House, Downtown</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">The Tap House, Downtown</span><span class="event-type">Meal</span><span class="cost">1005 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Banyan Tree Dubai</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-12-24 | Dubai</h2></div><strong>14003 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Waldorf Astoria Dubai Palm Jumeirah</strong><span>6676 CNY</span></div><ul class="event-list"><li><span class="time">07:00 - 07:15</span><span class="event-name">Check-out Banyan Tree Dubai</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">07:15 - 07:45</span><span class="event-name">Transfer Banyan Tree Dubai -&gt; Waldorf Astoria Dubai Palm Jumeirah</span><span class="event-type">Transfer</span><span class="cost">210 CNY</span></li><li><span class="time">07:45 - 08:00</span><span class="event-name">Check-in Waldorf Astoria Dubai Palm Jumeirah</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">08:00 - 08:33</span><span class="event-name">Transfer Waldorf Astoria Dubai Palm Jumeirah -&gt; Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai</span><span class="event-type">Transfer</span><span class="cost">231 CNY</span></li><li><span class="time">08:33 - 09:13</span><span class="event-name">Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai</span><span class="event-type">Meal</span><span class="cost">1467 CNY</span></li><li><span class="time">09:13 - 09:27</span><span class="event-name">Transfer Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai -&gt; Museum of Candy</span><span class="event-type">Transfer</span><span class="cost">98 CNY</span></li><li><span class="time">09:27 - 10:57</span><span class="event-name">Museum of Candy</span><span class="event-type">Poi</span><span class="cost">200 CNY</span></li><li><span class="time">10:57 - 12:10</span><span class="event-name">Transfer Museum of Candy -&gt; Above Eleven</span><span class="event-type">Transfer</span><span class="cost">511 CNY</span></li><li><span class="time">12:10 - 13:10</span><span class="event-name">Above Eleven</span><span class="event-type">Meal</span><span class="cost">1637 CNY</span></li><li><span class="time">13:10 - 14:30</span><span class="event-name">Transfer Above Eleven -&gt; Legendarium Fantastic Museum</span><span class="event-type">Transfer</span><span class="cost">560 CNY</span></li><li><span class="time">14:30 - 16:00</span><span class="event-name">Legendarium Fantastic Museum</span><span class="event-type">Poi</span><span class="cost">200 CNY</span></li><li><span class="time">16:00 - 17:43</span><span class="event-name">Local area walk near Legendarium Fantastic Museum before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:43 - 18:07</span><span class="event-name">Transfer Local area walk near Legendarium Fantastic Museum before dinner -&gt; Josette</span><span class="event-type">Transfer</span><span class="cost">168 CNY</span></li><li><span class="time">18:07 - 19:07</span><span class="event-name">Josette</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">19:07 - 19:12</span><span class="event-name">Transfer Josette -&gt; Artefactum Gallery Dubai</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">19:12 - 21:00</span><span class="event-name">Artefactum Gallery Dubai</span><span class="event-type">Poi</span><span class="cost">220 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Waldorf Astoria Dubai Palm Jumeirah</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-12-25 | Dubai</h2></div><strong>12467 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Waldorf Astoria Dubai Palm Jumeirah</strong><span>6676 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Waldorf Astoria Dubai Palm Jumeirah to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai</span><span class="event-type">Meal</span><span class="cost">1467 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Carnival by Trèsind Restaurant &amp; Bar | DIFC, Dubai -&gt; Dubai Dino</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Dubai Dino</span><span class="event-type">Poi</span><span class="cost">120 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Dubai Dino before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Dubai Dino before lunch -&gt; GIA</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">GIA</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">13:00 - 13:26</span><span class="event-name">Transfer GIA -&gt; Dubai Old village</span><span class="event-type">Transfer</span><span class="cost">182 CNY</span></li><li><span class="time">14:32 - 16:02</span><span class="event-name">Dubai Old village</span><span class="event-type">Poi</span><span class="cost">140 CNY</span></li><li><span class="time">16:02 - 17:35</span><span class="event-name">Local area walk near Dubai Old village before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:35 - 18:00</span><span class="event-name">Transfer Local area walk near Dubai Old village before dinner -&gt; CÉ LA VI</span><span class="event-type">Transfer</span><span class="cost">175 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">CÉ LA VI</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Waldorf Astoria Dubai Palm Jumeirah</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-12-26 | Dubai</h2></div><strong>12269 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Waldorf Astoria Dubai Palm Jumeirah</strong><span>6676 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Waldorf Astoria Dubai Palm Jumeirah to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">The MAINE Land Brasserie Restaurant, Business Bay Dubai</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">08:40 - 09:09</span><span class="event-name">Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -&gt; Al Fahidi Historical Neighbourhood</span><span class="event-type">Transfer</span><span class="cost">203 CNY</span></li><li><span class="time">09:09 - 10:39</span><span class="event-name">Al Fahidi Historical Neighbourhood</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">10:39 - 11:02</span><span class="event-name">Transfer Al Fahidi Historical Neighbourhood -&gt; 11 Woodfire</span><span class="event-type">Transfer</span><span class="cost">161 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">11 Woodfire</span><span class="event-type">Meal</span><span class="cost">1591 CNY</span></li><li><span class="time">13:00 - 13:25</span><span class="event-name">Transfer 11 Woodfire -&gt; Dubai Old City</span><span class="event-type">Transfer</span><span class="cost">175 CNY</span></li><li><span class="time">13:25 - 14:55</span><span class="event-name">Dubai Old City</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">14:55 - 17:30</span><span class="event-name">Local area walk near Dubai Old City before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:30 - 18:00</span><span class="event-name">Transfer Local area walk near Dubai Old City before dinner -&gt; Romeo Lane Dubai</span><span class="event-type">Transfer</span><span class="cost">210 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Romeo Lane Dubai</span><span class="event-type">Meal</span><span class="cost">1037 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Waldorf Astoria Dubai Palm Jumeirah</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 8</p><h2>2026-12-27 | Dubai</h2></div><strong>18909 CNY</strong></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Waldorf Astoria Dubai Palm Jumeirah to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">The MAINE Land Brasserie Restaurant, Business Bay Dubai</span><span class="event-type">Meal</span><span class="cost">1686 CNY</span></li><li><span class="time">08:40 - 08:59</span><span class="event-name">Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -&gt; Etihad Museum</span><span class="event-type">Transfer</span><span class="cost">133 CNY</span></li><li><span class="time">08:59 - 10:29</span><span class="event-name">Etihad Museum</span><span class="event-type">Poi</span><span class="cost">180 CNY</span></li><li><span class="time">10:29 - 11:24</span><span class="event-name">Transfer Etihad Museum -&gt; Waldorf Astoria Dubai Palm Jumeirah</span><span class="event-type">Transfer</span><span class="cost">385 CNY</span></li><li><span class="time">11:45 - 12:00</span><span class="event-name">Check-out Waldorf Astoria Dubai Palm Jumeirah</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Transfer Waldorf Astoria Dubai Palm Jumeirah -&gt; DXB</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">14:30 - 23:08</span><span class="event-name">Flight Dubai -&gt; Guangzhou</span><span class="event-type">Flight (Business) x2</span><span class="cost">16000 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 23.11667, "lng": 113.256, "day": 0, "date": "", "city": "Guangzhou", "name": "Start: Guangzhou", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 25.07725, "lng": 55.30927, "day": 1, "date": "2026-12-20", "city": "Dubai", "name": "Fly Guangzhou (CAN) -> Dubai (DXB) [Business]", "type": "flight", "time": "", "cost": 16000, "route_point": true}, {"lat": 25.0805625, "lng": 55.126687499999996, "day": 1, "date": "2026-12-20", "city": "Dubai", "name": "Day 1.2 Check-in Banyan Tree Dubai", "type": "checkin", "time": "19:38-19:53", "cost": 0, "estimated_coord": false}, {"lat": 25.07725, "lng": 55.31527, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.1 Transfer from Banyan Tree Dubai to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 25.188491799999998, "lng": 55.273011, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.2 The MAINE Land Brasserie Restaurant, Business Bay Dubai", "type": "meal", "time": "08:00-08:40", "cost": 1686, "estimated_coord": false}, {"lat": 25.081302923546165, "lng": 55.30484577004113, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.3 Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -> illusion City - illusion museum Dubai", "type": "transfer", "time": "08:40-09:02", "cost": 154, "estimated_coord": true}, {"lat": 25.0792027, "lng": 55.1226912, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.4 illusion City - illusion museum Dubai", "type": "poi", "time": "09:02-10:32", "cost": 200, "estimated_coord": false}, {"lat": 25.071272978075353, "lng": 55.30979460357631, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.5 Transfer illusion City - illusion museum Dubai -> Carnival by Trèsind Restaurant & Bar | DIFC, Dubai", "type": "transfer", "time": "10:32-11:43", "cost": 497, "estimated_coord": true}, {"lat": 25.2116863, "lng": 55.28787, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.6 Carnival by Trèsind Restaurant & Bar | DIFC, Dubai", "type": "meal", "time": "12:00-13:00", "cost": 1467, "estimated_coord": false}, {"lat": 25.082011649608443, "lng": 55.31292057433925, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.7 Transfer Carnival by Trèsind Restaurant & Bar | DIFC, Dubai -> Ain Dubai", "type": "transfer", "time": "13:00-14:10", "cost": 490, "estimated_coord": true}, {"lat": 25.0801674, "lng": 55.123849400000005, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.8 Ain Dubai", "type": "poi", "time": "14:10-15:40", "cost": 120, "estimated_coord": false}, {"lat": 25.07620481097421, "lng": 55.30336173630409, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.9 Transfer Ain Dubai -> The View Palm Jumeirah", "type": "transfer", "time": "15:40-15:53", "cost": 91, "estimated_coord": true}, {"lat": 25.1141712, "lng": 55.139423799999996, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.10 The View Palm Jumeirah", "type": "poi", "time": "17:03-18:33", "cost": 140, "estimated_coord": false}, {"lat": 25.074029735925077, "lng": 55.31433259807685, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.11 Transfer The View Palm Jumeirah -> DREAM Dinner Show Dubai", "type": "transfer", "time": "18:33-18:49", "cost": 112, "estimated_coord": true}, {"lat": 25.0725406, "lng": 55.1262379, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.12 DREAM Dinner Show Dubai", "type": "meal", "time": "18:49-19:49", "cost": 1686, "estimated_coord": false}, {"lat": 25.0830442519577, "lng": 55.30771223100213, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.13 Transfer DREAM Dinner Show Dubai -> Artefactum Gallery Dubai", "type": "transfer", "time": "19:49-20:05", "cost": 112, "estimated_coord": true}, {"lat": 25.2235129, "lng": 55.2884709, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.14 Artefactum Gallery Dubai", "type": "poi", "time": "20:05-21:00", "cost": 220, "estimated_coord": false}, {"lat": 25.071925229708096, "lng": 55.306504711346264, "day": 2, "date": "2026-12-21", "city": "Dubai", "name": "Day 2.15 Return to Banyan Tree Dubai", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 25.081366834917617, "lng": 55.32054171993358, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.1 Transfer from Banyan Tree Dubai to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 25.192544723546163, "lng": 55.26258677004113, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.2 The MAINE Land Brasserie Restaurant, Business Bay Dubai", "type": "meal", "time": "08:00-08:40", "cost": 1686, "estimated_coord": true}, {"lat": 25.08182826579106, "lng": 55.29817768363477, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.3 Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -> Dubai Marina Walk", "type": "transfer", "time": "08:40-09:34", "cost": 378, "estimated_coord": true}, {"lat": 25.085563999999998, "lng": 55.147801099999995, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.4 Dubai Marina Walk", "type": "poi", "time": "09:34-11:04", "cost": 140, "estimated_coord": false}, {"lat": 25.06638139819156, "lng": 55.31435659952518, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.5 Transfer Dubai Marina Walk -> Dinner In The Sky", "type": "transfer", "time": "11:04-11:13", "cost": 63, "estimated_coord": true}, {"lat": 25.089668999999997, "lng": 55.136932699999996, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.6 Dinner In The Sky", "type": "meal", "time": "12:00-13:00", "cost": 1686, "estimated_coord": false}, {"lat": 25.08870013211957, "lng": 55.31286088769588, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.7 Transfer Dinner In The Sky -> Zawyeh Gallery, Dubai", "type": "transfer", "time": "13:00-13:34", "cost": 238, "estimated_coord": true}, {"lat": 25.1412779, "lng": 55.2317551, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.8 Zawyeh Gallery, Dubai", "type": "poi", "time": "13:34-15:04", "cost": 180, "estimated_coord": false}, {"lat": 25.145330823546164, "lng": 55.221330870041136, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.9 Local area walk near Zawyeh Gallery, Dubai before dinner", "type": "poi", "time": "15:04-17:32", "cost": 0, "estimated_coord": true}, {"lat": 25.07123259595631, "lng": 55.29888776283381, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.10 Transfer Local area walk near Zawyeh Gallery, Dubai before dinner -> Trèsind Dubai", "type": "transfer", "time": "17:32-18:00", "cost": 196, "estimated_coord": true}, {"lat": 25.098970299999998, "lng": 55.154299599999995, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.11 Trèsind Dubai", "type": "meal", "time": "18:00-19:00", "cost": 1686, "estimated_coord": false}, {"lat": 25.074673994295328, "lng": 55.320990247207696, "day": 3, "date": "2026-12-22", "city": "Dubai", "name": "Day 3.12 Return to Banyan Tree Dubai", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 25.087066351247962, "lng": 55.30236788089231, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.1 Transfer from Banyan Tree Dubai to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 25.18251477807535, "lng": 55.267535603576306, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.2 The MAINE Land Brasserie Restaurant, Business Bay Dubai", "type": "meal", "time": "08:00-08:40", "cost": 1686, "estimated_coord": true}, {"lat": 25.065349407278674, "lng": 55.30772860683759, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.3 Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -> Burj Khalifa", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 25.197197, "lng": 55.274376399999994, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.4 Burj Khalifa", "type": "poi", "time": "08:49-10:19", "cost": 140, "estimated_coord": false}, {"lat": 25.08885095255104, "lng": 55.32303291756527, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.5 Transfer Burj Khalifa -> KidZania Dubai", "type": "transfer", "time": "10:19-10:28", "cost": 63, "estimated_coord": true}, {"lat": 25.195073999999998, "lng": 55.2800733, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.6 KidZania Dubai", "type": "poi", "time": "10:28-11:51", "cost": 120, "estimated_coord": false}, {"lat": 25.077992461806087, "lng": 55.2912853190057, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.7 Transfer KidZania Dubai -> Social House", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 25.1961549, "lng": 55.2775404, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.8 Social House", "type": "meal", "time": "12:00-13:00", "cost": 1156, "estimated_coord": false}, {"lat": 25.064554106860356, "lng": 55.3220298705866, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.9 Transfer Social House -> ARTE MUSEUM DUBAI", "type": "transfer", "time": "13:00-13:05", "cost": 35, "estimated_coord": true}, {"lat": 25.1975373, "lng": 55.2849742, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.10 ARTE MUSEUM DUBAI", "type": "poi", "time": "14:23-15:53", "cost": 200, "estimated_coord": false}, {"lat": 25.201590223546166, "lng": 55.274549970041136, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.11 Local area walk near ARTE MUSEUM DUBAI before dinner", "type": "poi", "time": "15:53-17:51", "cost": 0, "estimated_coord": true}, {"lat": 25.09523072178824, "lng": 55.30843714708746, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.12 Transfer Local area walk near ARTE MUSEUM DUBAI before dinner -> The Tap House, Downtown", "type": "transfer", "time": "17:51-18:00", "cost": 63, "estimated_coord": true}, {"lat": 25.1949813, "lng": 55.2759967, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.13 The Tap House, Downtown", "type": "meal", "time": "18:00-19:00", "cost": 1005, "estimated_coord": false}, {"lat": 25.06342894380045, "lng": 55.29773837368239, "day": 4, "date": "2026-12-23", "city": "Dubai", "name": "Day 4.14 Return to Banyan Tree Dubai", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 25.084615423546165, "lng": 55.11626327004113, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.1 Check-out Banyan Tree Dubai", "type": "checkout", "time": "07:00-07:15", "cost": 0, "estimated_coord": true}, {"lat": 25.079651788512173, "lng": 55.3271090417888, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.2 Transfer Banyan Tree Dubai -> Waldorf Astoria Dubai Palm Jumeirah", "type": "transfer", "time": "07:15-07:45", "cost": 210, "estimated_coord": true}, {"lat": 25.134567099999998, "lng": 55.1571192, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.3 Check-in Waldorf Astoria Dubai Palm Jumeirah", "type": "checkin", "time": "07:45-08:00", "cost": 0, "estimated_coord": false}, {"lat": 25.087529034636077, "lng": 55.2944936186111, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.4 Transfer Waldorf Astoria Dubai Palm Jumeirah -> Carnival by Trèsind Restaurant & Bar | DIFC, Dubai", "type": "transfer", "time": "08:00-08:33", "cost": 231, "estimated_coord": true}, {"lat": 25.215739223546166, "lng": 55.27744577004113, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.5 Carnival by Trèsind Restaurant & Bar | DIFC, Dubai", "type": "meal", "time": "08:33-09:13", "cost": 1467, "estimated_coord": true}, {"lat": 25.059689273826102, "lng": 55.313222327952666, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.6 Transfer Carnival by Trèsind Restaurant & Bar | DIFC, Dubai -> Museum of Candy", "type": "transfer", "time": "09:13-09:27", "cost": 98, "estimated_coord": true}, {"lat": 25.242801999999998, "lng": 55.3102358, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.7 Museum of Candy", "type": "poi", "time": "09:27-10:57", "cost": 200, "estimated_coord": false}, {"lat": 25.09807470530212, "lng": 55.32120028285833, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.8 Transfer Museum of Candy -> Above Eleven", "type": "transfer", "time": "10:57-12:10", "cost": 511, "estimated_coord": true}, {"lat": 25.1070192, "lng": 55.145730099999994, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.9 Above Eleven", "type": "meal", "time": "12:10-13:10", "cost": 1637, "estimated_coord": false}, {"lat": 25.069953206537786, "lng": 55.28640612444991, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.10 Transfer Above Eleven -> Legendarium Fantastic Museum", "type": "transfer", "time": "13:10-14:30", "cost": 560, "estimated_coord": true}, {"lat": 25.223194400000004, "lng": 55.3591568, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.11 Legendarium Fantastic Museum", "type": "poi", "time": "14:30-16:00", "cost": 200, "estimated_coord": false}, {"lat": 25.22724732354617, "lng": 55.348732570041136, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.12 Local area walk near Legendarium Fantastic Museum before dinner", "type": "poi", "time": "16:00-17:43", "cost": 0, "estimated_coord": true}, {"lat": 25.06718619211094, "lng": 55.33105806486983, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.13 Transfer Local area walk near Legendarium Fantastic Museum before dinner -> Josette", "type": "transfer", "time": "17:43-18:07", "cost": 168, "estimated_coord": true}, {"lat": 25.2118249, "lng": 55.2806479, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.14 Josette", "type": "meal", "time": "18:07-19:07", "cost": 1686, "estimated_coord": false}, {"lat": 25.099388326916564, "lng": 55.3000020724358, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.15 Transfer Josette -> Artefactum Gallery Dubai", "type": "transfer", "time": "19:07-19:12", "cost": 35, "estimated_coord": true}, {"lat": 25.227565823546165, "lng": 55.278046670041135, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.16 Artefactum Gallery Dubai", "type": "poi", "time": "19:12-21:00", "cost": 220, "estimated_coord": true}, {"lat": 25.05466545816124, "lng": 55.30114974939221, "day": 5, "date": "2026-12-24", "city": "Dubai", "name": "Day 5.17 Return to Waldorf Astoria Dubai Palm Jumeirah", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 25.088418075286874, "lng": 55.33051321290169, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.1 Transfer from Waldorf Astoria Dubai Palm Jumeirah to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 25.205709278075354, "lng": 55.28239460357631, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.2 Carnival by Trèsind Restaurant & Bar | DIFC, Dubai", "type": "meal", "time": "08:00-08:40", "cost": 1467, "estimated_coord": true}, {"lat": 25.0833644974164, "lng": 55.2860619642937, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.3 Transfer Carnival by Trèsind Restaurant & Bar | DIFC, Dubai -> Dubai Dino", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 25.197023899999998, "lng": 55.286511499999996, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.4 Dubai Dino", "type": "poi", "time": "08:49-10:19", "cost": 120, "estimated_coord": false}, {"lat": 25.201076823546163, "lng": 55.27608727004113, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.5 Local area walk near Dubai Dino before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 25.057064610495438, "lng": 55.322252682717725, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.6 Transfer Local area walk near Dubai Dino before lunch -> GIA", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 25.197142099999997, "lng": 55.275974299999994, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.7 GIA", "type": "meal", "time": "12:00-13:00", "cost": 1686, "estimated_coord": false}, {"lat": 25.10681721363678, "lng": 55.314347388871944, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.8 Transfer GIA -> Dubai Old village", "type": "transfer", "time": "13:00-13:26", "cost": 182, "estimated_coord": true}, {"lat": 25.2626895, "lng": 55.3136973, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.9 Dubai Old village", "type": "poi", "time": "14:32-16:02", "cost": 140, "estimated_coord": false}, {"lat": 25.266742423546166, "lng": 55.303273070041136, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.10 Local area walk near Dubai Old village before dinner", "type": "poi", "time": "16:02-17:35", "cost": 0, "estimated_coord": true}, {"lat": 25.058877686090014, "lng": 55.285553801282816, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.11 Transfer Local area walk near Dubai Old village before dinner -> CÉ LA VI", "type": "transfer", "time": "17:35-18:00", "cost": 175, "estimated_coord": true}, {"lat": 25.202026, "lng": 55.270675499999996, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.12 CÉ LA VI", "type": "meal", "time": "18:00-19:00", "cost": 1686, "estimated_coord": false}, {"lat": 25.074777233567975, "lng": 55.339167916753055, "day": 6, "date": "2026-12-25", "city": "Dubai", "name": "Day 6.13 Return to Waldorf Astoria Dubai Palm Jumeirah", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 25.099269009686598, "lng": 55.28889444571499, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.1 Transfer from Waldorf Astoria Dubai Palm Jumeirah to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 25.19325344960844, "lng": 55.27066157433925, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.2 The MAINE Land Brasserie Restaurant, Business Bay Dubai", "type": "meal", "time": "08:00-08:40", "cost": 1686, "estimated_coord": true}, {"lat": 25.04725037899201, "lng": 55.309420795812365, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.3 Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -> Al Fahidi Historical Neighbourhood", "type": "transfer", "time": "08:40-09:09", "cost": 203, "estimated_coord": true}, {"lat": 25.2642363, "lng": 55.300264299999995, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.4 Al Fahidi Historical Neighbourhood", "type": "poi", "time": "09:09-10:39", "cost": 160, "estimated_coord": false}, {"lat": 25.099472730986133, "lng": 55.329423169168095, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.5 Transfer Al Fahidi Historical Neighbourhood -> 11 Woodfire", "type": "transfer", "time": "10:39-11:02", "cost": 161, "estimated_coord": true}, {"lat": 25.2154641, "lng": 55.2515868, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.6 11 Woodfire", "type": "meal", "time": "12:00-13:00", "cost": 1591, "estimated_coord": false}, {"lat": 25.074476796942427, "lng": 55.27939845258776, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.7 Transfer 11 Woodfire -> Dubai Old City", "type": "transfer", "time": "13:00-13:25", "cost": 175, "estimated_coord": true}, {"lat": 25.2638684, "lng": 55.3120462, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.8 Dubai Old City", "type": "poi", "time": "13:25-14:55", "cost": 160, "estimated_coord": false}, {"lat": 25.267921323546165, "lng": 55.30162197004113, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.9 Local area walk near Dubai Old City before dinner", "type": "poi", "time": "14:55-17:30", "cost": 0, "estimated_coord": true}, {"lat": 25.059117031696978, "lng": 55.33316969582488, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.10 Transfer Local area walk near Dubai Old City before dinner -> Romeo Lane Dubai", "type": "transfer", "time": "17:30-18:00", "cost": 210, "estimated_coord": true}, {"lat": 25.186880499999997, "lng": 55.27164690000001, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.11 Romeo Lane Dubai", "type": "meal", "time": "18:00-19:00", "cost": 1037, "estimated_coord": false}, {"lat": 25.112667612312848, "lng": 55.302820756784186, "day": 7, "date": "2026-12-26", "city": "Dubai", "name": "Day 7.12 Return to Waldorf Astoria Dubai Palm Jumeirah", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 23.120722923546165, "lng": 113.24557577004113, "day": 2, "date": "2026-12-27", "city": "Guangzhou", "name": "Fly Dubai (DXB) -> Guangzhou (CAN) [Business]", "type": "flight", "time": "", "cost": 16000, "route_point": true, "estimated_coord": false}, {"lat": 25.046777674808276, "lng": 55.290101343359275, "day": 8, "date": "2026-12-27", "city": "Dubai", "name": "Day 8.1 Transfer from Waldorf Astoria Dubai Palm Jumeirah to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 25.18744661097421, "lng": 55.26110273630409, "day": 8, "date": "2026-12-27", "city": "Dubai", "name": "Day 8.2 The MAINE Land Brasserie Restaurant, Business Bay Dubai", "type": "meal", "time": "08:00-08:40", "cost": 1686, "estimated_coord": true}, {"lat": 25.086771245697005, "lng": 55.34398809154284, "day": 8, "date": "2026-12-27", "city": "Dubai", "name": "Day 8.3 Transfer The MAINE Land Brasserie Restaurant, Business Bay Dubai -> Etihad Museum", "type": "transfer", "time": "08:40-08:59", "cost": 133, "estimated_coord": true}, {"lat": 25.241295899999997, "lng": 55.2692991, "day": 8, "date": "2026-12-27", "city": "Dubai", "name": "Day 8.4 Etihad Museum", "type": "poi", "time": "08:59-10:29", "cost": 180, "estimated_coord": false}, {"lat": 25.093680931705585, "lng": 55.277238383067875, "day": 8, "date": "2026-12-27", "city": "Dubai", "name": "Day 8.5 Transfer Etihad Museum -> Waldorf Astoria Dubai Palm Jumeirah", "type": "transfer", "time": "10:29-11:24", "cost": 385, "estimated_coord": true}, {"lat": 25.138620023546164, "lng": 55.14669497004113, "day": 8, "date": "2026-12-27", "city": "Dubai", "name": "Day 8.6 Check-out Waldorf Astoria Dubai Palm Jumeirah", "type": "checkout", "time": "11:45-12:00", "cost": 0, "estimated_coord": true}, {"lat": 25.043497347535013, "lng": 55.321790321544505, "day": 8, "date": "2026-12-27", "city": "Dubai", "name": "Day 8.7 Transfer Waldorf Astoria Dubai Palm Jumeirah -> DXB", "type": "transfer", "time": "12:00-13:00", "cost": 420, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

@@ -15,7 +15,35 @@ BASE_DIR = Path(__file__).resolve().parent
 CITY_CENTROIDS_PATH = BASE_DIR / "cities15000.txt"
 AIRPORT_MAPPING_PATH = BASE_DIR / "global_airports.json"
 GOOGLE_DISTANCE_MATRIX_URL = "https://maps.googleapis.com/maps/api/distancematrix/json"
+GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+CITY_GEOCODE_CACHE_PATH = BASE_DIR / "city_geocode_cache.json"
 NEARBY_AIRPORT_RADIUS_KM = 220.0
+DEFAULT_COUNTRY_CITY_DAYS = 2
+
+CITY_COORD_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    # GeoNames cities15000 excludes some small but high-demand travel towns.
+    # These fallbacks let gateway-airport logic map them to nearby airports.
+    "hallstatt": {
+        "name": "Hallstatt",
+        "asciiname": "Hallstatt",
+        "lat": 47.5622,
+        "lng": 13.6493,
+        "feature_code": "PPL",
+        "country_code": "AT",
+        "population": 780,
+        "source": "city_coord_override",
+    },
+    "bali": {
+        "name": "Bali",
+        "asciiname": "Bali",
+        "lat": -8.4095,
+        "lng": 115.1889,
+        "feature_code": "ADM1",
+        "country_code": "ID",
+        "population": 4317404,
+        "source": "city_coord_override",
+    },
+}
 
 
 COUNTRY_NAME_ALIASES = {
@@ -200,6 +228,40 @@ def _allocate_days_by_ratio(total_days: int, items: List[Dict[str, Any]]) -> Lis
     return result
 
 
+def _allocate_default_country_city_days(total_days: int, items: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    if not items:
+        return []
+
+    total_days = max(1, total_days)
+
+    ratio_items: List[Dict[str, Any]] = []
+    for item in items:
+        if not isinstance(item, dict):
+            continue
+        city_name = _normalize_text(item.get("city"))
+        if not city_name:
+            continue
+        ratio_items.append({
+            "city": city_name,
+            "days_ratio": max(0.0, _safe_float(item.get("days_ratio"), 0.0)),
+            "source": _normalize_text(item.get("source")) or "country_default",
+        })
+
+    if not ratio_items:
+        return []
+
+    total_ratio = sum(item["days_ratio"] for item in ratio_items)
+    if total_ratio <= 0:
+        equal_ratio = 1.0 / len(ratio_items)
+        for item in ratio_items:
+            item["days_ratio"] = equal_ratio
+    else:
+        for item in ratio_items:
+            item["days_ratio"] = item["days_ratio"] / total_ratio
+
+    return _allocate_days_by_ratio(total_days, ratio_items)
+
+
 def recommend_cities_by_country(country: str, duration_days: int, db: dict):
     """
     Recommend country default cities based on trip duration.
@@ -331,7 +393,8 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
 
     # 1) Highest priority: explicit city_plan
     if isinstance(planned_cities, list) and planned_cities:
-        explicit_mode = _normalize_text(city_plan.get("mode")) in {"user_specified", "user_explicit_city_days"}
+        city_plan_mode = _normalize_text(city_plan.get("mode"))
+        explicit_mode = city_plan_mode in {"user_specified", "user_explicit_city_days"}
         trimmed_planned_cities = planned_cities if explicit_mode else _trim_items(planned_cities, max_city_count)
 
         ratio_items: List[Dict[str, Any]] = []
@@ -377,6 +440,16 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
 
         if direct_explicit_nights and len(direct_explicit_nights) == len(ratio_items):
             return direct_explicit_nights
+
+        if city_plan_mode == "country_recommendation" and all_have_days:
+            return [
+                {
+                    "city": item["city"],
+                    "days": max(1, _safe_int(item["days_ratio"], DEFAULT_COUNTRY_CITY_DAYS)),
+                    "source": item["source"],
+                }
+                for item in ratio_items
+            ]
 
         if ratio_items:
             if all_have_days and sum(explicit_day_values) > 0:
@@ -466,7 +539,7 @@ def _get_effective_cities(parsed_request: Dict[str, Any], db: Dict[str, Any]) ->
             for item in normalized_default_items:
                 item["days_ratio"] = item["days_ratio"] / total_ratio
 
-        return _allocate_days_by_ratio(total_days, normalized_default_items)
+        return _allocate_default_country_city_days(total_days, normalized_default_items)
 
     return []
 
@@ -548,31 +621,146 @@ def _load_city_centroids() -> Dict[str, Dict[str, Any]]:
                 }
                 aliases = {_normalize_alias_key(record["name"]), _normalize_alias_key(record["asciiname"])}
                 aliases.update(_normalize_alias_key(x) for x in (_normalize_text(parts[3]) or "").split(","))
-                for alias in aliases:
-                    if not alias:
-                        continue
-                    existing = index.get(alias)
+                def put(alias_key: str) -> None:
+                    if not alias_key:
+                        return
+                    existing = index.get(alias_key)
                     if existing is None:
-                        index[alias] = record
-                        continue
+                        index[alias_key] = record
+                        return
                     old_rank = _geonames_feature_rank(existing.get("feature_code"))
                     new_rank = _geonames_feature_rank(record.get("feature_code"))
                     if (new_rank > old_rank) or (
                         new_rank == old_rank
                         and record["population"] > _safe_int(existing.get("population"), 0)
                     ):
-                        index[alias] = record
+                        index[alias_key] = record
+
+                for alias in aliases:
+                    if not alias:
+                        continue
+                    put(alias)
+                    if record["country_code"]:
+                        put(f"{alias}|{record['country_code']}")
     except Exception:
         return {}
 
     return index
 
 
+def _city_geocode_cache_key(city: Any, country_hint: Any = None) -> str:
+    city_key = _normalize_alias_key(city)
+    country_key = _normalize_text(country_hint).upper()
+    return f"{city_key}|{country_key}" if country_key else city_key
+
+
+def _load_city_geocode_cache() -> Dict[str, Dict[str, Any]]:
+    if not CITY_GEOCODE_CACHE_PATH.exists():
+        return {}
+    try:
+        with CITY_GEOCODE_CACHE_PATH.open("r", encoding="utf-8") as f:
+            raw = json.load(f)
+        return raw if isinstance(raw, dict) else {}
+    except Exception:
+        return {}
+
+
+def _save_city_geocode_cache(cache: Dict[str, Dict[str, Any]]) -> None:
+    try:
+        with CITY_GEOCODE_CACHE_PATH.open("w", encoding="utf-8") as f:
+            json.dump(cache, f, ensure_ascii=False, indent=2, sort_keys=True)
+    except Exception:
+        pass
+
+
+def _geocode_city_centroid(city: Any, country_hint: Any = None) -> Optional[Dict[str, Any]]:
+    city_name = _normalize_text(city)
+    city_key = _normalize_alias_key(city_name)
+    if not city_key:
+        return None
+
+    cache = _load_city_geocode_cache()
+    cache_key = _city_geocode_cache_key(city_name, country_hint)
+    cached = cache.get(cache_key) or cache.get(city_key)
+    if isinstance(cached, dict):
+        return cached
+
+    api_key = os.getenv("GOOGLE_MAPS_API_KEY")
+    if not api_key:
+        return None
+
+    hinted_country = _normalize_text(country_hint).upper()
+    params: Dict[str, Any] = {
+        "address": f"{city_name}, {hinted_country}".strip(", "),
+        "key": api_key,
+    }
+    if hinted_country:
+        params["components"] = f"country:{hinted_country}"
+
+    try:
+        response = requests.get(GOOGLE_GEOCODE_URL, params=params, timeout=8)
+        if response.status_code != 200:
+            return None
+        data = response.json() if response.text else {}
+        results = data.get("results") if isinstance(data, dict) else []
+        first = results[0] if results and isinstance(results[0], dict) else {}
+        location = ((first.get("geometry") or {}).get("location") or {}) if isinstance(first, dict) else {}
+        lat = _safe_float(location.get("lat"), 0.0)
+        lng = _safe_float(location.get("lng"), 0.0)
+        if lat == 0.0 and lng == 0.0:
+            return None
+        country_code = hinted_country
+        for component in first.get("address_components") or []:
+            types = component.get("types") or []
+            if "country" in types:
+                country_code = _normalize_text(component.get("short_name")).upper() or country_code
+                break
+        record = {
+            "name": city_name,
+            "asciiname": city_name,
+            "lat": lat,
+            "lng": lng,
+            "feature_code": "PPL",
+            "country_code": country_code,
+            "population": 0,
+            "source": "google_geocode_cache",
+        }
+        cache[cache_key] = record
+        if hinted_country:
+            cache.setdefault(city_key, record)
+        _save_city_geocode_cache(cache)
+        return record
+    except Exception:
+        return None
+
+
 def _get_city_centroid(city: Any) -> Optional[Dict[str, Any]]:
     key = _normalize_alias_key(city)
     if not key:
         return None
-    return _load_city_centroids().get(key)
+    override = CITY_COORD_OVERRIDES.get(key)
+    if override:
+        return override
+    centroid = _load_city_centroids().get(key)
+    if centroid:
+        return centroid
+    return _geocode_city_centroid(city)
+
+
+def _get_city_centroid_with_country(city: Any, country_hint: Any = None) -> Optional[Dict[str, Any]]:
+    key = _normalize_alias_key(city)
+    country = _normalize_text(country_hint).upper()
+    if not key:
+        return None
+    override = CITY_COORD_OVERRIDES.get(key)
+    if override and (not country or _normalize_text(override.get("country_code")).upper() == country):
+        return override
+    centroids = _load_city_centroids()
+    if country:
+        hinted = centroids.get(f"{key}|{country}")
+        if hinted:
+            return hinted
+    return centroids.get(key) or _geocode_city_centroid(city, country_hint)
 
 
 def _city_coord(city: Any) -> Optional[Dict[str, float]]:
@@ -688,7 +876,7 @@ def _get_direct_city_airports(city: Any) -> List[Dict[str, Any]]:
 
     matched: Dict[str, Dict[str, Any]] = {}
     for indexed_key, airports in city_index.items():
-        if city_key in indexed_key or indexed_key in city_key:
+        if _route_city_keys_match(city_key, indexed_key):
             for airport in airports:
                 iata = _normalize_text(airport.get("iata")).upper()
                 if iata:
@@ -696,6 +884,26 @@ def _get_direct_city_airports(city: Any) -> List[Dict[str, Any]]:
     result = list(matched.values())
     result.sort(key=lambda x: (-_airport_type_rank(x.get("type")), _normalize_text(x.get("name"))))
     return result
+
+
+def _route_city_keys_match(city_key: str, indexed_key: str) -> bool:
+    if not city_key or not indexed_key:
+        return False
+    if city_key == indexed_key:
+        return True
+    if len(city_key) < 5 and len(indexed_key) < 5:
+        return False
+    city_tokens = set(city_key.split())
+    indexed_tokens = set(indexed_key.split())
+    if city_tokens and indexed_tokens and (
+        city_tokens.issubset(indexed_tokens) or indexed_tokens.issubset(city_tokens)
+    ):
+        return True
+    if len(city_key) >= 5 and city_key in indexed_key:
+        return True
+    if len(indexed_key) >= 5 and indexed_key in city_key:
+        return True
+    return False
 
 
 def _coord_for_place(place: Any) -> Optional[Dict[str, float]]:
@@ -714,7 +922,13 @@ def _coord_for_place(place: Any) -> Optional[Dict[str, float]]:
 def _find_gateway_for_city(city: Any, selected_city_keys: Dict[str, str]) -> Dict[str, Any]:
     city_name = _normalize_text(city)
     city_key = _normalize_route_city_key(city_name)
+    city_country = _normalize_text((_get_city_centroid(city_name) or {}).get("country_code")).upper()
     direct_airports = _get_direct_city_airports(city_name)
+    if city_country:
+        direct_airports = [
+            airport for airport in direct_airports
+            if _normalize_text(airport.get("country")).upper() == city_country
+        ]
     if direct_airports:
         return {
             "gateway_city": city_name,
@@ -734,7 +948,6 @@ def _find_gateway_for_city(city: Any, selected_city_keys: Dict[str, str]) -> Dic
             "has_direct_airport": False,
         }
 
-    city_country = _normalize_text((_get_city_centroid(city_name) or {}).get("country_code")).upper()
     nearby: List[Dict[str, Any]] = []
     for airport in _load_airports_by_iata().values():
         airport_city_key = _normalize_route_city_key(airport.get("city"))
@@ -1070,7 +1283,7 @@ def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
         )
 
         city_plan["mode"] = "country_recommendation"
-        city_plan["cities"] = _allocate_days_by_ratio(
+        city_plan["cities"] = _allocate_default_country_city_days(
             duration_days,
             [
                 {
@@ -1135,7 +1348,7 @@ def build_city_plan(input_json: dict, db_path="country_default_city_plan.json"):
         )
 
         city_plan["mode"] = "country_recommendation"
-        city_plan["cities"] = _allocate_days_by_ratio(
+        city_plan["cities"] = _allocate_default_country_city_days(
             duration_days,
             [
                 {

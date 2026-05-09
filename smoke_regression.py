@@ -9,6 +9,7 @@ from agent3_real import Agent3Selection
 from travel_requirement_parser_llm_agent import (
     _extract_explicit_city_list_from_text,
     _extract_hotel_area_from_text,
+    _normalize_result,
     _normalize_travel_dates,
 )
 from itinerary_agent import (
@@ -411,6 +412,56 @@ def test_parser_and_city_plan_keep_explicit_three_city_nights() -> None:
     _assert(explicit_cities == ["Tokyo", "Kyoto", "Osaka"], "Parser fallback should keep all explicit cities")
     _assert([item["city"] for item in explicit_stays] == ["Tokyo", "Kyoto", "Osaka"], "Night stays should match all explicit cities")
     _assert([item.get("days") for item in cities] == [2, 2, 2], "Explicit 2-night city stays should not be reallocated")
+
+
+def test_country_destination_recommends_two_day_cities() -> None:
+    original_env = os.environ.get("TRAVEL_CITY_ORDER_USE_MAP_API")
+    try:
+        os.environ["TRAVEL_CITY_ORDER_USE_MAP_API"] = "false"
+        planned = build_city_plan(
+            {
+                "origin": "Shanghai",
+                "destination": [],
+                "country": "Japan",
+                "duration_days": 5,
+                "travel_dates": {"start": "2026-06-10", "end": "2026-06-14"},
+                "user_request": "Plan a 5-day trip from Shanghai to Japan.",
+            }
+        )
+    finally:
+        if original_env is None:
+            os.environ.pop("TRAVEL_CITY_ORDER_USE_MAP_API", None)
+        else:
+            os.environ["TRAVEL_CITY_ORDER_USE_MAP_API"] = original_env
+
+    city_plan = planned.get("city_plan", {})
+    cities = city_plan.get("cities", [])
+    _assert(city_plan.get("mode") == "country_recommendation", "Country-only input should use country recommendation mode")
+    _assert([item.get("city") for item in cities] == ["Tokyo", "Osaka"], "Five-day Japan country input should recommend at most two famous cities")
+    _assert([item.get("days") for item in cities] == [2, 2], "Country recommendation should default to two days per city")
+
+
+def test_country_phrase_destination_is_normalized_before_city_planning() -> None:
+    normalized = _normalize_result(
+        {
+            "origin": "Shanghai",
+            "destination": ["6-16 in Japan"],
+            "country": None,
+            "num_people": 1,
+            "duration_days": 7,
+            "travel_dates": {"start": "2026-06-10", "end": "2026-06-16"},
+            "budget": {"total": 80000, "currency": "CNY"},
+            "preferences": {},
+        },
+        user_request="Plan a trip from Shanghai to 6-16 in Japan for 1 person with 80000 CNY.",
+    )
+    planned = build_city_plan(normalized)
+    cities = planned.get("city_plan", {}).get("cities", [])
+
+    _assert(normalized.get("country") == "japan", "Date-plus-country destination text should be normalized to country")
+    _assert(normalized.get("destination") == [], "Country-only text should not survive as a fake city destination")
+    _assert([item.get("city") for item in cities] == ["Tokyo", "Osaka"], "Normalized country input should drive automatic city recommendation")
+    _assert([item.get("days") for item in cities] == [2, 2], "Recommended cities should keep the two-day default")
 
 
 def test_city_plan_orders_japan_cities_by_gateway() -> None:
@@ -1496,6 +1547,123 @@ def test_inbound_airport_transfer_arrives_90_minutes_early() -> None:
     _assert(not post_deadline_events, "No destination-city activities should remain after the inbound airport deadline")
 
 
+def test_inbound_flight_truncates_following_itinerary_days() -> None:
+    result = run_itinerary_agent(
+        {
+            "trip_summary": {
+                "origin": "Shanghai",
+                "destination": ["Tokyo"],
+                "country": "japan",
+                "num_people": 1,
+                "duration_days": 4,
+                "budget": {"total": 20000, "currency": "CNY"},
+                "preferences": {},
+            },
+            "city_date_ranges": {
+                "Tokyo": {"check_in": "2026-05-03", "check_out": "2026-05-07", "days": 4},
+            },
+            "city_budget_plan": [
+                {"city": "Tokyo", "days": 4, "food_budget": 1600, "attractions_budget": 1200, "hotel_budget": 4000},
+            ],
+            "selected_hotels": [
+                {"city": "Tokyo", "name": "Tokyo Test Hotel", "estimated_total_cost": 3200},
+            ],
+            "selected_restaurants": [
+                {"city": "Tokyo", "name": "Breakfast Cafe", "estimated_meal_per_person": 80},
+                {"city": "Tokyo", "name": "Lunch Cafe", "estimated_meal_per_person": 100},
+            ],
+            "selected_pois": [
+                {"city": "Tokyo", "name": "Tokyo Tower", "estimated_total_cost": 120},
+                {"city": "Tokyo", "name": "Ueno Park", "estimated_total_cost": 0},
+            ],
+            "selected_all_flight_legs": [
+                {
+                    "leg_type": "inbound",
+                    "from_city": "Tokyo",
+                    "to_city": "Shanghai",
+                    "departure_date": "2026-05-04",
+                    "selected_flights": [
+                        {
+                            "departure_time": "14:30",
+                            "arrival_time": "17:30",
+                            "duration_minutes": 180,
+                            "price_total": 3000,
+                            "currency": "CNY",
+                        }
+                    ],
+                }
+            ],
+        }
+    )
+
+    daily_plan = result.get("daily_plan", [])
+    dates = [day.get("date") for day in daily_plan]
+    _assert(dates == ["2026-05-03", "2026-05-04"], "Itinerary must stop after the inbound flight day")
+    _assert(result.get("itinerary_summary", {}).get("total_days") == 2, "Summary day count should use the truncated itinerary")
+    _assert(
+        any("Removed all itinerary days after the inbound flight" in warning for warning in daily_plan[-1].get("warnings", [])),
+        "Truncation warning should be attached to the inbound flight day",
+    )
+
+
+def test_unavailable_inbound_flight_stops_later_meals() -> None:
+    result = run_itinerary_agent(
+        {
+            "trip_summary": {
+                "origin": "Shanghai",
+                "destination": ["Tokyo"],
+                "country": "japan",
+                "num_people": 1,
+                "duration_days": 1,
+                "budget": {"total": 20000, "currency": "CNY"},
+                "preferences": {},
+            },
+            "city_date_ranges": {
+                "Tokyo": {"check_in": "2026-05-04", "check_out": "2026-05-05", "days": 1},
+            },
+            "city_budget_plan": [
+                {"city": "Tokyo", "days": 1, "food_budget": 800, "attractions_budget": 600, "hotel_budget": 2000},
+            ],
+            "selected_hotels": [
+                {"city": "Tokyo", "name": "Tokyo Test Hotel", "estimated_total_cost": 1600},
+            ],
+            "selected_restaurants": [
+                {"city": "Tokyo", "name": "Breakfast Cafe", "estimated_meal_per_person": 80},
+                {"city": "Tokyo", "name": "Dinner Cafe", "estimated_meal_per_person": 120},
+            ],
+            "selected_pois": [
+                {"city": "Tokyo", "name": "Tokyo Tower", "estimated_total_cost": 120},
+                {"city": "Tokyo", "name": "Ueno Park", "estimated_total_cost": 0},
+            ],
+            "selected_all_flight_legs": [
+                {
+                    "leg_type": "inbound",
+                    "from_city": "Tokyo",
+                    "to_city": "Shanghai",
+                    "departure_date": "2026-05-04",
+                    "selection_status": "no_candidates",
+                    "selected_flights": [],
+                }
+            ],
+        }
+    )
+
+    day = result.get("daily_plan", [])[0]
+    terminal_index = next(
+        index
+        for index, event in enumerate(day.get("events", []))
+        if event.get("type") == "flight_unavailable" and (event.get("meta") or {}).get("leg_type") == "inbound"
+    )
+    _assert(
+        terminal_index == len(day.get("events", [])) - 1,
+        "No meals, POIs, or transfers should remain after an unavailable inbound flight row",
+    )
+    _assert(
+        any("Removed all schedule items after the inbound flight" in warning for warning in day.get("warnings", [])),
+        "Unavailable inbound cleanup should be visible in warnings",
+    )
+
+
 def test_early_inbound_checkout_allows_airport_transfer_time() -> None:
     result = run_itinerary_agent(
         {
@@ -2212,6 +2380,107 @@ def test_required_meals_are_added_when_not_covered_by_flight() -> None:
     _assert(slots == {"breakfast", "lunch", "dinner"}, "A full non-flight day should include breakfast, lunch, and dinner")
     breakfast = next(event for event in day["events"] if (event.get("meta") or {}).get("meal_slot") == "breakfast")
     _assert("Morning Bakery Cafe" in breakfast.get("name", ""), "Breakfast should use a concrete breakfast restaurant when available")
+    meal_names = [
+        event.get("name")
+        for event in day["events"]
+        if event.get("type") == "meal"
+    ]
+    _assert(len(meal_names) == len(set(meal_names)), "Required meals should use different restaurants when candidates are available")
+    _assert(
+        not any("Reused" in warning for warning in day.get("warnings", [])),
+        "Restaurant reuse warnings should not appear when enough unique restaurants are available",
+    )
+
+
+def test_required_meals_reuse_restaurant_only_with_shortage_warning() -> None:
+    day = {
+        "date": "2026-05-02",
+        "city": "Tokyo",
+        "schedule_start": "08:00",
+        "schedule_end": "20:30",
+        "hotel": {"name": "Tokyo Test Hotel", "lat": 35.67, "lng": 139.76},
+        "events": [],
+        "warnings": [],
+        "used_hours": 0.0,
+    }
+    candidates = {
+        "restaurants": [
+            {"city": "Tokyo", "name": "All Day Cafe", "estimated_meal_per_person": 100, "types": ["cafe"], "lat": 35.671, "lng": 139.761},
+        ],
+    }
+    restaurant_state: Dict[str, int] = {}
+    used_restaurants = set()
+
+    _ensure_required_meals(
+        day,
+        candidates,
+        {"food_budget": 2000, "days": 1},
+        current_day_index=1,
+        restaurant_last_used_day_index=restaurant_state,
+        restaurant_cooldown_days=2,
+        used_restaurant_keys=used_restaurants,
+    )
+
+    meal_keys = [
+        (event.get("meta") or {}).get("restaurant_key")
+        for event in day["events"]
+        if event.get("type") == "meal"
+    ]
+    _assert(len(meal_keys) == 3, "The test day should still receive all required meals")
+    _assert(len(set(meal_keys)) == 1, "The lone restaurant can be reused only when no alternative exists")
+    _assert(
+        any("within the 2-day restaurant cooldown because no alternative restaurant candidate was available" in warning for warning in day.get("warnings", [])),
+        "Forced restaurant reuse should explicitly explain that no alternative restaurant was available",
+    )
+
+
+def test_required_meals_avoid_recent_restaurants_across_days() -> None:
+    candidates = {
+        "restaurants": [
+            {"city": "Tokyo", "name": "Day 1 Morning Cafe", "estimated_meal_per_person": 80, "types": ["cafe"], "lat": 35.671, "lng": 139.761},
+            {"city": "Tokyo", "name": "Day 1 Lunch Bistro", "estimated_meal_per_person": 120, "lat": 35.672, "lng": 139.762},
+            {"city": "Tokyo", "name": "Day 1 Dinner Grill", "estimated_meal_per_person": 160, "lat": 35.673, "lng": 139.763},
+            {"city": "Tokyo", "name": "Day 2 Morning Cafe", "estimated_meal_per_person": 80, "types": ["cafe"], "lat": 35.681, "lng": 139.771},
+            {"city": "Tokyo", "name": "Day 2 Lunch Bistro", "estimated_meal_per_person": 120, "lat": 35.682, "lng": 139.772},
+            {"city": "Tokyo", "name": "Day 2 Dinner Grill", "estimated_meal_per_person": 160, "lat": 35.683, "lng": 139.773},
+        ],
+    }
+    restaurant_state: Dict[str, int] = {}
+    used_restaurants = set()
+    days = []
+    for day_index in (1, 2):
+        day = {
+            "date": f"2026-05-0{day_index}",
+            "city": "Tokyo",
+            "schedule_start": "08:00",
+            "schedule_end": "20:30",
+            "hotel": {"name": "Tokyo Test Hotel", "lat": 35.67, "lng": 139.76},
+            "events": [],
+            "warnings": [],
+            "used_hours": 0.0,
+        }
+        _ensure_required_meals(
+            day,
+            candidates,
+            {"food_budget": 4000, "days": 2},
+            current_day_index=day_index,
+            restaurant_last_used_day_index=restaurant_state,
+            restaurant_cooldown_days=2,
+            used_restaurant_keys=used_restaurants,
+        )
+        days.append(day)
+
+    day_1_keys = {
+        (event.get("meta") or {}).get("restaurant_key")
+        for event in days[0]["events"]
+        if event.get("type") == "meal"
+    }
+    day_2_keys = {
+        (event.get("meta") or {}).get("restaurant_key")
+        for event in days[1]["events"]
+        if event.get("type") == "meal"
+    }
+    _assert(day_1_keys.isdisjoint(day_2_keys), "Restaurants used on the previous day should not repeat when alternatives exist")
 
 
 def test_required_lunch_is_skipped_when_flight_covers_lunch() -> None:
@@ -2376,6 +2645,8 @@ def main() -> None:
     test_agent4_normalize_preserves_budget_plan_for_fallback_budget_map()
     test_agent4_spend_up_targets_budget_ceiling()
     test_parser_and_city_plan_keep_explicit_three_city_nights()
+    test_country_destination_recommends_two_day_cities()
+    test_country_phrase_destination_is_normalized_before_city_planning()
     test_city_plan_orders_japan_cities_by_gateway()
     test_city_plan_preserves_explicit_sequence_markers()
     test_hotel_area_parser_extracts_only_lodging_area()
@@ -2406,6 +2677,8 @@ def main() -> None:
     test_nearby_airport_arrival_is_visible_in_itinerary()
     test_router_preserves_nearby_airport_route_fields()
     test_inbound_airport_transfer_arrives_90_minutes_early()
+    test_inbound_flight_truncates_following_itinerary_days()
+    test_unavailable_inbound_flight_stops_later_meals()
     test_early_inbound_checkout_allows_airport_transfer_time()
     test_breakfast_uses_breakfast_restaurant_and_evening_returns_at_21()
     test_night_poi_is_not_scheduled_in_afternoon_and_not_repeated_within_three_days()
@@ -2422,6 +2695,8 @@ def main() -> None:
     test_area_must_visit_fallback_is_created_for_tokyo_district()
     test_large_gap_before_next_poi_gets_real_poi()
     test_required_meals_are_added_when_not_covered_by_flight()
+    test_required_meals_reuse_restaurant_only_with_shortage_warning()
+    test_required_meals_avoid_recent_restaurants_across_days()
     test_required_lunch_is_skipped_when_flight_covers_lunch()
     test_short_city_stay_keeps_one_hotel_area()
     test_ultra_international_hotel_switch_cost_is_capped()

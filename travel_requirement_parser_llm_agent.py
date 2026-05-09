@@ -6,12 +6,16 @@ import json
 import requests
 from pathlib import Path
 from datetime import datetime, timedelta
+from functools import lru_cache
 from typing import Any, Dict, List, Optional
 try:
     from dotenv import load_dotenv
 except ModuleNotFoundError:
     def load_dotenv(*_args: Any, **_kwargs: Any) -> bool:
         return False
+from destination import COUNTRY_NAME_ALIASES
+from destination import load_country_city_db
+from destination import normalize_country_name
 from destination import run_city_planning_agent
 from travel_time import get_today_date
 
@@ -904,6 +908,7 @@ def _merge_missing_fields_from_text(result: Dict[str, Any], user_request: str) -
             travel_dates["start"] = relative_start
             merged["travel_dates"] = travel_dates
 
+    merged = _normalize_country_destination_fields(merged)
     merged["missing_fields"] = _detect_missing_fields(merged)
     merged["is_ready_for_planning"] = len(merged["missing_fields"]["critical"]) == 0
     merged["parse_status"] = "success" if merged["is_ready_for_planning"] else "partial"
@@ -949,6 +954,61 @@ def _normalize_destination(value: Any) -> List[str]:
             seen.add(normalized.lower())
 
     return cleaned_destinations
+
+
+@lru_cache(maxsize=1)
+def _known_country_names() -> set[str]:
+    try:
+        db = load_country_city_db(str(DEFAULT_DB_PATH))
+    except Exception:
+        return set()
+
+    names = set(db.keys())
+    names.update(COUNTRY_NAME_ALIASES.keys())
+    return {name for name in names if name}
+
+
+def _country_from_destination_text(value: Any) -> Optional[str]:
+    text = _normalize_string(value)
+    if not text:
+        return None
+
+    country_names = _known_country_names()
+    if not country_names:
+        return None
+
+    normalized_whole = normalize_country_name(text)
+    if normalized_whole in country_names:
+        return normalized_whole
+
+    lowered = text.lower()
+    for country_name in sorted(country_names, key=len, reverse=True):
+        pattern = rf"(?<![a-z]){re.escape(country_name)}(?![a-z])"
+        if not re.search(pattern, lowered):
+            continue
+        normalized = normalize_country_name(country_name)
+        if normalized in country_names:
+            return normalized
+
+    return None
+
+
+def _normalize_country_destination_fields(result: Dict[str, Any]) -> Dict[str, Any]:
+    destinations = _normalize_destination(result.get("destination"))
+    country = _normalize_string(result.get("country"))
+
+    detected_country = None
+    if len(destinations) == 1:
+        detected_country = _country_from_destination_text(destinations[0])
+
+    if detected_country:
+        result["country"] = detected_country
+        result["destination"] = []
+    else:
+        result["country"] = normalize_country_name(country) if country else None
+        result["destination"] = destinations
+
+    return result
 
 
 def _normalize_list_of_strings(value: Any) -> List[str]:
@@ -1511,6 +1571,7 @@ def _normalize_result(parsed: Dict[str, Any], user_request: str) -> Dict[str, An
     result["origin"] = _normalize_string(parsed.get("origin"))
     result["destination"] = _normalize_destination(parsed.get("destination"))
     result["country"] = _normalize_string(parsed.get("country"))
+    result = _normalize_country_destination_fields(result)
 
     extracted_num_people = _extract_number(parsed.get("num_people"))
     result["num_people"] = extracted_num_people if extracted_num_people is not None else 1

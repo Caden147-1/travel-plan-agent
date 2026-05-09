@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Shanghai to Tokyo</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Shanghai -> Tokyo</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-09-10 - 2026-09-16</b></div>
+          <div class="request-item"><span>Travelers</span><b>2</b></div>
+          <div class="request-item"><span>Budget</span><b>18000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>budget hotel; food: local; attractions: mixed</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-09-10 - 2026-09-16</strong></div>
+        <div><span>Travelers</span><strong>2</strong></div>
+        <div><span>Budget</span><strong>18000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>11281 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>6810 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>1874 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>1457 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>1140 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>11281 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-09-10 | Tokyo</h2></div><strong>3634 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Livemax Tokyo Shintomicho Hotel</strong><span>272 CNY</span></div><ul class="event-list"><li><span class="time">12:00 - 15:50</span><span class="event-name">Flight Shanghai -&gt; Tokyo</span><span class="event-type">Flight (Economy) x2</span><span class="cost">2508 CNY total</span></li><li><span class="time">16:20 - 16:42</span><span class="event-name">Transfer Haneda Airport -&gt; Livemax Tokyo Shintomicho Hotel for check-in</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">16:50 - 17:05</span><span class="event-name">Check-in Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">17:05 - 17:12</span><span class="event-name">Transfer Livemax Tokyo Shintomicho Hotel -&gt; teamLab Borderless: MORI Building DIGITAL ART MUSEUM</span><span class="event-type">Transfer</span><span class="cost">49 CNY</span></li><li><span class="time">17:12 - 18:42</span><span class="event-name">teamLab Borderless: MORI Building DIGITAL ART MUSEUM</span><span class="event-type">Poi</span><span class="cost">200 CNY</span></li><li><span class="time">18:42 - 18:49</span><span class="event-name">Transfer teamLab Borderless: MORI Building DIGITAL ART MUSEUM -&gt; Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">49 CNY</span></li><li><span class="time">18:49 - 19:49</span><span class="event-name">Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">19:49 - 19:58</span><span class="event-name">Transfer Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel -&gt; Shibuya Sky</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">19:58 - 21:28</span><span class="event-name">Shibuya Sky</span><span class="event-type">Poi</span><span class="cost">120 CNY</span></li><li><span class="time">21:28 - 21:43</span><span class="event-name">Return to Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-09-11 | Tokyo</h2></div><strong>1085 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Livemax Tokyo Shintomicho Hotel</strong><span>272 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">40 CNY</span></li><li><span class="time">08:40 - 08:48</span><span class="event-name">Transfer Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel -&gt; Kaminarimon Gate</span><span class="event-type">Transfer</span><span class="cost">56 CNY</span></li><li><span class="time">08:48 - 10:18</span><span class="event-name">Kaminarimon Gate</span><span class="event-type">Poi</span><span class="cost">60 CNY</span></li><li><span class="time">10:18 - 11:52</span><span class="event-name">Local area walk near Kaminarimon Gate before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:52 - 12:00</span><span class="event-name">Transfer Local area walk near Kaminarimon Gate before lunch -&gt; Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">56 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">13:00 - 13:11</span><span class="event-name">Transfer Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel -&gt; Tokyo Night &amp; Light</span><span class="event-type">Transfer</span><span class="cost">77 CNY</span></li><li><span class="time">13:11 - 14:41</span><span class="event-name">Tokyo Night &amp; Light</span><span class="event-type">Poi</span><span class="cost">120 CNY</span></li><li><span class="time">14:41 - 17:50</span><span class="event-name">Local area walk near Tokyo Night &amp; Light before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:50 - 18:00</span><span class="event-name">Transfer Local area walk near Tokyo Night &amp; Light before dinner -&gt; Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">70 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-09-12 | Tokyo</h2></div><strong>966 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Livemax Tokyo Shintomicho Hotel</strong><span>272 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">40 CNY</span></li><li><span class="time">08:40 - 08:50</span><span class="event-name">Transfer Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel -&gt; Japanime Art Gallery Tokyo</span><span class="event-type">Transfer</span><span class="cost">70 CNY</span></li><li><span class="time">08:50 - 10:20</span><span class="event-name">Japanime Art Gallery Tokyo</span><span class="event-type">Poi</span><span class="cost">180 CNY</span></li><li><span class="time">10:20 - 11:50</span><span class="event-name">Local area walk near Japanime Art Gallery Tokyo before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:50 - 12:00</span><span class="event-name">Transfer Local area walk near Japanime Art Gallery Tokyo before lunch -&gt; Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">70 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-09-13 | Tokyo</h2></div><strong>1163 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Livemax Tokyo Shintomicho Hotel</strong><span>272 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">40 CNY</span></li><li><span class="time">08:40 - 08:48</span><span class="event-name">Transfer Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel -&gt; 買える化石博物館 TOKYO</span><span class="event-type">Transfer</span><span class="cost">56 CNY</span></li><li><span class="time">08:48 - 10:18</span><span class="event-name">買える化石博物館 TOKYO</span><span class="event-type">Poi</span><span class="cost">180 CNY</span></li><li><span class="time">10:18 - 11:52</span><span class="event-name">Local area walk near 買える化石博物館 TOKYO before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:52 - 12:00</span><span class="event-name">Transfer Local area walk near 買える化石博物館 TOKYO before lunch -&gt; Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">56 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel -&gt; Shibuya Sky</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">Shibuya Sky</span><span class="event-type">Poi</span><span class="cost">120 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-09-14 | Tokyo</h2></div><strong>1164 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Hotel Livemax Tokyo Kiba</strong><span>262 CNY</span></div><ul class="event-list"><li><span class="time">07:00 - 07:15</span><span class="event-name">Check-out Livemax Tokyo Shintomicho Hotel</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">07:15 - 07:45</span><span class="event-name">Transfer Livemax Tokyo Shintomicho Hotel -&gt; Hotel Livemax Tokyo Kiba</span><span class="event-type">Transfer</span><span class="cost">210 CNY</span></li><li><span class="time">07:45 - 08:00</span><span class="event-name">Check-in Hotel Livemax Tokyo Kiba</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Hotel Livemax Tokyo Kiba</span><span class="event-type">Meal</span><span class="cost">40 CNY</span></li><li><span class="time">08:40 - 08:57</span><span class="event-name">Transfer Hotel breakfast cafe at Hotel Livemax Tokyo Kiba -&gt; Meiji Jingu</span><span class="event-type">Transfer</span><span class="cost">119 CNY</span></li><li><span class="time">08:57 - 10:27</span><span class="event-name">Meiji Jingu</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">10:27 - 12:13</span><span class="event-name">Local area walk near Meiji Jingu before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:13 - 12:30</span><span class="event-name">Transfer Local area walk near Meiji Jingu before lunch -&gt; Hotel lunch restaurant at Hotel Livemax Tokyo Kiba</span><span class="event-type">Transfer</span><span class="cost">119 CNY</span></li><li><span class="time">12:30 - 13:30</span><span class="event-name">Hotel lunch restaurant at Hotel Livemax Tokyo Kiba</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at Hotel Livemax Tokyo Kiba</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Hotel Livemax Tokyo Kiba</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-09-15 | Tokyo</h2></div><strong>870 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Hotel Livemax Tokyo Kiba</strong><span>262 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Hotel Livemax Tokyo Kiba</span><span class="event-type">Meal</span><span class="cost">40 CNY</span></li><li><span class="time">08:40 - 08:51</span><span class="event-name">Transfer Hotel breakfast cafe at Hotel Livemax Tokyo Kiba -&gt; Sensō-ji</span><span class="event-type">Transfer</span><span class="cost">77 CNY</span></li><li><span class="time">08:51 - 10:21</span><span class="event-name">Sensō-ji</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">10:21 - 10:32</span><span class="event-name">Transfer Sensō-ji -&gt; Hotel lunch restaurant at Hotel Livemax Tokyo Kiba</span><span class="event-type">Transfer</span><span class="cost">77 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at Hotel Livemax Tokyo Kiba</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at Hotel Livemax Tokyo Kiba</span><span class="event-type">Meal</span><span class="cost">114 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Hotel Livemax Tokyo Kiba</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-09-16 | Tokyo</h2></div><strong>2139 CNY</strong></div><ul class="event-list"><li><span class="time">00:25 - 00:40</span><span class="event-name">Check-out Hotel Livemax Tokyo Kiba</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">00:40 - 01:10</span><span class="event-name">Transfer Hotel Livemax Tokyo Kiba -&gt; Haneda Airport</span><span class="event-type">Transfer</span><span class="cost">210 CNY</span></li><li><span class="time">02:40 - 05:00</span><span class="event-name">Flight Tokyo -&gt; Shanghai</span><span class="event-type">Flight (Economy) x2</span><span class="cost">1929 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 31.22222, "lng": 121.46406, "day": 0, "date": "", "city": "Shanghai", "name": "Start: Shanghai", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 35.6895, "lng": 139.69171, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Fly Shanghai (PVG) -> Tokyo (HND) [Economy]", "type": "flight", "time": "", "cost": 2508, "route_point": true}, {"lat": 35.6895, "lng": 139.69771, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.2 Transfer Haneda Airport -> Livemax Tokyo Shintomicho Hotel for check-in", "type": "transfer", "time": "16:20-16:42", "cost": 154, "estimated_coord": true}, {"lat": 35.6722972, "lng": 139.7795332, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.3 Check-in Livemax Tokyo Shintomicho Hotel", "type": "checkin", "time": "16:50-17:05", "cost": 0, "estimated_coord": false}, {"lat": 35.69355292354617, "lng": 139.68728577004114, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.4 Transfer Livemax Tokyo Shintomicho Hotel -> teamLab Borderless: MORI Building DIGITAL ART MUSEUM", "type": "transfer", "time": "17:05-17:12", "cost": 49, "estimated_coord": true}, {"lat": 35.6620689, "lng": 139.7432671, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.5 teamLab Borderless: MORI Building DIGITAL ART MUSEUM", "type": "poi", "time": "17:12-18:42", "cost": 200, "estimated_coord": false}, {"lat": 35.68352297807535, "lng": 139.6922346035763, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.6 Transfer teamLab Borderless: MORI Building DIGITAL ART MUSEUM -> Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "18:42-18:49", "cost": 49, "estimated_coord": true}, {"lat": 35.67635012354617, "lng": 139.76910897004115, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.7 Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "18:49-19:49", "cost": 114, "estimated_coord": true}, {"lat": 35.69426164960845, "lng": 139.69536057433925, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.8 Transfer Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel -> Shibuya Sky", "type": "transfer", "time": "19:49-19:58", "cost": 63, "estimated_coord": true}, {"lat": 35.6586719, "lng": 139.7079848, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.9 Shibuya Sky", "type": "poi", "time": "19:58-21:28", "cost": 120, "estimated_coord": false}, {"lat": 35.688454810974214, "lng": 139.6858017363041, "day": 1, "date": "2026-09-10", "city": "Tokyo", "name": "Day 1.10 Return to Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "21:28-21:43", "cost": 105, "estimated_coord": true}, {"lat": 35.66632017807535, "lng": 139.7740578035763, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.1 Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "08:00-08:40", "cost": 40, "estimated_coord": true}, {"lat": 35.68627973592508, "lng": 139.69677259807685, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.2 Transfer Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel -> Kaminarimon Gate", "type": "transfer", "time": "08:40-08:48", "cost": 56, "estimated_coord": true}, {"lat": 35.7111163, "lng": 139.8023656, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.3 Kaminarimon Gate", "type": "poi", "time": "08:48-10:18", "cost": 60, "estimated_coord": false}, {"lat": 35.71516922354617, "lng": 139.79194137004114, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.4 Local area walk near Kaminarimon Gate before lunch", "type": "poi", "time": "10:18-11:52", "cost": 0, "estimated_coord": true}, {"lat": 35.6952942519577, "lng": 139.69015223100214, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.5 Transfer Local area walk near Kaminarimon Gate before lunch -> Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "11:52-12:00", "cost": 56, "estimated_coord": true}, {"lat": 35.67705884960845, "lng": 139.77718377433925, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.6 Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "12:00-13:00", "cost": 114, "estimated_coord": true}, {"lat": 35.6841752297081, "lng": 139.68894471134627, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.7 Transfer Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel -> Tokyo Night & Light", "type": "transfer", "time": "13:00-13:11", "cost": 77, "estimated_coord": true}, {"lat": 35.6896633, "lng": 139.6988239, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.8 Tokyo Night & Light", "type": "poi", "time": "13:11-14:41", "cost": 120, "estimated_coord": false}, {"lat": 35.69371622354617, "lng": 139.68839967004115, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.9 Local area walk near Tokyo Night & Light before dinner", "type": "poi", "time": "14:41-17:50", "cost": 0, "estimated_coord": true}, {"lat": 35.69361683491762, "lng": 139.70298171993358, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.10 Transfer Local area walk near Tokyo Night & Light before dinner -> Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "17:50-18:00", "cost": 70, "estimated_coord": true}, {"lat": 35.671252010974214, "lng": 139.7676249363041, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.11 Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "18:00-19:00", "cost": 114, "estimated_coord": true}, {"lat": 35.69407826579106, "lng": 139.68061768363478, "day": 2, "date": "2026-09-11", "city": "Tokyo", "name": "Day 2.12 Return to Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 35.669076935925084, "lng": 139.77859579807685, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.1 Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "08:00-08:40", "cost": 40, "estimated_coord": true}, {"lat": 35.67863139819156, "lng": 139.6967965995252, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.2 Transfer Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel -> Japanime Art Gallery Tokyo", "type": "transfer", "time": "08:40-08:50", "cost": 70, "estimated_coord": true}, {"lat": 35.6712158, "lng": 139.7109213, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.3 Japanime Art Gallery Tokyo", "type": "poi", "time": "08:50-10:20", "cost": 180, "estimated_coord": false}, {"lat": 35.67526872354617, "lng": 139.70049707004114, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.4 Local area walk near Japanime Art Gallery Tokyo before lunch", "type": "poi", "time": "10:20-11:50", "cost": 0, "estimated_coord": true}, {"lat": 35.70095013211957, "lng": 139.69530088769588, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.5 Transfer Local area walk near Japanime Art Gallery Tokyo before lunch -> Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "11:50-12:00", "cost": 70, "estimated_coord": true}, {"lat": 35.6780914519577, "lng": 139.77197543100215, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.6 Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "12:00-13:00", "cost": 114, "estimated_coord": true}, {"lat": 35.6669724297081, "lng": 139.77076791134627, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.7 Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "18:00-19:00", "cost": 114, "estimated_coord": true}, {"lat": 35.68348259595631, "lng": 139.6813277628338, "day": 3, "date": "2026-09-12", "city": "Tokyo", "name": "Day 3.8 Return to Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 35.67641403491762, "lng": 139.78480491993358, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.1 Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "08:00-08:40", "cost": 40, "estimated_coord": true}, {"lat": 35.686923994295334, "lng": 139.7034302472077, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.2 Transfer Hotel breakfast cafe at Livemax Tokyo Shintomicho Hotel -> 買える化石博物館 TOKYO", "type": "transfer", "time": "08:40-08:48", "cost": 56, "estimated_coord": true}, {"lat": 35.691871299999995, "lng": 139.724672, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.3 買える化石博物館 TOKYO", "type": "poi", "time": "08:48-10:18", "cost": 180, "estimated_coord": false}, {"lat": 35.695924223546164, "lng": 139.71424777004114, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.4 Local area walk near 買える化石博物館 TOKYO before lunch", "type": "poi", "time": "10:18-11:52", "cost": 0, "estimated_coord": true}, {"lat": 35.699316351247965, "lng": 139.68480788089232, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.5 Transfer Local area walk near 買える化石博物館 TOKYO before lunch -> Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "11:52-12:00", "cost": 56, "estimated_coord": true}, {"lat": 35.67687546579106, "lng": 139.76244088363478, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.6 Hotel lunch restaurant at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "12:00-13:00", "cost": 114, "estimated_coord": true}, {"lat": 35.66142859819156, "lng": 139.7786197995252, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.7 Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel", "type": "meal", "time": "18:00-19:00", "cost": 114, "estimated_coord": true}, {"lat": 35.67759940727868, "lng": 139.6901686068376, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.8 Transfer Hotel dinner restaurant at Livemax Tokyo Shintomicho Hotel -> Shibuya Sky", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 35.66272482354617, "lng": 139.69756057004113, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.9 Shibuya Sky", "type": "poi", "time": "19:15-21:00", "cost": 120, "estimated_coord": true}, {"lat": 35.701100952551045, "lng": 139.70547291756526, "day": 4, "date": "2026-09-13", "city": "Tokyo", "name": "Day 4.10 Return to Livemax Tokyo Shintomicho Hotel", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 35.68374733211957, "lng": 139.77712408769588, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.1 Check-out Livemax Tokyo Shintomicho Hotel", "type": "checkout", "time": "07:00-07:15", "cost": 0, "estimated_coord": true}, {"lat": 35.69024246180609, "lng": 139.6737253190057, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.2 Transfer Livemax Tokyo Shintomicho Hotel -> Hotel Livemax Tokyo Kiba", "type": "transfer", "time": "07:15-07:45", "cost": 210, "estimated_coord": true}, {"lat": 35.6683096, "lng": 139.8177716, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.3 Check-in Hotel Livemax Tokyo Kiba", "type": "checkin", "time": "07:45-08:00", "cost": 0, "estimated_coord": false}, {"lat": 35.67236252354617, "lng": 139.80734737004113, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.4 Hotel breakfast cafe at Hotel Livemax Tokyo Kiba", "type": "meal", "time": "08:00-08:40", "cost": 40, "estimated_coord": true}, {"lat": 35.67680410686036, "lng": 139.7044698705866, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.5 Transfer Hotel breakfast cafe at Hotel Livemax Tokyo Kiba -> Meiji Jingu", "type": "transfer", "time": "08:40-08:57", "cost": 119, "estimated_coord": true}, {"lat": 35.6763976, "lng": 139.7053259, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.6 Meiji Jingu", "type": "poi", "time": "08:57-10:27", "cost": 80, "estimated_coord": false}, {"lat": 35.68045052354617, "lng": 139.69490167004113, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.7 Local area walk near Meiji Jingu before lunch", "type": "poi", "time": "10:27-12:13", "cost": 0, "estimated_coord": true}, {"lat": 35.707480721788244, "lng": 139.69087714708746, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.8 Transfer Local area walk near Meiji Jingu before lunch -> Hotel lunch restaurant at Hotel Livemax Tokyo Kiba", "type": "transfer", "time": "12:13-12:30", "cost": 119, "estimated_coord": true}, {"lat": 35.66233257807535, "lng": 139.8122962035763, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.9 Hotel lunch restaurant at Hotel Livemax Tokyo Kiba", "type": "meal", "time": "12:30-13:30", "cost": 114, "estimated_coord": true}, {"lat": 35.67307124960845, "lng": 139.81542217433923, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.10 Hotel dinner restaurant at Hotel Livemax Tokyo Kiba", "type": "meal", "time": "18:00-19:00", "cost": 114, "estimated_coord": true}, {"lat": 35.67567894380045, "lng": 139.6801783736824, "day": 5, "date": "2026-09-14", "city": "Tokyo", "name": "Day 5.11 Return to Hotel Livemax Tokyo Kiba", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 35.66726441097421, "lng": 139.80586333630407, "day": 6, "date": "2026-09-15", "city": "Tokyo", "name": "Day 6.1 Hotel breakfast cafe at Hotel Livemax Tokyo Kiba", "type": "meal", "time": "08:00-08:40", "cost": 40, "estimated_coord": true}, {"lat": 35.691901788512176, "lng": 139.70954904178882, "day": 6, "date": "2026-09-15", "city": "Tokyo", "name": "Day 6.2 Transfer Hotel breakfast cafe at Hotel Livemax Tokyo Kiba -> Sensō-ji", "type": "transfer", "time": "08:40-08:51", "cost": 77, "estimated_coord": true}, {"lat": 35.7147651, "lng": 139.7966553, "day": 6, "date": "2026-09-15", "city": "Tokyo", "name": "Day 6.3 Sensō-ji", "type": "poi", "time": "08:51-10:21", "cost": 80, "estimated_coord": false}, {"lat": 35.69977903463608, "lng": 139.6769336186111, "day": 6, "date": "2026-09-15", "city": "Tokyo", "name": "Day 6.4 Transfer Sensō-ji -> Hotel lunch restaurant at Hotel Livemax Tokyo Kiba", "type": "transfer", "time": "10:21-10:32", "cost": 77, "estimated_coord": true}, {"lat": 35.66508933592508, "lng": 139.81683419807683, "day": 6, "date": "2026-09-15", "city": "Tokyo", "name": "Day 6.5 Hotel lunch restaurant at Hotel Livemax Tokyo Kiba", "type": "meal", "time": "12:00-13:00", "cost": 114, "estimated_coord": true}, {"lat": 35.674103851957696, "lng": 139.81021383100213, "day": 6, "date": "2026-09-15", "city": "Tokyo", "name": "Day 6.6 Hotel dinner restaurant at Hotel Livemax Tokyo Kiba", "type": "meal", "time": "18:00-19:00", "cost": 114, "estimated_coord": true}, {"lat": 35.671939273826105, "lng": 139.69566232795268, "day": 6, "date": "2026-09-15", "city": "Tokyo", "name": "Day 6.7 Return to Hotel Livemax Tokyo Kiba", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 31.226272923546166, "lng": 121.45363577004113, "day": 2, "date": "2026-09-16", "city": "Shanghai", "name": "Fly Tokyo (HND) -> Shanghai (PVG) [Economy]", "type": "flight", "time": "", "cost": 1929, "route_point": true, "estimated_coord": false}, {"lat": 35.6629848297081, "lng": 139.80900631134625, "day": 7, "date": "2026-09-16", "city": "Tokyo", "name": "Day 7.1 Check-out Hotel Livemax Tokyo Kiba", "type": "checkout", "time": "00:25-00:40", "cost": 0, "estimated_coord": true}, {"lat": 35.71032470530212, "lng": 139.70364028285834, "day": 7, "date": "2026-09-16", "city": "Tokyo", "name": "Day 7.2 Transfer Hotel Livemax Tokyo Kiba -> Haneda Airport", "type": "transfer", "time": "00:40-01:10", "cost": 210, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Beijing to Chengdu</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Beijing -> Chengdu</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-06-19 - 2026-06-21</b></div>
+          <div class="request-item"><span>Travelers</span><b>1</b></div>
+          <div class="request-item"><span>Budget</span><b>6000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>food: local; attractions: mixed</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-06-19 - 2026-06-21</strong></div>
+        <div><span>Travelers</span><strong>1</strong></div>
+        <div><span>Budget</span><strong>6000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>5940 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>3656 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>1020 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>1264 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>0 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>5940 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-06-19 | Chengdu</h2></div><strong>2600 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Felton Gloria Grand Hotel Chengdu</strong><span>340 CNY</span></div><ul class="event-list"><li><span class="time">08:25 - 11:20</span><span class="event-name">Flight Beijing -&gt; Chengdu</span><span class="event-type">Flight (Economy)</span><span class="cost">1920 CNY</span></li><li><span class="time">13:30 - 13:45</span><span class="event-name">Check-in Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">17:45 - 18:00</span><span class="event-name">Transfer from Felton Gloria Grand Hotel Chengdu to first stop</span><span class="event-type">Transfer</span><span class="cost">30 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Meal</span><span class="cost">280 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Transfer</span><span class="cost">30 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-06-20 | Chengdu</h2></div><strong>1047 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Felton Gloria Grand Hotel Chengdu</strong><span>340 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Meal</span><span class="cost">97 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Meal</span><span class="cost">271 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Hotel dinner restaurant at Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Meal</span><span class="cost">280 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Hotel dinner restaurant at Felton Gloria Grand Hotel Chengdu -&gt; Chengdu night view walk near Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Transfer</span><span class="cost">30 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">Chengdu night view walk near Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Transfer</span><span class="cost">30 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-06-21 | Chengdu</h2></div><strong>1953 CNY</strong></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Meal</span><span class="cost">97 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Meal</span><span class="cost">240 CNY</span></li><li><span class="time">18:02 - 18:17</span><span class="event-name">Check-out Felton Gloria Grand Hotel Chengdu</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">18:17 - 19:10</span><span class="event-name">Transfer Felton Gloria Grand Hotel Chengdu -&gt; Chengdu Tianfu International</span><span class="event-type">Transfer</span><span class="cost">106 CNY</span></li><li><span class="time">20:40 - 23:15</span><span class="event-name">Flight Chengdu -&gt; Beijing</span><span class="event-type">Flight (Economy)</span><span class="cost">1510 CNY</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 39.9075, "lng": 116.40323, "day": 0, "date": "", "city": "Beijing", "name": "Start: Beijing", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 30.66667, "lng": 104.06667, "day": 1, "date": "2026-06-19", "city": "Chengdu", "name": "Fly Beijing (PEK) -> Chengdu (TFU) [Economy]", "type": "flight", "time": "", "cost": 1920, "route_point": true}, {"lat": 30.6958017, "lng": 103.851735, "day": 1, "date": "2026-06-19", "city": "Chengdu", "name": "Day 1.2 Check-in Felton Gloria Grand Hotel Chengdu", "type": "checkin", "time": "13:30-13:45", "cost": 0, "estimated_coord": false}, {"lat": 30.66667, "lng": 104.07267, "day": 1, "date": "2026-06-19", "city": "Chengdu", "name": "Day 1.3 Transfer from Felton Gloria Grand Hotel Chengdu to first stop", "type": "transfer", "time": "17:45-18:00", "cost": 30, "estimated_coord": true}, {"lat": 30.699854623546166, "lng": 103.84131077004113, "day": 1, "date": "2026-06-19", "city": "Chengdu", "name": "Day 1.4 Hotel dinner restaurant at Felton Gloria Grand Hotel Chengdu", "type": "meal", "time": "18:00-19:00", "cost": 280, "estimated_coord": true}, {"lat": 30.670722923546165, "lng": 104.06224577004113, "day": 1, "date": "2026-06-19", "city": "Chengdu", "name": "Day 1.5 Return to Felton Gloria Grand Hotel Chengdu", "type": "transfer", "time": "19:00-19:15", "cost": 30, "estimated_coord": true}, {"lat": 30.689824678075354, "lng": 103.84625960357631, "day": 2, "date": "2026-06-20", "city": "Chengdu", "name": "Day 2.1 Hotel breakfast cafe at Felton Gloria Grand Hotel Chengdu", "type": "meal", "time": "08:00-08:40", "cost": 97, "estimated_coord": true}, {"lat": 30.700563349608444, "lng": 103.84938557433925, "day": 2, "date": "2026-06-20", "city": "Chengdu", "name": "Day 2.2 Hotel lunch restaurant at Felton Gloria Grand Hotel Chengdu", "type": "meal", "time": "12:00-13:00", "cost": 271, "estimated_coord": true}, {"lat": 30.694756510974212, "lng": 103.8398267363041, "day": 2, "date": "2026-06-20", "city": "Chengdu", "name": "Day 2.3 Hotel dinner restaurant at Felton Gloria Grand Hotel Chengdu", "type": "meal", "time": "18:00-19:00", "cost": 280, "estimated_coord": true}, {"lat": 30.660692978075353, "lng": 104.06719460357631, "day": 2, "date": "2026-06-20", "city": "Chengdu", "name": "Day 2.4 Transfer Hotel dinner restaurant at Felton Gloria Grand Hotel Chengdu -> Chengdu night view walk near Felton Gloria Grand Hotel Chengdu", "type": "transfer", "time": "19:00-19:15", "cost": 30, "estimated_coord": true}, {"lat": 30.692581435925078, "lng": 103.85079759807687, "day": 2, "date": "2026-06-20", "city": "Chengdu", "name": "Day 2.5 Chengdu night view walk near Felton Gloria Grand Hotel Chengdu", "type": "poi", "time": "19:15-21:00", "cost": 0, "estimated_coord": true}, {"lat": 30.671431649608444, "lng": 104.07032057433925, "day": 2, "date": "2026-06-20", "city": "Chengdu", "name": "Day 2.6 Return to Felton Gloria Grand Hotel Chengdu", "type": "transfer", "time": "21:00-21:15", "cost": 30, "estimated_coord": true}, {"lat": 39.91155292354617, "lng": 116.39280577004112, "day": 2, "date": "2026-06-21", "city": "Beijing", "name": "Fly Chengdu (TFU) -> Beijing (PEK) [Economy]", "type": "flight", "time": "", "cost": 1510, "route_point": true, "estimated_coord": false}, {"lat": 30.7015959519577, "lng": 103.84417723100213, "day": 3, "date": "2026-06-21", "city": "Chengdu", "name": "Day 3.1 Hotel breakfast cafe at Felton Gloria Grand Hotel Chengdu", "type": "meal", "time": "08:00-08:40", "cost": 97, "estimated_coord": true}, {"lat": 30.690476929708097, "lng": 103.84296971134627, "day": 3, "date": "2026-06-21", "city": "Chengdu", "name": "Day 3.2 Hotel lunch restaurant at Felton Gloria Grand Hotel Chengdu", "type": "meal", "time": "12:00-13:00", "cost": 240, "estimated_coord": true}, {"lat": 30.699918534917618, "lng": 103.85700671993358, "day": 3, "date": "2026-06-21", "city": "Chengdu", "name": "Day 3.3 Check-out Felton Gloria Grand Hotel Chengdu", "type": "checkout", "time": "18:02-18:17", "cost": 0, "estimated_coord": true}, {"lat": 30.66562481097421, "lng": 104.0607617363041, "day": 3, "date": "2026-06-21", "city": "Chengdu", "name": "Day 3.4 Transfer Felton Gloria Grand Hotel Chengdu -> Chengdu Tianfu International", "type": "transfer", "time": "18:17-19:10", "cost": 106, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

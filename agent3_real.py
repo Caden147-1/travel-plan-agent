@@ -5,6 +5,7 @@ import itertools
 import math
 import os
 import re
+import time
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
@@ -20,11 +21,40 @@ DASHSCOPE_CHAT_BASE_URL = os.getenv(
     "DASHSCOPE_CHAT_BASE_URL",
     "https://dashscope.aliyuncs.com/compatible-mode/v1"
 )
-FLIGHT_LOOKAHEAD_DAYS = int(os.getenv("TRAVEL_FLIGHT_LOOKAHEAD_DAYS", "183"))
+FLIGHT_FAR_FUTURE_WARNING_DAYS = int(os.getenv("TRAVEL_FLIGHT_FAR_FUTURE_WARNING_DAYS", "183"))
 
 BASE_DIR = Path(__file__).resolve().parent
 AIRPORT_MAPPING_PATH = BASE_DIR / "global_airports.json"
 CITY_CENTROIDS_PATH = BASE_DIR / "cities15000.txt"
+COUNTRY_INFO_PATH = BASE_DIR / "countryInfo.txt"
+CITY_GEOCODE_CACHE_PATH = BASE_DIR / "city_geocode_cache.json"
+GOOGLE_GEOCODE_URL = "https://maps.googleapis.com/maps/api/geocode/json"
+
+CITY_COORD_OVERRIDES: Dict[str, Dict[str, Any]] = {
+    # GeoNames cities15000 excludes some small but high-demand travel towns.
+    # Keep these as coordinate-only fallbacks so normal nearby-airport ranking
+    # can still choose the best gateway airport.
+    "hallstatt": {
+        "name": "Hallstatt",
+        "asciiname": "Hallstatt",
+        "lat": 47.5622,
+        "lng": 13.6493,
+        "feature_code": "PPL",
+        "country_code": "AT",
+        "population": 780,
+        "source": "city_coord_override",
+    },
+    "bali": {
+        "name": "Bali",
+        "asciiname": "Bali",
+        "lat": -8.4095,
+        "lng": 115.1889,
+        "feature_code": "ADM1",
+        "country_code": "ID",
+        "population": 4317404,
+        "source": "city_coord_override",
+    },
+}
 
 if not GOOGLE_MAPS_API_KEY:
     raise ValueError("Please set GOOGLE_MAPS_API_KEY in your environment variables first.")
@@ -150,6 +180,18 @@ class Agent3Selection:
         self.attraction_priority = self._normalize_text(
             self.raw_planning_signals.get("attraction_intensity")
         ).lower()
+        self.maximize_experience = bool(self.parsed_request.get("budget_maximize_experience")) or (
+            self._normalize_text(self.raw_planning_signals.get("budget_discipline")).lower()
+            == "maximize_experience"
+        )
+        self.minimum_executable_recovery = (
+            self._normalize_text(self.raw_planning_signals.get("budget_recovery_mode")).lower()
+            == "minimum_executable"
+        )
+        self.experience_within_cap_recovery = (
+            self._normalize_text(self.raw_planning_signals.get("budget_recovery_mode")).lower()
+            == "experience_within_cap"
+        )
 
         # Agent2 normalized preferences
         self.normalized_preferences = (
@@ -224,13 +266,23 @@ class Agent3Selection:
         self.local_food_llm_enabled = bool(DASHSCOPE_API_KEY)
         self.local_food_keyword_cache: Dict[str, Dict[str, Any]] = {}
         self.restaurant_tier_cache: Dict[str, Dict[str, Any]] = {}
+        self.timing_enabled = self._normalize_text(os.getenv("TRAVEL_AGENT3_TIMING", "true")).lower() not in {
+            "0",
+            "false",
+            "no",
+            "off",
+        }
 
         self.airports_by_iata = self._load_airport_mapping()
         self.city_airport_index = self._build_city_airport_index()
         self.city_centroid_index = self._load_city_centroids()
+        self.city_geocode_cache = self._load_city_geocode_cache()
+        self.country_code_index = self._load_country_code_index()
 
         self.effective_cities = self._extract_effective_cities()
         self.destination = [item["city"] for item in self.effective_cities]
+        self.destination_city_keys = {self._normalize_city_key(city) for city in self.destination if city}
+        self.destination_country_code = self._resolve_destination_country_code()
 
         self.city_budget_plan, self.budget_source = self._extract_city_budget_plan()
         self.city_date_ranges = self._build_city_date_ranges()
@@ -240,10 +292,16 @@ class Agent3Selection:
         self.rooms_needed = max(1, math.ceil(self.num_people / 2))
 
         self.budget_pressure_mode = (
-            self._normalize_text(self.normalized_preferences.get("budget_pressure_mode")).lower() == "yes"
-            or self._normalize_text(self.raw_planning_signals.get("budget_discipline")).lower() == "cap"
-            or self._normalize_text(self.budget_strategy).lower() == "tight"
+            not self.maximize_experience
+            and (
+                self._normalize_text(self.normalized_preferences.get("budget_pressure_mode")).lower() == "yes"
+                or self._normalize_text(self.raw_planning_signals.get("budget_discipline")).lower() == "cap"
+                or self._normalize_text(self.budget_strategy).lower() == "tight"
+            )
         )
+        self.allow_paid_attractions = self._normalize_text(
+            self.raw_planning_signals.get("allow_paid_attractions")
+        ).lower() not in {"no", "false", "0", "free_only", "remove_paid"}
 
         self.flight_selected_limit = 1
         self.flight_budget_tolerance = 1.15
@@ -255,9 +313,36 @@ class Agent3Selection:
         self.target_budget_utilization_max = 0.90
         self.min_flight_distance_km = 180.0
         self.flight_buffer_hours = 2.0
-        self.max_direct_drive_hours_for_auto_drive = 4.0
+        self.max_direct_drive_hours_for_auto_drive = max(
+            1.0,
+            self._safe_float(os.getenv("TRAVEL_MAX_DIRECT_DRIVE_HOURS_FOR_AUTO_DRIVE"), 4.0),
+        )
+        self.max_ground_preferred_hours_if_flight_not_better = max(
+            self.max_direct_drive_hours_for_auto_drive,
+            self._safe_float(os.getenv("TRAVEL_MAX_GROUND_PREFERRED_HOURS_IF_FLIGHT_NOT_BETTER"), 6.0),
+        )
         self.nearby_airport_radius_km = 220.0
         self.max_nearby_airport_candidates = 5
+        self.max_flight_search_airports_per_city = max(
+            1,
+            self._safe_int(os.getenv("TRAVEL_MAX_FLIGHT_SEARCH_AIRPORTS_PER_CITY"), 3),
+        )
+        self.max_intercity_flight_search_airports_per_city = max(
+            1,
+            self._safe_int(os.getenv("TRAVEL_MAX_INTERCITY_FLIGHT_SEARCH_AIRPORTS_PER_CITY"), 1),
+        )
+        self.max_flight_search_airport_pairs = max(
+            1,
+            self._safe_int(os.getenv("TRAVEL_MAX_FLIGHT_SEARCH_AIRPORT_PAIRS"), 4),
+        )
+        self.max_intercity_flight_search_airport_pairs = max(
+            1,
+            self._safe_int(os.getenv("TRAVEL_MAX_INTERCITY_FLIGHT_SEARCH_AIRPORT_PAIRS"), 1),
+        )
+        self.flight_search_max_results = max(
+            8,
+            self._safe_int(os.getenv("TRAVEL_FLIGHT_SEARCH_MAX_RESULTS"), 16),
+        )
         self.drive_metrics_cache: Dict[str, Dict[str, Any]] = {}
 
         self.prefer_direct_price_gap_ratio = 0.15
@@ -292,6 +377,23 @@ class Agent3Selection:
                 self.flight_priority = "high"
                 self.flight_type = "business_class"
                 self.flight_relaxed_budget_tolerance = max(self.flight_relaxed_budget_tolerance, 1.45)
+        if self.maximize_experience:
+            self.hotel_pref = "luxury"
+            self.hotel_level = "premium"
+            self.hotel_level_rich = "luxury"
+            self.hotel_target_level = "luxury"
+            self.food_pref = "fine_dining"
+            self.food_level = "premium"
+            self.wants_fine_dining_target = True
+            if "fine_dining" not in self.food_preferences:
+                self.food_preferences.append("fine_dining")
+            self.attraction_intensity = "heavy"
+            self.attraction_priority = "high"
+            self.hotel_budget_tolerance = max(self.hotel_budget_tolerance, 1.60)
+            self.restaurant_budget_tolerance = max(self.restaurant_budget_tolerance, 1.35)
+            self.poi_budget_tolerance = max(self.poi_budget_tolerance, 1.25)
+            self.flight_relaxed_budget_tolerance = max(self.flight_relaxed_budget_tolerance, 1.35)
+            self.strict_preference_filtering = True
         if self.budget_pressure_mode:
             if not self.flight_cabin_locked:
                 self.flight_pref = "cheap"
@@ -309,8 +411,23 @@ class Agent3Selection:
             self.poi_budget_tolerance = 1.00
             self.prefer_direct_price_gap_ratio = 0.05
             self.strict_preference_filtering = False
+            if self.minimum_executable_recovery:
+                self.attraction_intensity = "minimum"
+                self.attraction_priority = "minimum"
+            elif self.experience_within_cap_recovery:
+                self.attraction_intensity = "heavy"
+                self.attraction_priority = "high"
+                self.restaurant_budget_tolerance = max(self.restaurant_budget_tolerance, 1.10)
+                self.poi_budget_tolerance = max(self.poi_budget_tolerance, 1.80)
 
         self.selection_policy = self._build_selection_policy()
+
+    def _timing_log(self, message: str) -> None:
+        if self.timing_enabled:
+            print(f"[agent3] {message}", flush=True)
+
+    def _elapsed_seconds(self, started_at: float) -> float:
+        return time.perf_counter() - started_at
 
     # =========================================================
     # basic helpers
@@ -477,6 +594,12 @@ class Agent3Selection:
         text = re.sub(r"\s+", " ", text)
         return text
 
+    def _normalize_country_key(self, text: Any) -> str:
+        text = self._normalize_text(text).lower().strip()
+        text = re.sub(r"[^a-z0-9]+", " ", text)
+        text = re.sub(r"\s+", " ", text).strip()
+        return text
+
     def _geonames_feature_rank(self, feature_code: str) -> int:
         """Prefer capital / admin centers / populated places."""
         rank_map = {
@@ -553,14 +676,14 @@ class Agent3Selection:
                         if alias:
                             aliases.add(self._normalize_alias_key(alias))
 
-                    for alias_key in aliases:
+                    def put(alias_key: str) -> None:
                         if not alias_key:
-                            continue
+                            return
 
                         existing = index.get(alias_key)
                         if existing is None:
                             index[alias_key] = record
-                            continue
+                            return
 
                         old_rank = self._geonames_feature_rank(existing.get("feature_code", ""))
                         new_rank = self._geonames_feature_rank(record.get("feature_code", ""))
@@ -569,19 +692,207 @@ class Agent3Selection:
                             new_rank == old_rank and record["population"] > existing.get("population", 0)
                         ):
                             index[alias_key] = record
+
+                    for alias_key in aliases:
+                        if not alias_key:
+                            continue
+                        put(alias_key)
+                        if record["country_code"]:
+                            put(f"{alias_key}|{record['country_code']}")
         except Exception:
             return {}
 
         return index
 
-    def _get_city_centroid(self, city: str) -> Optional[Dict[str, Any]]:
+    def _city_geocode_cache_key(self, city: Any, country_hint: Optional[str] = None) -> str:
+        city_key = self._normalize_alias_key(city)
+        country_key = self._normalize_text(country_hint).upper()
+        return f"{city_key}|{country_key}" if country_key else city_key
+
+    def _load_city_geocode_cache(self) -> Dict[str, Dict[str, Any]]:
+        if not CITY_GEOCODE_CACHE_PATH.exists():
+            return {}
+        try:
+            with CITY_GEOCODE_CACHE_PATH.open("r", encoding="utf-8") as f:
+                raw = json.load(f)
+            return raw if isinstance(raw, dict) else {}
+        except Exception:
+            return {}
+
+    def _save_city_geocode_cache(self) -> None:
+        try:
+            with CITY_GEOCODE_CACHE_PATH.open("w", encoding="utf-8") as f:
+                json.dump(self.city_geocode_cache, f, ensure_ascii=False, indent=2, sort_keys=True)
+        except Exception:
+            pass
+
+    def _geocode_city_centroid(
+        self,
+        city: str,
+        country_hint: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         city_key = self._normalize_alias_key(city)
         if not city_key:
             return None
-        return self.city_centroid_index.get(city_key)
+
+        cache_key = self._city_geocode_cache_key(city, country_hint)
+        cached = self.city_geocode_cache.get(cache_key)
+        if isinstance(cached, dict):
+            return cached
+
+        params: Dict[str, Any] = {
+            "address": f"{self._normalize_text(city)}, {self._normalize_text(country_hint).upper()}".strip(", "),
+            "key": GOOGLE_MAPS_API_KEY,
+        }
+        hinted_country = self._normalize_text(country_hint).upper()
+        if hinted_country:
+            params["components"] = f"country:{hinted_country}"
+
+        try:
+            response = requests.get(GOOGLE_GEOCODE_URL, params=params, timeout=8)
+            if response.status_code != 200:
+                return None
+            data = response.json() if response.text else {}
+            results = data.get("results") if isinstance(data, dict) else []
+            first = results[0] if results and isinstance(results[0], dict) else {}
+            location = ((first.get("geometry") or {}).get("location") or {}) if isinstance(first, dict) else {}
+            lat = self._safe_float(location.get("lat"), 0.0)
+            lng = self._safe_float(location.get("lng"), 0.0)
+            if lat == 0.0 and lng == 0.0:
+                return None
+            country_code = hinted_country
+            for component in first.get("address_components") or []:
+                types = component.get("types") or []
+                if "country" in types:
+                    country_code = self._normalize_text(component.get("short_name")).upper() or country_code
+                    break
+            record = {
+                "name": self._normalize_text(city),
+                "asciiname": self._normalize_text(city),
+                "lat": lat,
+                "lng": lng,
+                "feature_code": "PPL",
+                "country_code": country_code,
+                "population": 0,
+                "source": "google_geocode_cache",
+            }
+            self.city_geocode_cache[cache_key] = record
+            if hinted_country:
+                self.city_geocode_cache.setdefault(city_key, record)
+            self._save_city_geocode_cache()
+            return record
+        except Exception:
+            return None
+
+    def _load_country_code_index(self) -> Dict[str, str]:
+        index: Dict[str, str] = {}
+
+        def add_alias(alias: Any, country_code: str) -> None:
+            code = self._normalize_text(country_code).upper()
+            key = self._normalize_country_key(alias)
+            if not code or not key:
+                return
+            index[key] = code
+            compact_key = key.replace(" ", "")
+            if compact_key:
+                index[compact_key] = code
+
+        common_aliases = {
+            "usa": "US",
+            "u.s.": "US",
+            "u.s.a.": "US",
+            "america": "US",
+            "uk": "GB",
+            "u.k.": "GB",
+            "britain": "GB",
+            "great britain": "GB",
+            "england": "GB",
+            "uae": "AE",
+            "u.a.e.": "AE",
+            "korea": "KR",
+            "south korea": "KR",
+        }
+        for alias, code in common_aliases.items():
+            add_alias(alias, code)
+
+        if not COUNTRY_INFO_PATH.exists():
+            return index
+
+        try:
+            with open(COUNTRY_INFO_PATH, "r", encoding="utf-8") as f:
+                for line in f:
+                    if not line or line.startswith("#"):
+                        continue
+                    parts = line.rstrip("\n").split("\t")
+                    if len(parts) < 5:
+                        continue
+                    iso2 = self._normalize_text(parts[0]).upper()
+                    if not iso2:
+                        continue
+                    add_alias(iso2, iso2)
+                    add_alias(parts[1] if len(parts) > 1 else "", iso2)
+                    add_alias(parts[3] if len(parts) > 3 else "", iso2)
+                    add_alias(parts[4] if len(parts) > 4 else "", iso2)
+        except Exception:
+            return index
+
+        return index
+
+    def _country_code_from_text(self, value: Any) -> Optional[str]:
+        key = self._normalize_country_key(value)
+        if not key:
+            return None
+        return self.country_code_index.get(key) or self.country_code_index.get(key.replace(" ", ""))
+
+    def _city_country_code(self, city: str) -> Optional[str]:
+        centroid = self._get_city_centroid(city)
+        country_code = self._normalize_text((centroid or {}).get("country_code")).upper()
+        return country_code or None
+
+    def _resolve_destination_country_code(self) -> Optional[str]:
+        candidates: List[Any] = [
+            self.parsed_request.get("country"),
+            self.raw_input.get("country"),
+            ((self.raw_input.get("trip_summary") or {}).get("country") if isinstance(self.raw_input.get("trip_summary"), dict) else None),
+        ]
+        for value in candidates:
+            country_code = self._country_code_from_text(value)
+            if country_code:
+                return country_code
+        return None
+
+    def _country_hint_for_city(self, city: str) -> Optional[str]:
+        city_key = self._normalize_city_key(city)
+        if city_key in self.destination_city_keys and self.destination_country_code:
+            return self.destination_country_code
+        return self._city_country_code(city)
+
+    def _get_city_centroid(self, city: str, country_hint: Optional[str] = None) -> Optional[Dict[str, Any]]:
+        city_key = self._normalize_alias_key(city)
+        if not city_key:
+            return None
+        hinted_country = self._normalize_text(country_hint).upper()
+        if hinted_country:
+            hinted = self.city_centroid_index.get(f"{city_key}|{hinted_country}")
+            if hinted:
+                return hinted
+            override = CITY_COORD_OVERRIDES.get(city_key)
+            if override and self._normalize_text(override.get("country_code")).upper() == hinted_country:
+                return override
+        override = CITY_COORD_OVERRIDES.get(city_key)
+        if override:
+            return override
+        centroid = self.city_centroid_index.get(city_key)
+        if centroid:
+            return centroid
+        cache_key = self._city_geocode_cache_key(city, country_hint)
+        cached = self.city_geocode_cache.get(cache_key) or self.city_geocode_cache.get(city_key)
+        if isinstance(cached, dict):
+            return cached
+        return self._geocode_city_centroid(city, country_hint)
 
     def _get_city_location_bias(self, city: str) -> Optional[Dict[str, float]]:
-        centroid = self._get_city_centroid(city)
+        centroid = self._get_city_centroid(city, self._country_hint_for_city(city))
         if not centroid:
             return None
 
@@ -591,8 +902,8 @@ class Agent3Selection:
             "radius_m": 30000
         }
 
-    def _city_coord(self, city: str) -> Optional[Dict[str, float]]:
-        centroid = self._get_city_centroid(city)
+    def _city_coord(self, city: str, country_hint: Optional[str] = None) -> Optional[Dict[str, float]]:
+        centroid = self._get_city_centroid(city, country_hint or self._country_hint_for_city(city))
         if not centroid:
             return None
         return {
@@ -697,10 +1008,16 @@ class Agent3Selection:
         self.drive_metrics_cache[cache_key] = result
         return result
 
-    def _estimate_city_drive_metrics(self, from_city: str, to_city: str) -> Optional[Dict[str, Any]]:
+    def _estimate_city_drive_metrics(
+        self,
+        from_city: str,
+        to_city: str,
+        from_country_hint: Optional[str] = None,
+        to_country_hint: Optional[str] = None,
+    ) -> Optional[Dict[str, Any]]:
         return self._estimate_drive_metrics_between_coords(
-            self._city_coord(from_city),
-            self._city_coord(to_city),
+            self._city_coord(from_city, from_country_hint),
+            self._city_coord(to_city, to_country_hint),
         )
 
     def _estimate_city_airport_drive_metrics(self, city: str, iata: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -715,7 +1032,7 @@ class Agent3Selection:
         if not address_text:
             return "unknown"
 
-        centroid = self._get_city_centroid(city)
+        centroid = self._get_city_centroid(city, self._country_hint_for_city(city))
         city_key = self._normalize_alias_key(city)
 
         if not centroid:
@@ -778,7 +1095,7 @@ class Agent3Selection:
         loose_km: float = 80.0
     ) -> str:
         """Return near / far / unknown."""
-        centroid = self._get_city_centroid(city)
+        centroid = self._get_city_centroid(city, self._country_hint_for_city(city))
         if not centroid:
             return "unknown"
 
@@ -798,6 +1115,17 @@ class Agent3Selection:
         address = self._normalize_text(place.get("formattedAddress"))
         distance_signal = self._place_is_near_target_city(place, city)
         address_signal = self._address_geo_signal(address, city)
+        types = {
+            self._normalize_text(t).lower()
+            for t in (place.get("types") or [])
+            if self._normalize_text(t)
+        }
+        restaurant_like = (
+            "restaurant" in types
+            or "food" in types
+            or "meal_takeaway" in types
+            or any(t.endswith("_restaurant") for t in types)
+        )
 
         if distance_signal == "near":
             return True
@@ -809,6 +1137,8 @@ class Agent3Selection:
         if address_signal == "mismatch":
             return False
         if address_signal == "weak_match":
+            return True
+        if restaurant_like:
             return True
 
         return False
@@ -856,19 +1186,20 @@ class Agent3Selection:
 
     def _candidate_limits_by_days(self, city_days: int) -> Dict[str, int]:
         city_days = max(1, city_days)
+        restaurant_target = self._restaurant_target_count(city_days)
         limits = {
             "hotel_candidates": max(6, city_days * 3),
-            "restaurant_candidates": max(8, city_days * 4),
+            "restaurant_candidates": max(3, city_days * 3),
             "poi_candidates": max(8, city_days * 4),
             "hotel_selected": 2,
-            "restaurant_selected": self._restaurant_target_count(city_days),
+            "restaurant_selected": restaurant_target,
             "poi_selected": self._poi_limit_by_intensity(city_days),
         }
         if self.refinement_mode:
             if "hotel" in self.refinement_targets:
                 limits["hotel_candidates"] = max(limits["hotel_candidates"], city_days * 5, 12)
             if "food" in self.refinement_targets:
-                limits["restaurant_candidates"] = max(limits["restaurant_candidates"], city_days * 6, 14)
+                limits["restaurant_candidates"] = max(3, city_days * 3)
             if "attractions" in self.refinement_targets:
                 limits["poi_candidates"] = max(limits["poi_candidates"], city_days * 6, 14)
         return limits
@@ -917,6 +1248,25 @@ class Agent3Selection:
         }
         return rank_map.get(self._normalize_text(airport_type).lower(), 0)
 
+    def _airport_city_key_matches(self, city_key: str, airport_city_key: str) -> bool:
+        if not city_key or not airport_city_key:
+            return False
+        if city_key == airport_city_key:
+            return True
+        if len(city_key) < 5 and len(airport_city_key) < 5:
+            return False
+        city_tokens = set(city_key.split())
+        airport_tokens = set(airport_city_key.split())
+        if city_tokens and airport_tokens and (
+            city_tokens.issubset(airport_tokens) or airport_tokens.issubset(city_tokens)
+        ):
+            return True
+        if len(city_key) >= 5 and city_key in airport_city_key:
+            return True
+        if len(airport_city_key) >= 5 and airport_city_key in city_key:
+            return True
+        return False
+
     def _build_city_airport_index(self) -> Dict[str, List[Dict[str, Any]]]:
         city_index: Dict[str, List[Dict[str, Any]]] = {}
 
@@ -942,19 +1292,57 @@ class Agent3Selection:
             )
         return city_index
 
-    def _get_city_airport_candidates(self, city: str) -> List[Dict[str, Any]]:
+    def _airport_sort_key(
+        self,
+        city: str,
+        airport: Dict[str, Any],
+        country_hint: Optional[str] = None,
+    ) -> Tuple[int, int, int, float, str]:
+        airport_country = self._normalize_text(airport.get("country")).upper()
         city_key = self._normalize_city_key(city)
-        direct = self.city_airport_index.get(city_key, [])
-        if direct:
-            preferred = [
-                a for a in direct
-                if a.get("type") in {"large_airport", "medium_airport", "small_airport"}
-            ]
-            return preferred or direct
+        airport_city_key = self._normalize_city_key(airport.get("city"))
+        airport_name_key = self._normalize_city_key(airport.get("name"))
+        hinted_country = self._normalize_text(country_hint).upper()
 
+        country_mismatch = 0
+        if hinted_country:
+            country_mismatch = 0 if airport_country == hinted_country else 1
+
+        city_relevance = 1
+        if city_key and (
+            self._airport_city_key_matches(city_key, airport_city_key)
+            or (len(city_key) >= 5 and city_key in airport_name_key)
+        ):
+            city_relevance = 0
+
+        distance_km = 99999.0
+        city_coord = self._city_coord(city)
+        if city_coord:
+            lat = self._safe_float(airport.get("lat"), 0.0)
+            lng = self._safe_float(airport.get("lng"), 0.0)
+            if lat or lng:
+                distance_km = self._haversine_distance_km(city_coord["lat"], city_coord["lng"], lat, lng)
+
+        return (
+            country_mismatch,
+            city_relevance,
+            -self._airport_type_rank(airport.get("type", "")),
+            distance_km,
+            self._normalize_text(airport.get("name")),
+        )
+
+    def _get_city_airport_candidates(
+        self,
+        city: str,
+        country_hint: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
+        city_key = self._normalize_city_key(city)
         matched: List[Dict[str, Any]] = []
+        direct = self.city_airport_index.get(city_key, [])
+        matched.extend(direct)
+
         for indexed_city_key, airports in self.city_airport_index.items():
-            if city_key and (city_key in indexed_city_key or indexed_city_key in city_key):
+            if self._airport_city_key_matches(city_key, indexed_city_key):
                 matched.extend(airports)
 
         dedup: Dict[str, Dict[str, Any]] = {}
@@ -963,15 +1351,18 @@ class Agent3Selection:
             if iata and iata not in dedup:
                 dedup[iata] = airport
 
-        result = list(dedup.values())
-        result.sort(
-            key=lambda x: (
-                self._airport_type_rank(x.get("type", "")),
-                len(self._normalize_text(x.get("name"))),
-                self._normalize_text(x.get("iata")),
-            ),
-            reverse=True,
-        )
+        result = [
+            airport for airport in dedup.values()
+            if airport.get("type") in {"large_airport", "medium_airport", "small_airport"}
+        ] or list(dedup.values())
+        resolved_country_hint = self._normalize_text(country_hint).upper() or self._country_hint_for_city(city)
+        if resolved_country_hint:
+            country_matched = [
+                airport for airport in result
+                if self._normalize_text(airport.get("country")).upper() == resolved_country_hint
+            ]
+            result = country_matched
+        result.sort(key=lambda x: self._airport_sort_key(city, x, resolved_country_hint))
         return result
 
     def city_to_primary_airport(self, city: str) -> Optional[str]:
@@ -980,19 +1371,111 @@ class Agent3Selection:
             return None
         return self._normalize_text(candidates[0].get("iata")).upper() or None
 
-    def city_to_candidate_airports(self, city: str) -> List[str]:
-        candidates = self._get_city_airport_candidates(city)
+    def city_to_candidate_airports(self, city: str, country_hint: Optional[str] = None) -> List[str]:
+        candidates = self._get_city_airport_candidates(city, country_hint)
         return [
             self._normalize_text(item.get("iata")).upper()
             for item in candidates
             if self._normalize_text(item.get("iata"))
         ][:8]
 
-    def city_to_nearby_airport_candidates(self, city: str) -> List[Dict[str, Any]]:
+    def _rank_airport_codes_for_city(
+        self,
+        city: str,
+        airport_codes: List[str],
+        country_hint: Optional[str] = None,
+    ) -> List[str]:
+        city_coord = self._city_coord(city)
+        seen = set()
+        ranked: List[Tuple[int, int, float, str, str]] = []
+        hinted_country = self._normalize_text(country_hint).upper() or self._country_hint_for_city(city) or ""
+
+        for code in airport_codes:
+            iata = self._normalize_text(code).upper()
+            if not iata or iata in seen:
+                continue
+            seen.add(iata)
+            airport = self.get_airport_info(iata) or {}
+            airport_type_rank = self._airport_type_rank(airport.get("type", ""))
+            airport_country = self._normalize_text(airport.get("country")).upper()
+            country_mismatch = 0 if not hinted_country or airport_country == hinted_country else 1
+            distance_km = 99999.0
+            if city_coord and airport:
+                lat = self._safe_float(airport.get("lat"), 0.0)
+                lng = self._safe_float(airport.get("lng"), 0.0)
+                if lat or lng:
+                    distance_km = self._haversine_distance_km(city_coord["lat"], city_coord["lng"], lat, lng)
+            ranked.append((
+                country_mismatch,
+                -airport_type_rank,
+                distance_km,
+                self._normalize_text(airport.get("name")),
+                iata,
+            ))
+
+        ranked.sort()
+        return [item[4] for item in ranked]
+
+    def _flight_airport_limit_for_leg(self, leg: Dict[str, Any]) -> int:
+        if self._normalize_text(leg.get("leg_type")) == "intercity":
+            if self.flight_pref == "direct" and not self.budget_pressure_mode:
+                return max(2, self.max_intercity_flight_search_airports_per_city)
+            return self.max_intercity_flight_search_airports_per_city
+        if self.flight_pref == "direct" and not self.budget_pressure_mode:
+            return max(3, self.max_flight_search_airports_per_city)
+        return self.max_flight_search_airports_per_city
+
+    def _flight_airport_pair_limit_for_leg(self, leg: Dict[str, Any]) -> int:
+        if self._normalize_text(leg.get("leg_type")) == "intercity":
+            if self.flight_pref == "direct" and not self.budget_pressure_mode:
+                return max(4, self.max_intercity_flight_search_airport_pairs)
+            return self.max_intercity_flight_search_airport_pairs
+        if self.flight_pref == "direct" and not self.budget_pressure_mode:
+            return max(6, self.max_flight_search_airport_pairs)
+        return self.max_flight_search_airport_pairs
+
+    def _airport_pairs_for_leg(
+        self,
+        leg: Dict[str, Any],
+        candidate_from_airports: List[str],
+        candidate_to_airports: List[str],
+    ) -> List[Tuple[str, str]]:
+        from_city = self._normalize_text(leg.get("from_city"))
+        to_city = self._normalize_text(leg.get("to_city"))
+        airport_limit = self._flight_airport_limit_for_leg(leg)
+        pair_limit = self._flight_airport_pair_limit_for_leg(leg)
+
+        ranked_from = self._rank_airport_codes_for_city(
+            from_city,
+            candidate_from_airports,
+            leg.get("from_country_hint"),
+        )[:airport_limit]
+        ranked_to = self._rank_airport_codes_for_city(
+            to_city,
+            candidate_to_airports,
+            leg.get("to_country_hint"),
+        )[:airport_limit]
+
+        pairs: List[Tuple[str, str]] = []
+        for departure_id in ranked_from:
+            for arrival_id in ranked_to:
+                if not departure_id or not arrival_id or departure_id == arrival_id:
+                    continue
+                pairs.append((departure_id, arrival_id))
+                if len(pairs) >= pair_limit:
+                    return pairs
+        return pairs
+
+    def city_to_nearby_airport_candidates(
+        self,
+        city: str,
+        country_hint: Optional[str] = None,
+    ) -> List[Dict[str, Any]]:
         city_coord = self._city_coord(city)
         if not city_coord:
             return []
 
+        hinted_country = self._normalize_text(country_hint).upper() or self._country_hint_for_city(city) or ""
         ranked: List[Dict[str, Any]] = []
         for airport in self.airports_by_iata.values():
             iata = self._normalize_text(airport.get("iata")).upper()
@@ -1000,6 +1483,8 @@ class Agent3Selection:
                 continue
             airport_type = self._normalize_text(airport.get("type")).lower()
             if airport_type not in {"large_airport", "medium_airport", "small_airport"}:
+                continue
+            if hinted_country and self._normalize_text(airport.get("country")).upper() != hinted_country:
                 continue
             airport_coord = {
                 "lat": self._safe_float(airport.get("lat"), 0.0),
@@ -1030,11 +1515,19 @@ class Agent3Selection:
         )
         return ranked[:self.max_nearby_airport_candidates]
 
-    def city_to_search_airport_candidates(self, city: str) -> Tuple[List[str], str]:
-        direct = self.city_to_candidate_airports(city)
+    def city_to_search_airport_candidates(
+        self,
+        city: str,
+        country_hint: Optional[str] = None,
+    ) -> Tuple[List[str], str]:
+        direct = self.city_to_candidate_airports(city, country_hint)
         if direct:
+            if self.flight_pref == "direct" and not self.budget_pressure_mode:
+                nearby = [item["iata"] for item in self.city_to_nearby_airport_candidates(city, country_hint)]
+                merged = list(dict.fromkeys(direct + nearby))
+                return merged, "city_airport_plus_nearby"
             return direct, "city_airport"
-        nearby = self.city_to_nearby_airport_candidates(city)
+        nearby = self.city_to_nearby_airport_candidates(city, country_hint)
         return [item["iata"] for item in nearby], "nearby_airport" if nearby else "no_airport"
 
     def get_airport_info(self, iata: Optional[str]) -> Optional[Dict[str, Any]]:
@@ -1081,7 +1574,7 @@ class Agent3Selection:
 
         direct_drive_h = self._safe_float(route.get("direct_drive_hours"), 0.0)
         if 0 < direct_drive_h <= self.max_direct_drive_hours_for_auto_drive:
-            return True, direct_drive_h, "direct_drive_under_4h"
+            return True, direct_drive_h, "direct_drive_under_auto_drive_limit"
 
         from_airport = route.get("from_airport")
         to_airport = route.get("to_airport")
@@ -1144,6 +1637,8 @@ class Agent3Selection:
                         "source": "agent2_city_budget_plan"
                     })
             if normalized:
+                if len(normalized) == 1 and normalized[0].get("days", 0) < self.duration_days:
+                    normalized[0]["days"] = self.duration_days
                 return normalized
 
         if isinstance(planned_cities, list) and planned_cities:
@@ -1165,6 +1660,12 @@ class Agent3Selection:
                             "source": "destination"
                         })
             if normalized:
+                if (
+                    len(normalized) == 1
+                    and city_plan_mode != "user_explicit_city_days"
+                    and normalized[0].get("days", 0) < self.duration_days
+                ):
+                    normalized[0]["days"] = self.duration_days
                 return normalized
 
         destination = self.parsed_request.get("destination") or self.raw_input.get("destination") or []
@@ -1224,6 +1725,8 @@ class Agent3Selection:
                     "cost_weights": item.get("cost_weights", {}) if isinstance(item.get("cost_weights"), dict) else {}
                 })
             if cleaned:
+                if len(cleaned) == 1 and cleaned[0].get("days", 0) < self.duration_days:
+                    cleaned[0]["days"] = self.duration_days
                 return cleaned, "city_budget_plan"
 
         if self.effective_cities and self.total_budget > 0 and self.final_ratio:
@@ -1424,9 +1927,16 @@ class Agent3Selection:
         return date_info.get("check_out")
 
     def _build_route(self, from_city: str, to_city: str, departure_date: Optional[str], leg_type: str, leg_index: int) -> Dict[str, Any]:
-        from_candidates, from_candidate_source = self.city_to_search_airport_candidates(from_city)
-        to_candidates, to_candidate_source = self.city_to_search_airport_candidates(to_city)
-        direct_drive_metrics = self._estimate_city_drive_metrics(from_city, to_city)
+        from_country_hint = self._country_hint_for_city(from_city)
+        to_country_hint = self._country_hint_for_city(to_city)
+        from_candidates, from_candidate_source = self.city_to_search_airport_candidates(from_city, from_country_hint)
+        to_candidates, to_candidate_source = self.city_to_search_airport_candidates(to_city, to_country_hint)
+        direct_drive_metrics = self._estimate_city_drive_metrics(
+            from_city,
+            to_city,
+            from_country_hint,
+            to_country_hint,
+        )
         direct_drive_hours = (
             self._safe_float(direct_drive_metrics.get("duration_h"), 0.0)
             if isinstance(direct_drive_metrics, dict)
@@ -1443,6 +1953,8 @@ class Agent3Selection:
             "candidate_to_airports": to_candidates,
             "from_airport_candidate_source": from_candidate_source,
             "to_airport_candidate_source": to_candidate_source,
+            "from_country_hint": from_country_hint,
+            "to_country_hint": to_country_hint,
             "departure_date": departure_date,
             "direct_drive_hours": round(direct_drive_hours, 2) if direct_drive_hours > 0 else None,
             "direct_drive_distance_km": (
@@ -1621,6 +2133,8 @@ class Agent3Selection:
         if not self.local_food_llm_enabled:
             return None
 
+        started = time.perf_counter()
+        self._timing_log(f"local_food_llm start city={city}")
         url = DASHSCOPE_CHAT_BASE_URL.rstrip("/") + "/chat/completions"
         headers = {
             "Content-Type": "application/json",
@@ -1674,6 +2188,8 @@ class Agent3Selection:
             }
         except Exception:
             return None
+        finally:
+            self._timing_log(f"local_food_llm done city={city} elapsed={self._elapsed_seconds(started):.2f}s")
 
     def get_local_food_profile(self, city: str) -> Dict[str, Any]:
         city_key = self._normalize_city_key(city)
@@ -1705,10 +2221,89 @@ class Agent3Selection:
             "source": "fallback_price_level",
         }
 
+    def _restaurant_price_variation_multiplier(
+        self,
+        restaurant: Dict[str, Any],
+        tier_result: Dict[str, Any],
+    ) -> float:
+        key = "|".join([
+            self._normalize_text(restaurant.get("city")),
+            self._normalize_text(restaurant.get("name")),
+            self._normalize_text(restaurant.get("area")),
+        ]).lower()
+        checksum = sum((idx + 1) * ord(ch) for idx, ch in enumerate(key))
+        multiplier = 0.88 + ((checksum % 29) / 100.0)
+
+        tier_price = self._safe_float(tier_result.get("tier_price_per_person"), 300.0)
+        if tier_price <= 120:
+            multiplier *= 0.72
+        elif tier_price <= 350:
+            multiplier *= 0.92
+        else:
+            multiplier *= 1.12
+
+        price_level = self._normalize_text(restaurant.get("price_level")).lower()
+        if "very_expensive" in price_level:
+            multiplier *= 1.25
+        elif "expensive" in price_level:
+            multiplier *= 1.12
+        elif "inexpensive" in price_level:
+            multiplier *= 0.78
+
+        name = self._normalize_text(restaurant.get("name")).lower()
+        query = self._normalize_text(restaurant.get("matched_query")).lower()
+        types_text = " ".join(
+            self._normalize_text(t).lower()
+            for t in (restaurant.get("types") or [])
+            if self._normalize_text(t)
+        )
+        signal_text = f"{name} {query} {types_text}"
+        upscale_terms = [
+            "fine dining",
+            "tasting",
+            "michelin",
+            "chef",
+            "table",
+            "omakase",
+            "rooms",
+            "grill",
+        ]
+        casual_terms = [
+            "cafe",
+            "casual",
+            "street food",
+            "market",
+            "permit room",
+            "bakery",
+            "deli",
+            "takeaway",
+        ]
+        if any(term in signal_text for term in upscale_terms):
+            multiplier *= 1.10
+        if any(term in signal_text for term in casual_terms):
+            multiplier *= 0.86
+
+        rating = self._safe_float(restaurant.get("rating"), 0.0)
+        review_count = self._safe_int(restaurant.get("user_ratings_total"), 0)
+        if rating >= 4.8 and review_count >= 100:
+            multiplier *= 1.08
+        elif rating >= 4.6 and review_count >= 50:
+            multiplier *= 1.04
+
+        return round(min(max(multiplier, 0.55), 1.55), 3)
+
+    def _restaurant_tier_cache_key(self, restaurant: Dict[str, Any]) -> str:
+        return (
+            f"{self._normalize_city_key(restaurant.get('city', ''))}|"
+            f"{self._normalize_text(restaurant.get('name')).lower()}|"
+            f"{self._normalize_text(restaurant.get('area')).lower()}"
+        )
+
     def _call_restaurant_tier_llm(self, restaurant: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         if not self.local_food_llm_enabled:
             return None
 
+        started = time.perf_counter()
         url = DASHSCOPE_CHAT_BASE_URL.rstrip("/") + "/chat/completions"
         headers = {
             "Content-Type": "application/json",
@@ -1716,6 +2311,7 @@ class Agent3Selection:
         }
         city = self._normalize_text(restaurant.get("city"))
         name = self._normalize_text(restaurant.get("name"))
+        self._timing_log(f"restaurant_tier_llm start city={city} name={name[:80]}")
         matched_query = self._normalize_text(restaurant.get("matched_query"))
         price_level = self._normalize_text(restaurant.get("price_level"))
         types = [self._normalize_text(x) for x in (restaurant.get("types") or []) if self._normalize_text(x)]
@@ -1758,13 +2354,129 @@ class Agent3Selection:
             }
         except Exception:
             return None
+        finally:
+            self._timing_log(
+                f"restaurant_tier_llm done city={city} name={name[:80]} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+
+    def _call_restaurant_tiers_batch_llm(
+        self,
+        city: str,
+        restaurants: List[Dict[str, Any]],
+    ) -> Dict[str, Dict[str, Any]]:
+        if not self.local_food_llm_enabled or not restaurants:
+            return {}
+
+        pending: List[Tuple[int, Dict[str, Any]]] = []
+        for index, restaurant in enumerate(restaurants, start=1):
+            if self._restaurant_tier_cache_key(restaurant) not in self.restaurant_tier_cache:
+                pending.append((index, restaurant))
+        if not pending:
+            return {}
+
+        started = time.perf_counter()
+        self._timing_log(f"restaurant_tier_batch_llm start city={city} count={len(pending)}")
+        url = DASHSCOPE_CHAT_BASE_URL.rstrip("/") + "/chat/completions"
+        headers = {
+            "Content-Type": "application/json",
+            "Authorization": f"Bearer {DASHSCOPE_API_KEY}",
+        }
+        restaurant_rows = []
+        for index, restaurant in pending:
+            types = [
+                self._normalize_text(x)
+                for x in (restaurant.get("types") or [])
+                if self._normalize_text(x)
+            ]
+            restaurant_rows.append({
+                "id": index,
+                "name": self._normalize_text(restaurant.get("name")),
+                "query": self._normalize_text(restaurant.get("matched_query")),
+                "price_level": self._normalize_text(restaurant.get("price_level")),
+                "rating": self._safe_float(restaurant.get("rating"), 0.0),
+                "types": types[:6],
+            })
+
+        prompt = (
+            "You are a travel budgeting assistant. "
+            "Classify each restaurant into exactly one per-person meal tier in CNY: 100, 300, or 500. "
+            "Use 100 for budget/local casual meals, 300 for standard sit-down restaurants, and 500 for upscale/fine dining. "
+            "Return JSON only, no markdown. "
+            "Output format: {\"restaurants\":[{\"id\":1,\"tier_price_per_person\":100|300|500,\"reason\":\"short reason\"}]}. "
+            f"City: {city}. Restaurants: {json.dumps(restaurant_rows, ensure_ascii=False)}"
+        )
+        payload = {
+            "model": TRAVEL_LLM_MODEL,
+            "messages": [
+                {"role": "system", "content": "Return valid JSON only."},
+                {"role": "user", "content": prompt},
+            ],
+            "temperature": 0.0,
+        }
+
+        try:
+            resp = requests.post(url, headers=headers, json=payload, timeout=45)
+            if resp.status_code != 200:
+                return {}
+            data = resp.json()
+            content = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
+            if not content:
+                return {}
+            match = re.search(r"\{.*\}", content, re.DOTALL)
+            json_text = match.group(0) if match else content
+            parsed = json.loads(json_text)
+            raw_items = parsed.get("restaurants") if isinstance(parsed, dict) else parsed
+            if not isinstance(raw_items, list):
+                return {}
+
+            by_id = {index: restaurant for index, restaurant in pending}
+            results: Dict[str, Dict[str, Any]] = {}
+            for item in raw_items:
+                if not isinstance(item, dict):
+                    continue
+                item_id = self._safe_int(item.get("id"), 0)
+                restaurant = by_id.get(item_id)
+                if not restaurant:
+                    continue
+                tier_price = self._safe_int(item.get("tier_price_per_person"), 0)
+                if tier_price not in {100, 300, 500}:
+                    continue
+                results[self._restaurant_tier_cache_key(restaurant)] = {
+                    "tier_price_per_person": tier_price,
+                    "source": "llm_qwen_batch",
+                    "reason": self._normalize_text(item.get("reason")),
+                }
+            return results
+        except Exception:
+            return {}
+        finally:
+            self._timing_log(
+                f"restaurant_tier_batch_llm done city={city} count={len(pending)} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+
+    def _prefetch_restaurant_tiers(self, city: str, restaurants: List[Dict[str, Any]]) -> None:
+        if not restaurants:
+            return
+        if self.budget_pressure_mode:
+            for restaurant in restaurants:
+                self.restaurant_tier_cache[self._restaurant_tier_cache_key(restaurant)] = {
+                    "tier_price_per_person": 100,
+                    "source": "budget_pressure_cap",
+                    "reason": "Budget is a hard cap, so restaurant execution is capped at budget/local meal pricing.",
+                }
+            return
+        batch_results = self._call_restaurant_tiers_batch_llm(city, restaurants)
+        for restaurant in restaurants:
+            cache_key = self._restaurant_tier_cache_key(restaurant)
+            if cache_key in self.restaurant_tier_cache:
+                continue
+            tier_result = batch_results.get(cache_key)
+            if not tier_result:
+                tier_result = self._fallback_restaurant_tier_from_price_level(restaurant.get("price_level"))
+            self.restaurant_tier_cache[cache_key] = tier_result
 
     def _get_restaurant_tier(self, restaurant: Dict[str, Any]) -> Dict[str, Any]:
-        cache_key = (
-            f"{self._normalize_city_key(restaurant.get('city', ''))}|"
-            f"{self._normalize_text(restaurant.get('name')).lower()}|"
-            f"{self._normalize_text(restaurant.get('area')).lower()}"
-        )
+        cache_key = self._restaurant_tier_cache_key(restaurant)
         if cache_key in self.restaurant_tier_cache:
             return self.restaurant_tier_cache[cache_key]
 
@@ -1804,6 +2516,8 @@ class Agent3Selection:
         max_results: int = 10,
         location_bias: Optional[Dict[str, float]] = None
     ) -> List[Dict[str, Any]]:
+        started = time.perf_counter()
+        self._timing_log(f"places start query={text_query[:100]} max_results={max_results}")
         url = "https://places.googleapis.com/v1/places:searchText"
         headers = {
             "Content-Type": "application/json",
@@ -1836,12 +2550,22 @@ class Agent3Selection:
                 }
             }
 
-        response = requests.post(url, headers=headers, json=payload, timeout=20)
-        if response.status_code != 200:
-            raise RuntimeError(f"Places API request failed: {response.status_code}, {response.text}")
+        try:
+            response = requests.post(url, headers=headers, json=payload, timeout=20)
+            if response.status_code != 200:
+                raise RuntimeError(f"Places API request failed: {response.status_code}, {response.text}")
 
-        data = response.json()
-        return data.get("places", []) or []
+            data = response.json()
+            places = data.get("places", []) or []
+            self._timing_log(
+                f"places done query={text_query[:100]} count={len(places)} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+            return places
+        except Exception:
+            self._timing_log(
+                f"places failed query={text_query[:100]} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+            raise
 
     # =========================================================
     # query builders
@@ -1931,6 +2655,32 @@ class Agent3Selection:
     def _poi_general_query(self, city: str) -> str:
         return f"top attractions in {city}"
 
+    def _poi_expansion_queries(self, city: str) -> List[Tuple[str, str]]:
+        city = self._normalize_text(city)
+        if not city:
+            return []
+        queries = [
+            ("general", f"things to do in {city}"),
+            ("general", f"iconic landmarks in {city}"),
+            ("historical", f"best museums in {city}"),
+            ("historical", f"historic sites in {city}"),
+            ("art", f"art galleries in {city}"),
+            ("nature", f"parks and gardens in {city}"),
+            ("nature", f"scenic spots near {city}"),
+            ("nature", f"viewpoints near {city}"),
+            ("shopping", f"markets and shopping streets in {city}"),
+            ("entertainment", f"evening attractions in {city}"),
+        ]
+        if self.duration_days >= 5:
+            queries.extend([
+                ("nearby", f"attractions near {city}"),
+                ("nearby", f"day trips from {city}"),
+                ("nearby", f"best places to visit around {city}"),
+                ("nature", f"mountain attractions near {city}"),
+                ("nature", f"lake attractions near {city}"),
+            ])
+        return queries
+
     def _poi_mix_ratio(self) -> float:
         if "mixed" in self.attraction_styles or self.attraction_style == "mixed":
             return 0.5
@@ -1941,6 +2691,8 @@ class Agent3Selection:
     def _poi_limit_by_intensity(self, city_days: int) -> int:
         base = max(2, city_days * 2)
         signal = self.attraction_priority or self.attraction_intensity
+        if self.budget_pressure_mode and signal == "minimum":
+            return max(2, min(3, math.ceil(max(1, city_days) / 3)))
         if signal == "high":
             return base + max(1, city_days // 2)
         if signal == "low":
@@ -1948,14 +2700,14 @@ class Agent3Selection:
         return base
 
     def _restaurant_target_count(self, city_days: int) -> int:
-        if self.budget_pressure_mode:
-            return max(1, city_days)
         return max(2, city_days * 2)
 
     # =========================================================
     # POIs / restaurants
     # =========================================================
     def fetch_poi_candidates(self, city: str, max_results: int = 20) -> List[Dict[str, Any]]:
+        started = time.perf_counter()
+        self._timing_log(f"poi_fetch start city={city} max_results={max_results}")
         try:
             style_queries: List[Tuple[str, str]] = []
             active_styles = [s for s in self.attraction_styles if s and s != "mixed"]
@@ -1981,8 +2733,10 @@ class Agent3Selection:
             merged_raw: List[Tuple[Dict[str, Any], str, str]] = []
             seen = set()
 
-            for matched_style, query in must_visit_queries:
-                for place in self.search_places_new(query, max_results=min(4, max_results)):
+            def add_places_from_query(matched_style: str, query: str, query_limit: int) -> None:
+                if not query or query_limit <= 0:
+                    return
+                for place in self.search_places_new(query, max_results=query_limit):
                     name = self._normalize_text((place.get("displayName") or {}).get("text"))
                     address = self._normalize_text(place.get("formattedAddress"))
                     dedup_key = (name.lower(), address.lower())
@@ -1991,24 +2745,30 @@ class Agent3Selection:
                     seen.add(dedup_key)
                     merged_raw.append((place, matched_style, query))
 
-            for style, query in style_queries:
-                for place in self.search_places_new(query, max_results=per_style_count):
-                    name = self._normalize_text((place.get("displayName") or {}).get("text"))
-                    address = self._normalize_text(place.get("formattedAddress"))
-                    dedup_key = (name.lower(), address.lower())
-                    if not name or dedup_key in seen:
-                        continue
-                    seen.add(dedup_key)
-                    merged_raw.append((place, style, query))
+            for matched_style, query in must_visit_queries:
+                add_places_from_query(matched_style, query, min(4, max_results))
 
-            for place in self.search_places_new(general_query, max_results=general_count):
-                name = self._normalize_text((place.get("displayName") or {}).get("text"))
-                address = self._normalize_text(place.get("formattedAddress"))
-                dedup_key = (name.lower(), address.lower())
-                if not name or dedup_key in seen:
-                    continue
-                seen.add(dedup_key)
-                merged_raw.append((place, "general", general_query))
+            for style, query in style_queries:
+                add_places_from_query(style, query, per_style_count)
+
+            add_places_from_query("general", general_query, general_count)
+
+            expansion_target = min(max_results * 2, max(max_results, self.duration_days * 4))
+            if len(merged_raw) < expansion_target:
+                used_queries = {
+                    self._normalize_text(query).lower()
+                    for _, _, query in merged_raw
+                    if self._normalize_text(query)
+                }
+                for matched_style, query in self._poi_expansion_queries(city):
+                    query_key = self._normalize_text(query).lower()
+                    if not query_key or query_key in used_queries:
+                        continue
+                    used_queries.add(query_key)
+                    remaining = max(0, expansion_target - len(merged_raw))
+                    if remaining <= 0:
+                        break
+                    add_places_from_query(matched_style, query, min(8, max(4, remaining)))
 
             results: List[Dict[str, Any]] = []
             for place, matched_style, matched_query in merged_raw[:max_results * 3]:
@@ -2030,8 +2790,13 @@ class Agent3Selection:
                     "matched_query": matched_query,
                 })
 
-            return results[:max_results * 2]
+            final_results = results[:max_results * 2]
+            self._timing_log(
+                f"poi_fetch done city={city} count={len(final_results)} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+            return final_results
         except Exception:
+            self._timing_log(f"poi_fetch failed city={city} elapsed={self._elapsed_seconds(started):.2f}s")
             return []
 
     
@@ -2046,6 +2811,8 @@ class Agent3Selection:
         4) Prefer actual restaurant-like places over districts / nightlife areas / generic POIs.
         5) Preserve downstream fields and overall structure.
         """
+        started = time.perf_counter()
+        self._timing_log(f"restaurant_fetch start city={city} max_results={max_results}")
         try:
             food_modes = [m for m in self.food_preferences if m and m != "mixed"]
             if not food_modes:
@@ -2247,9 +3014,14 @@ class Agent3Selection:
                 reverse=True
             )
 
-            return candidates[: max_results * 3]
+            final_candidates = candidates[:max_results]
+            self._timing_log(
+                f"restaurant_fetch done city={city} count={len(final_candidates)} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+            return final_candidates
 
         except Exception:
+            self._timing_log(f"restaurant_fetch failed city={city} elapsed={self._elapsed_seconds(started):.2f}s")
             return []
 
     # =========================================================
@@ -2509,6 +3281,11 @@ class Agent3Selection:
         max_results: int = 10,
         hotel_area: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        started = time.perf_counter()
+        area_label = hotel_area or "city"
+        self._timing_log(
+            f"hotel_searchapi start city={city} area={area_label} check_in={check_in_date} check_out={check_out_date}"
+        )
         url = "https://www.searchapi.io/api/v1/search"
         params = {
             "engine": "google_hotels",
@@ -2519,15 +3296,21 @@ class Agent3Selection:
             "api_key": SEARCHAPI_API_KEY,
         }
 
-        response = requests.get(url, params=params, timeout=40)
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"SearchAPI hotel request failed: {response.status_code}\n"
-                f"params={json.dumps(params, ensure_ascii=False)}\n"
-                f"response_text={response.text[:1500]}"
-            )
+        try:
+            response = requests.get(url, params=params, timeout=40)
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"SearchAPI hotel request failed: {response.status_code}\n"
+                    f"params={json.dumps(params, ensure_ascii=False)}\n"
+                    f"response_text={response.text[:1500]}"
+                )
 
-        root = response.json() if response.text else {}
+            root = response.json() if response.text else {}
+        except Exception:
+            self._timing_log(
+                f"hotel_searchapi failed city={city} area={area_label} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+            raise
         raw_items = (
             root.get("properties")
             or root.get("hotels")
@@ -2567,6 +3350,9 @@ class Agent3Selection:
         if hotel_area:
             for item in normalized:
                 item["hotel_area_query"] = hotel_area
+        self._timing_log(
+            f"hotel_searchapi done city={city} area={area_label} count={len(normalized)} elapsed={self._elapsed_seconds(started):.2f}s"
+        )
         return normalized
 
     def fetch_hotel_candidates_from_google_places(
@@ -2604,6 +3390,8 @@ class Agent3Selection:
             return []
 
     def fetch_hotel_candidates(self, city: str, city_days: int, max_results: int = 20) -> Tuple[List[Dict[str, Any]], str]:
+        started = time.perf_counter()
+        self._timing_log(f"hotel_fetch start city={city} city_days={city_days} max_results={max_results}")
         date_info = self.city_date_ranges.get(city, {})
         check_in = date_info.get("check_in")
         check_out = date_info.get("check_out")
@@ -2621,6 +3409,9 @@ class Agent3Selection:
                         hotel_area=hotel_area,
                     )
                     if hotels:
+                        self._timing_log(
+                            f"hotel_fetch done city={city} provider=searchapi_google_hotels_area_preferred count={len(hotels)} elapsed={self._elapsed_seconds(started):.2f}s"
+                        )
                         return hotels, "searchapi_google_hotels_area_preferred"
                 except Exception:
                     area_search_failed = True
@@ -2640,6 +3431,9 @@ class Agent3Selection:
                         }
                         for hotel in hotels:
                             hotel["hotel_area_fallback"] = True
+                    self._timing_log(
+                        f"hotel_fetch done city={city} provider=searchapi_google_hotels count={len(hotels)} elapsed={self._elapsed_seconds(started):.2f}s"
+                    )
                     return hotels, "searchapi_google_hotels"
             except Exception:
                 pass
@@ -2651,6 +3445,9 @@ class Agent3Selection:
                 hotel_area=hotel_area,
             )
             if fallback_hotels:
+                self._timing_log(
+                    f"hotel_fetch done city={city} provider=google_places_area_preferred count={len(fallback_hotels)} elapsed={self._elapsed_seconds(started):.2f}s"
+                )
                 return fallback_hotels, "google_places_area_preferred"
             self.hotel_area_fallbacks[city] = {
                 "requested_area": hotel_area,
@@ -2662,6 +3459,9 @@ class Agent3Selection:
         if hotel_area:
             for hotel in fallback_hotels:
                 hotel["hotel_area_fallback"] = True
+        self._timing_log(
+            f"hotel_fetch done city={city} provider=google_places_fallback count={len(fallback_hotels)} elapsed={self._elapsed_seconds(started):.2f}s"
+        )
         return fallback_hotels, "google_places_fallback"
 
     # =========================================================
@@ -2671,15 +3471,9 @@ class Agent3Selection:
         if self.flight_cabin_locked and self.requested_flight_cabin:
             return [self.requested_flight_cabin]
         if self.flight_type == "first_class":
-            return ["first_class", "business", "economy"]
+            return ["first_class"]
         if self.flight_type == "business_class":
-            return ["business", "economy"]
-        if self.flight_type == "economy_class":
-            return ["economy"]
-        if self.flight_type == "comfort" or self.flight_pref == "comfort":
-            return ["economy", "business"]
-        if not self.budget_pressure_mode and self.total_budget >= 50000 and self.flight_pref != "cheap":
-            return ["economy", "business"]
+            return ["business"]
         return ["economy"]
 
     def _searchapi_travel_class(self) -> str:
@@ -2689,6 +3483,15 @@ class Agent3Selection:
         if self.flight_pref == "direct" and strict_direct:
             return "nonstop"
         return "any"
+
+    def _searchapi_sort_by(self) -> str:
+        if self.budget_pressure_mode or self.flight_pref == "cheap" or self.flight_type == "budget":
+            return "price"
+        if self.flight_pref in {"direct", "comfort"} or self.flight_priority in {"high", "comfort"}:
+            return "duration"
+        if self.total_budget >= 30000 or self.transport_budget >= 12000:
+            return "duration"
+        return "price"
 
     def _extract_flight_price_value(self, value: Any) -> Optional[float]:
         if value is None:
@@ -2829,6 +3632,12 @@ class Agent3Selection:
         strict_direct: bool = True,
         travel_class_override: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
+        started = time.perf_counter()
+        requested_class = travel_class_override or self._searchapi_travel_class()
+        stops = self._searchapi_stops(strict_direct=strict_direct)
+        self._timing_log(
+            f"flight_searchapi start {departure_id}->{arrival_id} date={outbound_date} class={requested_class} stops={stops}"
+        )
         url = "https://www.searchapi.io/api/v1/search"
         params: Dict[str, Any] = {
             "engine": "google_flights",
@@ -2838,23 +3647,29 @@ class Agent3Selection:
             "flight_type": flight_type,
             "currency": self.currency,
             "adults": max(1, self._safe_int(adults, 1)),
-            "travel_class": travel_class_override or self._searchapi_travel_class(),
-            "stops": self._searchapi_stops(strict_direct=strict_direct),
-            "sort_by": "price",
+            "travel_class": requested_class,
+            "stops": stops,
+            "sort_by": self._searchapi_sort_by(),
             "api_key": SEARCHAPI_API_KEY,
         }
         if return_date and flight_type == "round_trip":
             params["return_date"] = return_date
 
-        response = requests.get(url, params=params, timeout=40)
-        if response.status_code != 200:
-            raise RuntimeError(
-                f"SearchAPI request failed: {response.status_code}\n"
-                f"params={json.dumps(params, ensure_ascii=False)}\n"
-                f"response_text={response.text[:2000]}"
-            )
+        try:
+            response = requests.get(url, params=params, timeout=40)
+            if response.status_code != 200:
+                raise RuntimeError(
+                    f"SearchAPI request failed: {response.status_code}\n"
+                    f"params={json.dumps(params, ensure_ascii=False)}\n"
+                    f"response_text={response.text[:2000]}"
+                )
 
-        root = response.json() if response.text else {}
+            root = response.json() if response.text else {}
+        except Exception:
+            self._timing_log(
+                f"flight_searchapi failed {departure_id}->{arrival_id} date={outbound_date} class={requested_class} stops={stops} elapsed={self._elapsed_seconds(started):.2f}s"
+            )
+            raise
         best_flights = root.get("best_flights", []) or []
         other_flights = root.get("other_flights", []) or []
         combined = best_flights + other_flights
@@ -2898,6 +3713,9 @@ class Agent3Selection:
             except Exception:
                 continue
 
+        self._timing_log(
+            f"flight_searchapi done {departure_id}->{arrival_id} date={outbound_date} class={requested_class} stops={stops} count={len(normalized)} elapsed={self._elapsed_seconds(started):.2f}s"
+        )
         return normalized
 
     # =========================================================
@@ -2918,6 +3736,89 @@ class Agent3Selection:
         if text in mapping:
             return mapping[text]
         return 1.0
+
+    def _stable_price_variation(self, text: Any, low: float = 0.85, high: float = 1.18) -> float:
+        normalized = self._normalize_text(text).lower()
+        if not normalized:
+            return 1.0
+        checksum = sum((idx + 1) * ord(ch) for idx, ch in enumerate(normalized))
+        span = max(0.0, high - low)
+        return low + ((checksum % 101) / 100.0) * span
+
+    def _estimate_poi_base_per_person(self, poi: Dict[str, Any]) -> float:
+        name = self._normalize_text(poi.get("name")).lower()
+        types = " ".join([self._normalize_text(t).lower() for t in (poi.get("types") or [])])
+        query = self._normalize_text(poi.get("matched_query")).lower()
+        style = self._normalize_text(poi.get("attraction_style") or self.attraction_style).lower()
+        signal = f"{name} {types} {query} {style}"
+
+        free_terms = [
+            "park",
+            "garden",
+            "square",
+            "plaza",
+            "piazza",
+            "bridge",
+            "fountain",
+            "street",
+            "market",
+            "viewpoint",
+            "scenic",
+            "beach",
+            "memorial",
+            "monument",
+        ]
+        low_cost_terms = [
+            "church",
+            "cathedral",
+            "basilica",
+            "temple",
+            "shrine",
+            "chapel",
+            "tower",
+        ]
+        medium_cost_terms = [
+            "museum",
+            "gallery",
+            "palace",
+            "castle",
+            "forum",
+            "colosseum",
+            "archaeological",
+            "opera",
+            "exhibition",
+        ]
+        high_cost_terms = [
+            "theme park",
+            "aquarium",
+            "zoo",
+            "show",
+            "concert",
+            "performance",
+            "experience",
+            "observation deck",
+        ]
+
+        if any(term in signal for term in high_cost_terms):
+            return 150.0
+        if any(term in signal for term in medium_cost_terms):
+            return 90.0
+        if any(term in signal for term in low_cost_terms):
+            return 35.0
+        if any(term in signal for term in free_terms):
+            return 0.0
+
+        if style == "nature":
+            return 25.0
+        if style == "shopping":
+            return 0.0
+        if style == "art":
+            return 90.0
+        if style == "historical":
+            return 75.0
+        if style == "entertainment":
+            return 130.0
+        return 65.0
 
     def _get_city_food_budget_entry(self, city: str) -> Dict[str, Any]:
         city_key = self._normalize_city_key(city)
@@ -2959,22 +3860,12 @@ class Agent3Selection:
         return multiplier
 
     def _estimate_poi_cost(self, poi: Dict[str, Any], city_days: int) -> Dict[str, Any]:
-        base_per_person = 80.0
-        style = self.attraction_style
-
-        if style == "historical":
-            base_per_person = 100.0
-        elif style == "nature":
-            base_per_person = 60.0
-        elif style == "art":
-            base_per_person = 110.0
-        elif style == "entertainment":
-            base_per_person = 150.0
-        elif style == "shopping":
-            base_per_person = 30.0
-
+        base_per_person = self._estimate_poi_base_per_person(poi)
         multiplier = self._price_level_to_multiplier(poi.get("price_level"))
-        estimated_ticket_per_person = round(base_per_person * multiplier, 2)
+        if base_per_person > 0 and self._normalize_text(poi.get("price_level")) == "":
+            variation_key = f"{poi.get('name')}|{poi.get('matched_query')}|{poi.get('attraction_style')}"
+            multiplier *= self._stable_price_variation(variation_key)
+        estimated_ticket_per_person = round(base_per_person * multiplier / 10.0) * 10.0
         estimated_total_cost = round(estimated_ticket_per_person * self.num_people, 2)
 
         poi["estimated_ticket_per_person"] = estimated_ticket_per_person
@@ -3004,14 +3895,19 @@ class Agent3Selection:
             if city_food_budget > 0:
                 total_meal_slots = max(1, city_days * 3)
                 target_per_person = city_food_budget / total_meal_slots / max(1, self.num_people)
-                spend_up_meal = min(max(estimated_meal_per_person, target_per_person * 0.9), target_per_person, 1800.0)
+                variation_multiplier = self._restaurant_price_variation_multiplier(restaurant, tier_result)
+                spend_up_meal = min(
+                    max(estimated_meal_per_person, target_per_person * variation_multiplier),
+                    max(target_per_person * 1.55, estimated_meal_per_person),
+                    1800.0,
+                )
                 if spend_up_meal > estimated_meal_per_person:
                     estimated_meal_per_person = round(spend_up_meal, 2)
                     tier_result = {
                         **tier_result,
                         "tier_price_per_person": estimated_meal_per_person,
-                        "source": "budget_spend_up",
-                        "reason": "Budget has room, so meal tier is raised toward the city dining allocation.",
+                        "source": "budget_spend_up_varied",
+                        "reason": "Budget has room, so meal tier is raised with restaurant-specific pricing variation.",
                     }
         if self.budget_pressure_mode:
             recommended_visits = 1
@@ -3021,7 +3917,7 @@ class Agent3Selection:
                 2,
             )
         estimated_total_cost = round(estimated_meal_per_person * self.num_people * recommended_visits, 2)
-        if self._normalize_text(tier_result.get("source")) == "budget_spend_up":
+        if self._normalize_text(tier_result.get("source")) in {"budget_spend_up", "budget_spend_up_varied"}:
             restaurant["pre_spend_up_estimated_total_cost"] = round(
                 pre_spend_up_meal_per_person * self.num_people * recommended_visits,
                 2,
@@ -3137,7 +4033,9 @@ class Agent3Selection:
 
     def _fallback_attractions_budget_for_city(self, city_days: int) -> float:
         if self.budget_pressure_mode:
-            return 0.0
+            if not self.allow_paid_attractions:
+                return 0.0
+            return round(120.0 * max(1, city_days), 2)
         total_buffer = self._safe_float(self.total_budget_plan.get("buffer"), 0.0)
         if total_buffer <= 0:
             return 0.0
@@ -3809,6 +4707,24 @@ class Agent3Selection:
             item["generalized_cost"] = self._flight_generalized_cost(item, budget)
             ranked.append(item)
 
+        direct_only_note = ""
+        if self.flight_pref == "direct" and not self.budget_pressure_mode:
+            direct_ranked = [
+                item for item in ranked
+                if self._safe_int(item.get("stops"), 0) == 0
+            ]
+            affordable_direct_ranked = [
+                item for item in direct_ranked
+                if self._direct_flight_is_affordable_for_leg(item, budget)
+            ]
+            if affordable_direct_ranked:
+                ranked = affordable_direct_ranked
+                direct_only_note = "|direct_only_affordable"
+            elif direct_ranked:
+                direct_only_note = f"|{self._direct_flight_fallback_reason(direct_ranked, budget)}"
+            else:
+                direct_only_note = "|direct_unavailable_fallback_to_stop"
+
         ranked = sorted(
             ranked,
             key=lambda x: (
@@ -3839,25 +4755,93 @@ class Agent3Selection:
                 if target_floor <= self._safe_float(f.get("price_total"), 0.0) <= budget
             ]
             if targeted:
-                return finalize(targeted), "within_budget_target_utilization"
+                return finalize(targeted), f"within_budget_target_utilization{direct_only_note}"
 
         strict = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget]
         if strict:
-            return finalize(strict), "within_budget_generalized_cost"
+            return finalize(strict), f"within_budget_generalized_cost{direct_only_note}"
 
         slightly_over = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget * tolerance]
         if slightly_over:
-            return finalize(slightly_over), "slightly_over_budget_generalized_cost"
+            return finalize(slightly_over), f"slightly_over_budget_generalized_cost{direct_only_note}"
 
         relaxed = [f for f in ranked if 0 < self._safe_float(f.get("price_total"), 0.0) <= budget * relaxed_tolerance]
         if relaxed:
-            return finalize(relaxed), "relaxed_over_budget_generalized_cost"
+            return finalize(relaxed), f"relaxed_over_budget_generalized_cost{direct_only_note}"
 
         priced = [f for f in ranked if self._safe_float(f.get("price_total"), 0.0) > 0]
         if priced:
-            return finalize(priced), "closest_generalized_cost"
+            return finalize(priced), f"closest_generalized_cost{direct_only_note}"
 
-        return finalize(ranked), "price_unavailable"
+        return finalize(ranked), f"price_unavailable{direct_only_note}"
+
+    def _flight_is_affordable_for_leg(
+        self,
+        flight: Dict[str, Any],
+        budget: float,
+        tolerance: float,
+    ) -> bool:
+        price = self._safe_float(flight.get("price_total"), 0.0)
+        if price <= 0:
+            return False
+        if budget <= 0:
+            return True
+        return price <= budget * max(1.0, tolerance)
+
+    def _direct_flight_affordability_cap(self, budget: float) -> float:
+        if budget <= 0:
+            return 0.0
+        tolerance_cap = budget * max(1.0, self.flight_relaxed_budget_tolerance)
+        flexible_cap = budget * 2.2
+        if self.transport_budget > 0:
+            flexible_cap = min(flexible_cap, self.transport_budget * 0.8)
+        return max(tolerance_cap, flexible_cap)
+
+    def _direct_flight_is_affordable_for_leg(self, flight: Dict[str, Any], budget: float) -> bool:
+        price = self._safe_float(flight.get("price_total"), 0.0)
+        if price <= 0:
+            return False
+        if budget <= 0:
+            return True
+        return price <= self._direct_flight_affordability_cap(budget)
+
+    def _has_affordable_direct_flight(
+        self,
+        flights: List[Dict[str, Any]],
+        budget: float,
+    ) -> bool:
+        return any(
+            self._safe_int(item.get("stops"), 0) == 0
+            and self._direct_flight_is_affordable_for_leg(item, budget)
+            for item in flights
+        )
+
+    def _direct_flight_fallback_reason(
+        self,
+        strict_direct_candidates: List[Dict[str, Any]],
+        budget: float,
+    ) -> str:
+        if not strict_direct_candidates:
+            return "direct_unavailable_fallback_to_stop"
+        priced_direct = [
+            item for item in strict_direct_candidates
+            if self._safe_float(item.get("price_total"), 0.0) > 0
+        ]
+        if not priced_direct:
+            return "direct_price_unavailable_fallback_to_stop"
+        if not self._has_affordable_direct_flight(strict_direct_candidates, budget):
+            return "direct_over_budget_fallback_to_stop"
+        return ""
+
+    def _direct_fallback_report_note(self, status: str) -> str:
+        text = self._normalize_text(status)
+        if "direct_unavailable_fallback_to_stop" in text:
+            return "No nonstop flight was available for this leg, so a stop/layover flight was selected."
+        if "direct_over_budget_fallback_to_stop" in text:
+            return "Nonstop flights were available but exceeded the leg transport budget, so a stop/layover flight was selected."
+        if "direct_price_unavailable_fallback_to_stop" in text:
+            return "Nonstop flight pricing was unavailable, so a priced stop/layover flight was allowed."
+        return ""
 
     def select_with_budget(
         self,
@@ -3943,6 +4927,40 @@ class Agent3Selection:
             return relaxed, "slightly_over_budget"
 
         return ranked[:max_items], "not_found_within_tolerance"
+
+    def _fill_restaurants_to_target(
+        self,
+        selected: List[Dict[str, Any]],
+        ranked_restaurants: List[Dict[str, Any]],
+        target_count: int,
+    ) -> Tuple[List[Dict[str, Any]], bool]:
+        if target_count <= 0 or len(selected) >= target_count:
+            return selected[:target_count], False
+
+        filled = list(selected)
+        seen = {
+            (
+                self._normalize_text(item.get("place_id")),
+                self._normalize_text(item.get("name")).lower(),
+                self._normalize_text(item.get("area")).lower(),
+            )
+            for item in filled
+        }
+
+        for restaurant in ranked_restaurants:
+            key = (
+                self._normalize_text(restaurant.get("place_id")),
+                self._normalize_text(restaurant.get("name")).lower(),
+                self._normalize_text(restaurant.get("area")).lower(),
+            )
+            if key in seen:
+                continue
+            filled.append(restaurant)
+            seen.add(key)
+            if len(filled) >= target_count:
+                break
+
+        return filled[:target_count], len(filled) > len(selected)
 
     def select_pois_with_must_visit(
         self,
@@ -4044,7 +5062,7 @@ class Agent3Selection:
                 return selected, "slightly_over_budget", warnings
             return selected, "within_budget", warnings
 
-        if self.budget_pressure_mode:
+        if self.budget_pressure_mode and not self.allow_paid_attractions:
             return [], "not_found_within_hard_budget", warnings
 
         relaxed = []
@@ -4060,7 +5078,7 @@ class Agent3Selection:
         if relaxed:
             return relaxed, "not_found_within_tolerance", warnings
 
-        if self.budget_pressure_mode:
+        if self.budget_pressure_mode and not self.allow_paid_attractions:
             return [], "not_found_within_hard_budget", warnings
 
         if ranked:
@@ -4192,10 +5210,21 @@ class Agent3Selection:
                 return hour * 60 + minute
         return None
 
+    def _flight_arrival_day_offset(self, flight: Dict[str, Any]) -> int:
+        dep = self._time_to_minutes(flight.get("departure_time"))
+        duration_minutes = self._safe_float(flight.get("duration_minutes") or flight.get("total_duration"), 0.0)
+        if dep is not None and duration_minutes > 0:
+            return max(0, int((dep + duration_minutes) // (24 * 60)))
+        arr = self._time_to_minutes(flight.get("arrival_time"))
+        if dep is not None and arr is not None and arr <= dep:
+            return 1
+        return 0
+
     def _flight_timing_score(self, flight: Dict[str, Any], leg_type: str) -> float:
         dep = self._time_to_minutes(flight.get("departure_time"))
         arr = self._time_to_minutes(flight.get("arrival_time"))
         leg = self._normalize_text(leg_type).lower()
+        arrival_day_offset = self._flight_arrival_day_offset(flight)
 
         if leg == "outbound":
             if dep is None and arr is None:
@@ -4221,6 +5250,15 @@ class Agent3Selection:
                     score -= 1.2
                 else:
                     score -= 2.0
+                if arrival_day_offset >= 1:
+                    if arr >= 21 * 60:
+                        score -= 4.5
+                    elif arr >= 18 * 60:
+                        score -= 3.2
+                    elif arr >= 15 * 60:
+                        score -= 1.4
+                    elif arr <= 12 * 60:
+                        score += 0.5
             return score
 
         if leg == "inbound":
@@ -4414,6 +5452,7 @@ class Agent3Selection:
         leg = self._normalize_text(leg_type).lower()
         arr = self._time_to_minutes(flight.get("arrival_time"))
         dep = self._time_to_minutes(flight.get("departure_time"))
+        arrival_day_offset = self._flight_arrival_day_offset(flight)
         time_pref_multiplier = self._flight_time_preference_multiplier()
 
         if timing_score >= 0:
@@ -4432,12 +5471,23 @@ class Agent3Selection:
                 reward += 1600.0 * time_pref_multiplier
             elif arr < 8 * 60:
                 reward += 850.0 * time_pref_multiplier
+            if arrival_day_offset >= 1:
+                if arr >= 21 * 60:
+                    reward += 4200.0 * time_pref_multiplier
+                elif arr >= 18 * 60:
+                    reward += 3000.0 * time_pref_multiplier
+                elif arr >= 15 * 60:
+                    reward += 1400.0 * time_pref_multiplier
+                elif arr <= 12 * 60:
+                    reward -= 360.0 * time_pref_multiplier
 
         if leg == "outbound" and dep is not None:
             if dep < 6 * 60:
                 reward += 1200.0 * time_pref_multiplier
             elif dep < 8 * 60:
                 reward += 520.0 * time_pref_multiplier
+            elif dep >= 17 * 60 and arrival_day_offset >= 1:
+                reward += 900.0 * time_pref_multiplier
 
         if leg == "inbound" and dep is not None:
             if dep < 9 * 60:
@@ -4640,7 +5690,7 @@ class Agent3Selection:
         if direct_drive_h <= 0:
             return flights, "drive_time_unavailable"
         if direct_drive_h <= self.max_direct_drive_hours_for_auto_drive:
-            return [], "direct_drive_under_4h"
+            return [], "direct_drive_under_auto_drive_limit"
 
         annotated = [self._annotate_flight_ground_time(flight, leg) for flight in flights]
         faster_or_equal_flights = [
@@ -4653,7 +5703,10 @@ class Agent3Selection:
         if direct_drive_h <= self.max_direct_drive_hours_for_auto_drive:
             return [], "direct_drive_faster"
 
-        # For long direct drives, keep the least-bad flight candidates but mark the comparison.
+        if direct_drive_h <= self.max_ground_preferred_hours_if_flight_not_better:
+            return [], "direct_drive_faster_under_ground_preferred_limit"
+
+        # For genuinely long direct drives, keep the least-bad flight candidates but mark the comparison.
         best = sorted(
             annotated,
             key=lambda item: self._safe_float(item.get("flight_total_comparable_hours"), 99999.0),
@@ -4661,7 +5714,10 @@ class Agent3Selection:
         for item in best:
             item["why_selected"] = (
                 self._normalize_text(item.get("why_selected"))
-                + "; flight kept although direct drive is estimated faster because direct drive exceeds the 4h drive constraint"
+                + (
+                    "; flight kept although direct drive is estimated faster because direct drive exceeds "
+                    f"the {self.max_ground_preferred_hours_if_flight_not_better:g}h ground-preferred comparison limit"
+                )
             ).strip()
         return best, "direct_drive_faster_but_over_drive_limit"
 
@@ -4684,9 +5740,13 @@ class Agent3Selection:
         if direct_drive_h <= self.max_direct_drive_hours_for_auto_drive:
             return True
         if "direct_drive_faster" in self._normalize_text(fetch_status):
-            return direct_drive_h <= self.max_direct_drive_hours_for_auto_drive
+            return direct_drive_h <= self.max_ground_preferred_hours_if_flight_not_better
         if "missing_route_info" in self._normalize_text(fetch_status):
             return direct_drive_h <= self.max_direct_drive_hours_for_auto_drive
+        if "estimated_daytime_fallback" in self._normalize_text(fetch_status):
+            return direct_drive_h <= self.max_ground_preferred_hours_if_flight_not_better
+        if "no_live_flights_under_ground_preferred_limit" in self._normalize_text(fetch_status):
+            return direct_drive_h <= self.max_ground_preferred_hours_if_flight_not_better
         return False
 
     def _build_direct_drive_leg_output(
@@ -4718,8 +5778,8 @@ class Agent3Selection:
                 "estimated_drive_hours": round(drive_h, 2) if drive_h > 0 else None,
                 "estimated_drive_distance_km": round(drive_km, 2) if drive_km > 0 else None,
                 "comparison_note": (
-                    "Direct driving was selected because city-to-city driving time is within "
-                    "the 4h ground-transport rule, so flight search/selection is skipped."
+                    "Direct driving was selected because city-to-city ground time was preferable "
+                    "under the configured flight-vs-ground comparison rules."
                 ),
             },
         }
@@ -4762,10 +5822,12 @@ class Agent3Selection:
 
         if self.flight_cabin_locked and self.requested_flight_cabin:
             class_candidates = [self.requested_flight_cabin]
+        elif self.flight_type == "first_class":
+            class_candidates = ["first_class"]
+        elif self.flight_type == "business_class":
+            class_candidates = ["business"]
         else:
             class_candidates = ["economy"]
-            if self.flight_type in {"comfort", "business_class", "first_class"} or self.flight_pref == "comfort":
-                class_candidates.append("business")
 
         fallback_flights: List[Dict[str, Any]] = []
         seen_keys = set()
@@ -4861,19 +5923,19 @@ class Agent3Selection:
 
         return deduped 
 
-    def _flight_date_window_status(self, date_text: Any) -> str:
+    def _flight_date_status(self, date_text: Any) -> str:
         date_value = self._parse_iso_date(self._normalize_text(date_text))
         if not date_value:
             return ""
         days_ahead = (date_value.date() - get_today_date()).days
         if days_ahead < 0:
             return f"flight_date_in_past(days={abs(days_ahead)})"
-        if days_ahead > FLIGHT_LOOKAHEAD_DAYS:
-            return f"flight_date_outside_booking_window(days_ahead={days_ahead})"
+        if days_ahead > FLIGHT_FAR_FUTURE_WARNING_DAYS:
+            return f"flight_date_far_future(days_ahead={days_ahead})"
         return ""
     
     
-    def _search_leg_flights(self, leg: Dict[str, Any]) -> Tuple[List[Dict[str, Any]], str]:
+    def _search_leg_flights(self, leg: Dict[str, Any], leg_budget: float = 0.0) -> Tuple[List[Dict[str, Any]], str]:
         if not leg:
             return [], "empty_leg"
 
@@ -4885,9 +5947,10 @@ class Agent3Selection:
         if not outbound_date:
             return [], "missing_route_info"
 
-        date_window_status = self._flight_date_window_status(outbound_date)
-        if date_window_status:
-            return [], date_window_status
+        date_status = self._flight_date_status(outbound_date)
+        if "flight_date_in_past" in date_status:
+            return [], date_status
+        status_prefix = f"{date_status}|" if date_status else ""
 
         candidate_from_airports = leg.get("candidate_from_airports") or []
         candidate_to_airports = leg.get("candidate_to_airports") or []
@@ -4911,6 +5974,13 @@ class Agent3Selection:
 
         if not candidate_from_airports or not candidate_to_airports:
             return [], "missing_route_info"
+
+        airport_pairs = self._airport_pairs_for_leg(leg, candidate_from_airports, candidate_to_airports)
+        if not airport_pairs:
+            return [], "missing_route_info"
+        self._timing_log(
+            f"leg airport_pairs type={leg.get('leg_type')} route={leg.get('from_city')}->{leg.get('to_city')} pairs={','.join(f'{a}->{b}' for a, b in airport_pairs)}"
+        )
 
         strict_all: List[Dict[str, Any]] = []
         relaxed_all: List[Dict[str, Any]] = []
@@ -4936,7 +6006,7 @@ class Agent3Selection:
                     outbound_date=outbound_date,
                     flight_type="one_way",
                     adults=self.num_people,
-                    max_results=8,
+                    max_results=self.flight_search_max_results,
                     strict_direct=strict_direct,
                     travel_class_override=travel_class,
                 )
@@ -4948,83 +6018,106 @@ class Agent3Selection:
             return collected
 
         try:
-            # Query factual flight candidates first, then rank the combined set.
-            # Direct flights still receive a score bonus, but they should not
-            # prevent cheaper or better-timed one-stop options from being seen.
-            for departure_id in candidate_from_airports:
-                for arrival_id in candidate_to_airports:
-                    if not departure_id or not arrival_id or departure_id == arrival_id:
-                        continue
+            # Query nonstop candidates first. Under an explicit direct preference,
+            # only relax to stop/layover options if nonstop is unavailable or over budget.
+            for departure_id, arrival_id in airport_pairs:
+                tried_pairs.append(f"{departure_id}->{arrival_id}")
 
-                    tried_pairs.append(f"{departure_id}->{arrival_id}")
+                strict = fetch_with_class_fallback(
+                    departure_id=departure_id,
+                    arrival_id=arrival_id,
+                    strict_direct=True,
+                )
 
-                    strict = fetch_with_class_fallback(
-                        departure_id=departure_id,
-                        arrival_id=arrival_id,
-                        strict_direct=True,
-                    )
-
-                    if strict:
-                        scored = [
-                            self._score_flight(x, leg.get("leg_type", "leg"))
-                            for x in strict
-                        ]
-                        for item in scored:
-                            item["searched_airport_pair"] = f"{departure_id}->{arrival_id}"
-                        strict_all.extend(scored)
+                if strict:
+                    scored = [
+                        self._score_flight(x, leg.get("leg_type", "leg"))
+                        for x in strict
+                    ]
+                    for item in scored:
+                        item["searched_airport_pair"] = f"{departure_id}->{arrival_id}"
+                    strict_all.extend(scored)
 
             strict_all = self._dedupe_flight_candidates(strict_all)
+            if self.flight_pref == "direct" and strict_all:
+                direct_fallback_reason = self._direct_flight_fallback_reason(strict_all, leg_budget)
+                if not direct_fallback_reason:
+                    compared, comparison_status = self._filter_flights_by_drive_time_comparison(strict_all, leg)
+                    return (
+                        compared,
+                        f"{status_prefix}live_flight_search("
+                        f"direct_pairs={','.join(tried_pairs)};"
+                        f"any_stop_pairs=skipped_direct_affordable;"
+                        f"class_fallbacks={','.join(tried_classes)};"
+                        f"direct_candidates={len(strict_all)};"
+                        f"all_candidates={len(strict_all)}"
+                        f")|direct_only_available|{comparison_status}",
+                    )
+            else:
+                direct_fallback_reason = (
+                    "direct_unavailable_fallback_to_stop"
+                    if self.flight_pref == "direct"
+                    else ""
+                )
 
             # 2) relaxed any-stop search across all airport pairs
             relaxed_pairs: List[str] = []
-            for departure_id in candidate_from_airports:
-                for arrival_id in candidate_to_airports:
-                    if not departure_id or not arrival_id or departure_id == arrival_id:
-                        continue
+            for departure_id, arrival_id in airport_pairs:
+                relaxed_pairs.append(f"{departure_id}->{arrival_id}")
 
-                    relaxed_pairs.append(f"{departure_id}->{arrival_id}")
+                relaxed = fetch_with_class_fallback(
+                    departure_id=departure_id,
+                    arrival_id=arrival_id,
+                    strict_direct=False,
+                )
 
-                    relaxed = fetch_with_class_fallback(
-                        departure_id=departure_id,
-                        arrival_id=arrival_id,
-                        strict_direct=False,
-                    )
-
-                    if relaxed:
-                        scored = [
-                            self._score_flight(x, leg.get("leg_type", "leg"))
-                            for x in relaxed
-                        ]
-                        for item in scored:
-                            item["searched_airport_pair"] = f"{departure_id}->{arrival_id}"
-                        relaxed_all.extend(scored)
+                if relaxed:
+                    scored = [
+                        self._score_flight(x, leg.get("leg_type", "leg"))
+                        for x in relaxed
+                    ]
+                    for item in scored:
+                        item["searched_airport_pair"] = f"{departure_id}->{arrival_id}"
+                    relaxed_all.extend(scored)
 
             combined = self._dedupe_flight_candidates(strict_all + relaxed_all)
             if not combined:
+                direct_drive_h = self._safe_float(leg.get("direct_drive_hours"), 0.0)
+                if 0 < direct_drive_h <= self.max_ground_preferred_hours_if_flight_not_better:
+                    return [], (
+                        f"{status_prefix}live_flight_search("
+                        f"direct_pairs={','.join(tried_pairs)};"
+                        f"any_stop_pairs={','.join(relaxed_pairs)};"
+                        f"class_fallbacks={','.join(tried_classes)};"
+                        f"direct_candidates={len(strict_all)};"
+                        f"all_candidates={len(combined)}"
+                        f")|{direct_fallback_reason + '|' if direct_fallback_reason else ''}"
+                        "no_live_flights_under_ground_preferred_limit"
+                    )
                 fallback_flights = self._build_estimated_fallback_flights(
                     leg,
                     "live search returned no candidates after trying direct, any-stop, and cabin relaxation",
                 )
                 if fallback_flights:
                     return fallback_flights, (
-                        f"live_flight_search("
+                        f"{status_prefix}live_flight_search("
                         f"direct_pairs={','.join(tried_pairs)};"
                         f"any_stop_pairs={','.join(relaxed_pairs)};"
                         f"class_fallbacks={','.join(tried_classes)};"
                         f"direct_candidates={len(strict_all)};"
                         f"all_candidates={len(combined)}"
-                        f")|estimated_daytime_fallback"
+                        f")|{direct_fallback_reason + '|' if direct_fallback_reason else ''}estimated_daytime_fallback"
                     )
             compared, comparison_status = self._filter_flights_by_drive_time_comparison(combined, leg)
             return (
                 compared,
-                f"live_flight_search("
+                f"{status_prefix}live_flight_search("
                 f"direct_pairs={','.join(tried_pairs)};"
                 f"any_stop_pairs={','.join(relaxed_pairs)};"
                 f"class_fallbacks={','.join(tried_classes)};"
                 f"direct_candidates={len(strict_all)};"
                 f"all_candidates={len(combined)}"
-                f")|{comparison_status}",
+                f")|{direct_fallback_reason + '|' if direct_fallback_reason else ''}{comparison_status}",
             )
 
         except Exception:
@@ -5040,6 +6133,7 @@ class Agent3Selection:
     # main
     # =========================================================
     def generate_shortlist(self) -> Dict[str, Any]:
+        shortlist_started = time.perf_counter()
         if not self.effective_cities:
             return {
                 "success": False,
@@ -5054,6 +6148,9 @@ class Agent3Selection:
 
         route_plan = self._build_route_plan()
         flight_legs = route_plan.get("flight_legs", [])
+        self._timing_log(
+            f"shortlist start cities={','.join(self.destination)} flight_legs={len(flight_legs)} budget={self.total_budget} {self.currency}"
+        )
 
         selected_outbound_flights: List[Dict[str, Any]] = []
         selected_inbound_flights: List[Dict[str, Any]] = []
@@ -5082,10 +6179,14 @@ class Agent3Selection:
             flight_leg_budget = round(self.transport_budget / len(flight_legs), 2) if self.transport_budget > 0 else 0.0
 
         for leg in flight_legs:
+            leg_started = time.perf_counter()
             leg_key = self._leg_key(leg)
             leg_budget_map[leg_key] = flight_leg_budget
+            self._timing_log(
+                f"leg start key={leg_key} type={leg.get('leg_type')} route={leg.get('from_city')}->{leg.get('to_city')} date={leg.get('departure_date')} budget={flight_leg_budget}"
+            )
 
-            candidates, fetch_status = self._search_leg_flights(leg)
+            candidates, fetch_status = self._search_leg_flights(leg, flight_leg_budget)
             selected_leg_flights, select_status = self.select_flights_with_budget(
                 flights=candidates,
                 budget=flight_leg_budget,
@@ -5100,6 +6201,30 @@ class Agent3Selection:
                 self._format_selected_flight_output(flight)
                 for flight in selected_leg_flights
             ]
+            full_leg_status = f"{fetch_status}|{select_status}"
+            is_far_future_flight_date = "flight_date_far_future" in full_leg_status
+            if is_far_future_flight_date and not formatted_selected_leg_flights:
+                warnings.append(
+                    f"No live flight candidate selected for {leg.get('leg_type')} leg "
+                    f"{leg.get('from_city')}->{leg.get('to_city')} on {leg.get('departure_date')}; "
+                    "the date is beyond the usual six-month fare publication window, so airlines or the provider may not have released searchable fares yet."
+                )
+            if self.flight_pref == "direct":
+                fallback_note = self._direct_fallback_report_note(full_leg_status)
+                selected_stop = any(self._safe_int(f.get("stops"), 0) > 0 for f in formatted_selected_leg_flights)
+                if fallback_note and selected_stop:
+                    warnings.append(
+                        f"{leg.get('from_city')}->{leg.get('to_city')} on {leg.get('departure_date')}: {fallback_note}"
+                    )
+                    for item in formatted_selected_leg_flights:
+                        if self._safe_int(item.get("stops"), 0) <= 0:
+                            continue
+                        existing_note = self._normalize_text(item.get("selection_note"))
+                        item["selection_note"] = (
+                            f"{existing_note} {fallback_note}".strip()
+                            if existing_note
+                            else fallback_note
+                        )
 
             if not formatted_selected_leg_flights and self._should_select_direct_drive(leg, fetch_status):
                 leg_output = self._build_direct_drive_leg_output(
@@ -5128,6 +6253,7 @@ class Agent3Selection:
                 if (
                     not formatted_selected_leg_flights
                     and self._normalize_text(leg.get("leg_type")) in {"outbound", "inbound"}
+                    and not is_far_future_flight_date
                 ):
                     warnings.append(
                         f"No live flight candidate selected for {leg.get('leg_type')} leg "
@@ -5143,6 +6269,9 @@ class Agent3Selection:
                 selected_intercity_flights.append(leg_output)
 
             selected_all_flight_legs.append(leg_output)
+            self._timing_log(
+                f"leg done key={leg_key} candidates={len(candidates)} selected={len(formatted_selected_leg_flights)} status={leg_selection_status_map.get(leg_key)} elapsed={self._elapsed_seconds(leg_started):.2f}s"
+            )
 
         rental_intercity_legs: List[Dict[str, Any]] = []
         if rental_intercity_legs:
@@ -5158,9 +6287,11 @@ class Agent3Selection:
         # City-by-city selection
         # -------------------------
         for city_item in self.city_budget_plan:
+            city_started = time.perf_counter()
             city = self._normalize_text(city_item.get("city"))
             if not city:
                 continue
+            self._timing_log(f"city start city={city}")
 
             city_days = max(1, self._safe_int(city_item.get("days"), 1))
             city_dates = self.city_date_ranges.get(city, {})
@@ -5181,6 +6312,9 @@ class Agent3Selection:
                 max_results=limits["hotel_candidates"]
             )
             hotel_provider_used[city] = hotel_provider
+            self._timing_log(
+                f"city hotel_candidates city={city} provider={hotel_provider} count={len(hotel_candidates)}"
+            )
 
             estimated_hotels = [
                 self._estimate_hotel_cost(h, city_days=city_days, city_nights=city_nights)
@@ -5230,10 +6364,13 @@ class Agent3Selection:
                 city=city,
                 max_results=limits["restaurant_candidates"]
             )
+            self._timing_log(f"city restaurant_candidates city={city} count={len(restaurant_candidates)}")
+            self._prefetch_restaurant_tiers(city, restaurant_candidates)
             estimated_restaurants = [
                 self._estimate_restaurant_cost(r, city_days=city_days)
                 for r in restaurant_candidates
             ]
+            self._timing_log(f"city restaurant_estimated city={city} count={len(estimated_restaurants)}")
             estimated_restaurants = self._attach_city_budget_reference(
                 estimated_restaurants,
                 city_budget=food_budget,
@@ -5273,12 +6410,20 @@ class Agent3Selection:
                 max_items=limits["restaurant_selected"],
                 tolerance=self.restaurant_budget_tolerance
             )
+            selected_city_restaurants, restaurant_filled_to_target = self._fill_restaurants_to_target(
+                selected_city_restaurants,
+                ranked_restaurants,
+                limits["restaurant_selected"],
+            )
+            if restaurant_filled_to_target:
+                restaurant_status = f"{restaurant_status}|filled_to_two_per_day"
 
             # POIs
             poi_candidates = self.fetch_poi_candidates(
                 city=city,
                 max_results=limits["poi_candidates"]
             )
+            self._timing_log(f"city poi_candidates city={city} count={len(poi_candidates)}")
             estimated_pois = [
                 self._estimate_poi_cost(p, city_days=city_days)
                 for p in poi_candidates
@@ -5401,6 +6546,9 @@ class Agent3Selection:
 
             if not selected_city_pois:
                 warnings.append(f"No POI candidates selected for {city}.")
+            self._timing_log(
+                f"city done city={city} selected_hotels={len(selected_city_hotels)} selected_restaurants={len(selected_city_restaurants)} selected_pois={len(selected_city_pois)} elapsed={self._elapsed_seconds(city_started):.2f}s"
+            )
 
         # -------------------------
         # Budget summary
@@ -5590,6 +6738,7 @@ class Agent3Selection:
         # De-duplicate warnings while preserving order
         warnings = list(dict.fromkeys(warnings))
 
+        self._timing_log(f"shortlist done elapsed={self._elapsed_seconds(shortlist_started):.2f}s")
         return {
             "success": True,
             "stage": "agent3_real_selection",

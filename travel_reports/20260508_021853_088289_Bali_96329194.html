@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Hangzhou to Bali</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Hangzhou -> Bali</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-06-10 - 2026-06-17</b></div>
+          <div class="request-item"><span>Travelers</span><b>2</b></div>
+          <div class="request-item"><span>Budget</span><b>30000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>budget hotel; food: local, street_food, fine_dining; attractions: entertainment, nature</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-06-10 - 2026-06-17</strong></div>
+        <div><span>Travelers</span><strong>2</strong></div>
+        <div><span>Budget</span><strong>30000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>29952 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>20166 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>1386 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>4200 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>4200 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>29952 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-06-10 | Bali</h2></div><strong>6239 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Raffles Bali</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">09:30 - 16:16</span><span class="event-name">Flight Hangzhou -&gt; Bali</span><span class="event-type">Flight (Economy) x2</span><span class="cost">5211 CNY total</span></li><li><span class="time">16:46 - 17:46</span><span class="event-name">Transfer DPS (nearby airport for Bali) -&gt; Raffles Bali for check-in</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">17:46 - 18:01</span><span class="event-name">Check-in Raffles Bali</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">18:01 - 18:16</span><span class="event-name">Transfer Raffles Bali -&gt; Nasi Campur Lawar Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">18:16 - 19:16</span><span class="event-name">Nasi Campur Lawar Bali</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:16 - 19:31</span><span class="event-name">Return to Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-06-11 | Bali</h2></div><strong>2259 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Raffles Bali</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Raffles Bali to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Warung Nasi Campur khas Bali</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">08:40 - 09:35</span><span class="event-name">Transfer Warung Nasi Campur khas Bali -&gt; Sangeh Monkey Forest</span><span class="event-type">Transfer</span><span class="cost">385 CNY</span></li><li><span class="time">09:35 - 11:05</span><span class="event-name">Sangeh Monkey Forest</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">11:05 - 11:19</span><span class="event-name">Transfer Sangeh Monkey Forest -&gt; Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat)</span><span class="event-type">Transfer</span><span class="cost">98 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat)</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 17:51</span><span class="event-name">Local area walk near Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat) before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat) before dinner -&gt; Bebek Bali Ubud</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bebek Bali Ubud</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Bebek Bali Ubud -&gt; AeroXSpace Adventure Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">AeroXSpace Adventure Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-06-12 | Bali</h2></div><strong>2657 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Raffles Bali</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Raffles Bali to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">BETUTU KEREN PAK RIZAL(local resto)</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">08:40 - 09:23</span><span class="event-name">Transfer BETUTU KEREN PAK RIZAL(local resto) -&gt; Kemenuh Butterfly Park, Bali</span><span class="event-type">Transfer</span><span class="cost">301 CNY</span></li><li><span class="time">09:23 - 10:53</span><span class="event-name">Kemenuh Butterfly Park, Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:53 - 11:11</span><span class="event-name">Transfer Kemenuh Butterfly Park, Bali -&gt; Babi Guling Ibu gendut</span><span class="event-type">Transfer</span><span class="cost">126 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Babi Guling Ibu gendut</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Babi Guling Ibu gendut -&gt; Sacred Monkey Forest Sanctuary</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:09 - 17:51</span><span class="event-name">Sacred Monkey Forest Sanctuary</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Sacred Monkey Forest Sanctuary -&gt; Bebek Tepi Sawah</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bebek Tepi Sawah</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:28</span><span class="event-name">Transfer Bebek Tepi Sawah -&gt; Bali Bird Park</span><span class="event-type">Transfer</span><span class="cost">196 CNY</span></li><li><span class="time">19:28 - 20:58</span><span class="event-name">Bali Bird Park</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">20:58 - 21:13</span><span class="event-name">Return to Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-06-13 | Bali</h2></div><strong>1819 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Raffles Bali</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Raffles Bali to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">BETUTU KEREN PAK RIZAL(local resto)</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">08:40 - 12:01</span><span class="event-name">Local area walk near BETUTU KEREN PAK RIZAL(local resto) before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:01 - 12:30</span><span class="event-name">Transfer Local area walk near BETUTU KEREN PAK RIZAL(local resto) before lunch -&gt; Warung Mek Juwel Nasi Campur Ayam</span><span class="event-type">Transfer</span><span class="cost">203 CNY</span></li><li><span class="time">12:30 - 13:30</span><span class="event-name">Warung Mek Juwel Nasi Campur Ayam</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:30 - 17:31</span><span class="event-name">Local area walk near Warung Mek Juwel Nasi Campur Ayam before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:31 - 18:00</span><span class="event-name">Transfer Local area walk near Warung Mek Juwel Nasi Campur Ayam before dinner -&gt; Warung Babi Guling Pande Egi</span><span class="event-type">Transfer</span><span class="cost">203 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Warung Babi Guling Pande Egi</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Warung Babi Guling Pande Egi -&gt; G Swing Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">G Swing Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-06-14 | Bali</h2></div><strong>2762 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Raffles Bali</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Raffles Bali to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Warung Nasi Campur khas Bali</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">08:40 - 09:17</span><span class="event-name">Transfer Warung Nasi Campur khas Bali -&gt; Waterbom Bali</span><span class="event-type">Transfer</span><span class="cost">259 CNY</span></li><li><span class="time">09:17 - 10:47</span><span class="event-name">Waterbom Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:47 - 11:15</span><span class="event-name">Transfer Waterbom Bali -&gt; Nasi Campur Lawar Bali</span><span class="event-type">Transfer</span><span class="cost">196 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Nasi Campur Lawar Bali</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 13:19</span><span class="event-name">Transfer Nasi Campur Lawar Bali -&gt; Trans Studio Theme Park Bali</span><span class="event-type">Transfer</span><span class="cost">133 CNY</span></li><li><span class="time">13:19 - 14:49</span><span class="event-name">Trans Studio Theme Park Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">14:49 - 15:06</span><span class="event-name">Transfer Trans Studio Theme Park Bali -&gt; AeroXSpace Adventure Bali</span><span class="event-type">Transfer</span><span class="cost">119 CNY</span></li><li><span class="time">15:06 - 16:36</span><span class="event-name">AeroXSpace Adventure Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">16:36 - 16:57</span><span class="event-name">Transfer AeroXSpace Adventure Bali -&gt; BABI GULING BERASPINGE</span><span class="event-type">Transfer</span><span class="cost">147 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">BABI GULING BERASPINGE</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-06-15 | Bali</h2></div><strong>2965 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Raffles Bali</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Raffles Bali to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Warung Nasi Campur khas Bali</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">08:40 - 08:59</span><span class="event-name">Transfer Warung Nasi Campur khas Bali -&gt; The Iron Fairies Bali</span><span class="event-type">Transfer</span><span class="cost">133 CNY</span></li><li><span class="time">08:59 - 10:29</span><span class="event-name">The Iron Fairies Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">10:29 - 10:41</span><span class="event-name">Transfer The Iron Fairies Bali -&gt; SAPIRING Nasi Campur</span><span class="event-type">Transfer</span><span class="cost">84 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">SAPIRING Nasi Campur</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 13:12</span><span class="event-name">Transfer SAPIRING Nasi Campur -&gt; Shooters Bali</span><span class="event-type">Transfer</span><span class="cost">84 CNY</span></li><li><span class="time">13:12 - 14:42</span><span class="event-name">Shooters Bali</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">14:42 - 15:31</span><span class="event-name">Transfer Shooters Bali -&gt; GWK Cultural Park</span><span class="event-type">Transfer</span><span class="cost">343 CNY</span></li><li><span class="time">15:31 - 17:01</span><span class="event-name">GWK Cultural Park</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">17:01 - 18:00</span><span class="event-name">Transfer GWK Cultural Park -&gt; Warung Babi Guling Men Malen</span><span class="event-type">Transfer</span><span class="cost">413 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Warung Babi Guling Men Malen</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-06-16 | Bali</h2></div><strong>4709 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Raffles Bali</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Raffles Bali to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">BETUTU KEREN PAK RIZAL(local resto)</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">08:40 - 10:57</span><span class="event-name">Transfer BETUTU KEREN PAK RIZAL(local resto) -&gt; Garuda Wisnu Kencana Cultural Park</span><span class="event-type">Transfer</span><span class="cost">959 CNY</span></li><li><span class="time">10:57 - 12:27</span><span class="event-name">Garuda Wisnu Kencana Cultural Park</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">12:27 - 14:03</span><span class="event-name">Transfer Garuda Wisnu Kencana Cultural Park -&gt; Bebek uma Menuh Restaurant</span><span class="event-type">Transfer</span><span class="cost">672 CNY</span></li><li><span class="time">14:03 - 15:03</span><span class="event-name">Bebek uma Menuh Restaurant</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">15:03 - 16:39</span><span class="event-name">Local area walk near Bebek uma Menuh Restaurant before Uluwatu Temple</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:39 - 18:37</span><span class="event-name">Transfer Local area walk near Bebek uma Menuh Restaurant before Uluwatu Temple -&gt; Uluwatu Temple</span><span class="event-type">Transfer</span><span class="cost">826 CNY</span></li><li><span class="time">18:37 - 20:07</span><span class="event-name">Uluwatu Temple</span><span class="event-type">Poi</span><span class="cost">300 CNY</span></li><li><span class="time">20:07 - 21:39</span><span class="event-name">Transfer Uluwatu Temple -&gt; Bebek Tebasari Resto</span><span class="event-type">Transfer</span><span class="cost">644 CNY</span></li><li><span class="time">21:39 - 22:39</span><span class="event-name">Bebek Tebasari Resto</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">22:39 - 22:54</span><span class="event-name">Return to Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 8</p><h2>2026-06-17 | Bali</h2></div><strong>6542 CNY</strong></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Raffles Bali to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Warung Nasi Campur khas Bali</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">08:40 - 11:43</span><span class="event-name">Local area walk near Warung Nasi Campur khas Bali before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:43 - 12:00</span><span class="event-name">Transfer Local area walk near Warung Nasi Campur khas Bali before lunch -&gt; Warung Sriwijaya</span><span class="event-type">Transfer</span><span class="cost">119 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Warung Sriwijaya</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 13:41</span><span class="event-name">Transfer Warung Sriwijaya -&gt; Raffles Bali</span><span class="event-type">Transfer</span><span class="cost">287 CNY</span></li><li><span class="time">14:15 - 14:30</span><span class="event-name">Check-out Raffles Bali</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">14:30 - 15:30</span><span class="event-name">Transfer Raffles Bali -&gt; DPS (nearby airport for Bali)</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">17:00 - 23:46</span><span class="event-name">Flight Bali -&gt; Hangzhou</span><span class="event-type">Flight (Economy) x2</span><span class="cost">5211 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 30.29365, "lng": 120.16742, "day": 0, "date": "", "city": "Hangzhou", "name": "Start: Hangzhou", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 41.12066, "lng": 16.86982, "day": 1, "date": "2026-06-10", "city": "Bali", "name": "Fly Hangzhou (HGH) -> Bali (DPS) [Economy]", "type": "flight", "time": "", "cost": 5211, "route_point": true}, {"lat": 41.12066, "lng": 16.87582, "day": 1, "date": "2026-06-10", "city": "Bali", "name": "Day 1.2 Transfer DPS (nearby airport for Bali) -> Raffles Bali for check-in", "type": "transfer", "time": "16:46-17:46", "cost": 420, "estimated_coord": true}, {"lat": -8.7864398, "lng": 115.16415409999999, "day": 1, "date": "2026-06-10", "city": "Bali", "name": "Day 1.3 Check-in Raffles Bali", "type": "checkin", "time": "17:46-18:01", "cost": 0, "estimated_coord": false}, {"lat": 41.12471292354617, "lng": 16.865395770041133, "day": 1, "date": "2026-06-10", "city": "Bali", "name": "Day 1.4 Transfer Raffles Bali -> Nasi Campur Lawar Bali", "type": "transfer", "time": "18:01-18:16", "cost": 105, "estimated_coord": true}, {"lat": -8.652961, "lng": 115.16841900000001, "day": 1, "date": "2026-06-10", "city": "Bali", "name": "Day 1.5 Nasi Campur Lawar Bali", "type": "meal", "time": "18:16-19:16", "cost": 200, "estimated_coord": false}, {"lat": 41.11468297807535, "lng": 16.870344603576314, "day": 1, "date": "2026-06-10", "city": "Bali", "name": "Day 1.6 Return to Raffles Bali", "type": "transfer", "time": "19:16-19:31", "cost": 105, "estimated_coord": true}, {"lat": 41.12542164960845, "lng": 16.87347057433925, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.1 Transfer from Raffles Bali to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": -8.626534399999999, "lng": 115.1677151, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.2 Warung Nasi Campur khas Bali", "type": "meal", "time": "08:00-08:40", "cost": 200, "estimated_coord": false}, {"lat": 41.11961481097421, "lng": 16.863911736304093, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.3 Transfer Warung Nasi Campur khas Bali -> Sangeh Monkey Forest", "type": "transfer", "time": "08:40-09:35", "cost": 385, "estimated_coord": true}, {"lat": -8.4818231, "lng": 115.20646409999999, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.4 Sangeh Monkey Forest", "type": "poi", "time": "09:35-11:05", "cost": 300, "estimated_coord": false}, {"lat": 41.11743973592508, "lng": 16.874882598076855, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.5 Transfer Sangeh Monkey Forest -> Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat)", "type": "transfer", "time": "11:05-11:19", "cost": 98, "estimated_coord": true}, {"lat": -8.4835369, "lng": 115.25246109999998, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.6 Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat)", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": false}, {"lat": -8.479483976453835, "lng": 115.2420368700411, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.7 Local area walk near Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat) before dinner", "type": "poi", "time": "13:00-17:51", "cost": 0, "estimated_coord": true}, {"lat": 41.126454251957696, "lng": 16.868262231002134, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.8 Transfer Local area walk near Nasi Ayam Kedewatan Ibu Mangku - Ubud (Pusat) before dinner -> Bebek Bali Ubud", "type": "transfer", "time": "17:51-18:00", "cost": 63, "estimated_coord": true}, {"lat": -8.466094499999999, "lng": 115.2480696, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.9 Bebek Bali Ubud", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": false}, {"lat": 41.1153352297081, "lng": 16.867054711346267, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.10 Transfer Bebek Bali Ubud -> AeroXSpace Adventure Bali", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": -8.71298, "lng": 115.2349103, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.11 AeroXSpace Adventure Bali", "type": "poi", "time": "19:15-21:00", "cost": 300, "estimated_coord": false}, {"lat": 41.12477683491762, "lng": 16.881091719933583, "day": 2, "date": "2026-06-11", "city": "Bali", "name": "Day 2.12 Return to Raffles Bali", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 41.12523826579106, "lng": 16.85872768363477, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.1 Transfer from Raffles Bali to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": -8.4553187, "lng": 115.3140855, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.2 BETUTU KEREN PAK RIZAL(local resto)", "type": "meal", "time": "08:00-08:40", "cost": 200, "estimated_coord": false}, {"lat": 41.10979139819156, "lng": 16.874906599525183, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.3 Transfer BETUTU KEREN PAK RIZAL(local resto) -> Kemenuh Butterfly Park, Bali", "type": "transfer", "time": "08:40-09:23", "cost": 301, "estimated_coord": true}, {"lat": -8.5728188, "lng": 115.28713470000001, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.4 Kemenuh Butterfly Park, Bali", "type": "poi", "time": "09:23-10:53", "cost": 300, "estimated_coord": false}, {"lat": 41.13211013211957, "lng": 16.873410887695876, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.5 Transfer Kemenuh Butterfly Park, Bali -> Babi Guling Ibu gendut", "type": "transfer", "time": "10:53-11:11", "cost": 126, "estimated_coord": true}, {"lat": -8.528506499999999, "lng": 115.26393659999998, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.6 Babi Guling Ibu gendut", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": false}, {"lat": 41.11464259595631, "lng": 16.85943776283381, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.7 Transfer Babi Guling Ibu gendut -> Sacred Monkey Forest Sanctuary", "type": "transfer", "time": "13:00-13:09", "cost": 63, "estimated_coord": true}, {"lat": -8.5193727, "lng": 115.26062990000001, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.8 Sacred Monkey Forest Sanctuary", "type": "poi", "time": "13:09-17:51", "cost": 300, "estimated_coord": false}, {"lat": 41.11808399429533, "lng": 16.881540247207695, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.9 Transfer Sacred Monkey Forest Sanctuary -> Bebek Tepi Sawah", "type": "transfer", "time": "17:51-18:00", "cost": 63, "estimated_coord": true}, {"lat": -8.523743999999999, "lng": 115.27284949999999, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.10 Bebek Tepi Sawah", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": false}, {"lat": 41.130476351247964, "lng": 16.86291788089232, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.11 Transfer Bebek Tepi Sawah -> Bali Bird Park", "type": "transfer", "time": "19:00-19:28", "cost": 196, "estimated_coord": true}, {"lat": -8.5996431, "lng": 115.2520569, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.12 Bali Bird Park", "type": "poi", "time": "19:28-20:58", "cost": 300, "estimated_coord": false}, {"lat": 41.108759407278676, "lng": 16.868278606837595, "day": 3, "date": "2026-06-12", "city": "Bali", "name": "Day 3.13 Return to Raffles Bali", "type": "transfer", "time": "20:58-21:13", "cost": 105, "estimated_coord": true}, {"lat": 41.13226095255104, "lng": 16.883582917565274, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.1 Transfer from Raffles Bali to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": -8.451265776453834, "lng": 115.30366127004113, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.2 BETUTU KEREN PAK RIZAL(local resto)", "type": "meal", "time": "08:00-08:40", "cost": 200, "estimated_coord": true}, {"lat": -8.461295721924648, "lng": 115.30861010357631, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.3 Local area walk near BETUTU KEREN PAK RIZAL(local resto) before lunch", "type": "poi", "time": "08:40-12:01", "cost": 0, "estimated_coord": true}, {"lat": 41.12140246180609, "lng": 16.85183531900571, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.4 Transfer Local area walk near BETUTU KEREN PAK RIZAL(local resto) before lunch -> Warung Mek Juwel Nasi Campur Ayam", "type": "transfer", "time": "12:01-12:30", "cost": 203, "estimated_coord": true}, {"lat": -8.5068377, "lng": 115.2515584, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.5 Warung Mek Juwel Nasi Campur Ayam", "type": "meal", "time": "12:30-13:30", "cost": 200, "estimated_coord": false}, {"lat": -8.502784776453835, "lng": 115.24113417004112, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.6 Local area walk near Warung Mek Juwel Nasi Campur Ayam before dinner", "type": "poi", "time": "13:30-17:31", "cost": 0, "estimated_coord": true}, {"lat": 41.10796410686036, "lng": 16.8825798705866, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.7 Transfer Local area walk near Warung Mek Juwel Nasi Campur Ayam before dinner -> Warung Babi Guling Pande Egi", "type": "transfer", "time": "17:31-18:00", "cost": 203, "estimated_coord": true}, {"lat": -8.5268818, "lng": 115.32515559999999, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.8 Warung Babi Guling Pande Egi", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": false}, {"lat": 41.13864072178824, "lng": 16.868987147087463, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.9 Transfer Warung Babi Guling Pande Egi -> G Swing Bali", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": -8.6514051, "lng": 115.1330068, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.10 G Swing Bali", "type": "poi", "time": "19:15-21:00", "cost": 300, "estimated_coord": false}, {"lat": 41.10683894380045, "lng": 16.858288373682395, "day": 4, "date": "2026-06-13", "city": "Bali", "name": "Day 4.11 Return to Raffles Bali", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 41.123061788512175, "lng": 16.887659041788808, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.1 Transfer from Raffles Bali to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": -8.622481476453833, "lng": 115.15729087004112, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.2 Warung Nasi Campur khas Bali", "type": "meal", "time": "08:00-08:40", "cost": 200, "estimated_coord": true}, {"lat": 41.13093903463608, "lng": 16.8550436186111, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.3 Transfer Warung Nasi Campur khas Bali -> Waterbom Bali", "type": "transfer", "time": "08:40-09:17", "cost": 259, "estimated_coord": true}, {"lat": -8.728581499999999, "lng": 115.1692888, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.4 Waterbom Bali", "type": "poi", "time": "09:17-10:47", "cost": 300, "estimated_coord": false}, {"lat": 41.1030992738261, "lng": 16.87377232795267, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.5 Transfer Waterbom Bali -> Nasi Campur Lawar Bali", "type": "transfer", "time": "10:47-11:15", "cost": 196, "estimated_coord": true}, {"lat": -8.648908076453834, "lng": 115.15799477004114, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.6 Nasi Campur Lawar Bali", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 41.14148470530212, "lng": 16.88175028285833, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.7 Transfer Nasi Campur Lawar Bali -> Trans Studio Theme Park Bali", "type": "transfer", "time": "13:00-13:19", "cost": 133, "estimated_coord": true}, {"lat": -8.7019925, "lng": 115.18305689999998, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.8 Trans Studio Theme Park Bali", "type": "poi", "time": "13:19-14:49", "cost": 300, "estimated_coord": false}, {"lat": 41.11336320653779, "lng": 16.846956124449914, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.9 Transfer Trans Studio Theme Park Bali -> AeroXSpace Adventure Bali", "type": "transfer", "time": "14:49-15:06", "cost": 119, "estimated_coord": true}, {"lat": -8.708927076453834, "lng": 115.22448607004112, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.10 AeroXSpace Adventure Bali", "type": "poi", "time": "15:06-16:36", "cost": 300, "estimated_coord": true}, {"lat": 41.11059619211094, "lng": 16.891608064869835, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.11 Transfer AeroXSpace Adventure Bali -> BABI GULING BERASPINGE", "type": "transfer", "time": "16:36-16:57", "cost": 147, "estimated_coord": true}, {"lat": -8.659913099999999, "lng": 115.2057534, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.12 BABI GULING BERASPINGE", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": false}, {"lat": 41.14279832691657, "lng": 16.8605520724358, "day": 5, "date": "2026-06-14", "city": "Bali", "name": "Day 5.13 Return to Raffles Bali", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 41.09807545816124, "lng": 16.861699749392212, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.1 Transfer from Raffles Bali to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": -8.632511421924647, "lng": 115.1622397035763, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.2 Warung Nasi Campur khas Bali", "type": "meal", "time": "08:00-08:40", "cost": 200, "estimated_coord": true}, {"lat": 41.131828075286876, "lng": 16.891063212901695, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.3 Transfer Warung Nasi Campur khas Bali -> The Iron Fairies Bali", "type": "transfer", "time": "08:40-08:59", "cost": 133, "estimated_coord": true}, {"lat": -8.6771175, "lng": 115.15511939999999, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.4 The Iron Fairies Bali", "type": "poi", "time": "08:59-10:29", "cost": 300, "estimated_coord": false}, {"lat": 41.1267744974164, "lng": 16.846611964293704, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.5 Transfer The Iron Fairies Bali -> SAPIRING Nasi Campur", "type": "transfer", "time": "10:29-10:41", "cost": 84, "estimated_coord": true}, {"lat": -8.6542505, "lng": 115.13011379999999, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.6 SAPIRING Nasi Campur", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": false}, {"lat": 41.10047461049544, "lng": 16.882802682717728, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.7 Transfer SAPIRING Nasi Campur -> Shooters Bali", "type": "transfer", "time": "13:00-13:12", "cost": 84, "estimated_coord": true}, {"lat": -8.6743391, "lng": 115.15714769999998, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.8 Shooters Bali", "type": "poi", "time": "13:12-14:42", "cost": 300, "estimated_coord": false}, {"lat": 41.15022721363678, "lng": 16.874897388871947, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.9 Transfer Shooters Bali -> GWK Cultural Park", "type": "transfer", "time": "14:42-15:31", "cost": 343, "estimated_coord": true}, {"lat": -8.8109019, "lng": 115.1671947, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.10 GWK Cultural Park", "type": "poi", "time": "15:31-17:01", "cost": 300, "estimated_coord": false}, {"lat": 41.102287686090015, "lng": 16.84610380128282, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.11 Transfer GWK Cultural Park -> Warung Babi Guling Men Malen", "type": "transfer", "time": "17:01-18:00", "cost": 413, "estimated_coord": true}, {"lat": -8.5802537, "lng": 115.2487455, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.12 Warung Babi Guling Men Malen", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": false}, {"lat": 41.11818723356798, "lng": 16.89971791675306, "day": 6, "date": "2026-06-15", "city": "Bali", "name": "Day 6.13 Return to Raffles Bali", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 41.1426790096866, "lng": 16.84944444571499, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.1 Transfer from Raffles Bali to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": -8.450557050391554, "lng": 115.31173607433925, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.2 BETUTU KEREN PAK RIZAL(local resto)", "type": "meal", "time": "08:00-08:40", "cost": 200, "estimated_coord": true}, {"lat": 41.09066037899201, "lng": 16.869970795812364, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.3 Transfer BETUTU KEREN PAK RIZAL(local resto) -> Garuda Wisnu Kencana Cultural Park", "type": "transfer", "time": "08:40-10:57", "cost": 959, "estimated_coord": true}, {"lat": -8.8104228, "lng": 115.16759859999999, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.4 Garuda Wisnu Kencana Cultural Park", "type": "poi", "time": "10:57-12:27", "cost": 300, "estimated_coord": false}, {"lat": 41.14288273098613, "lng": 16.889973169168098, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.5 Transfer Garuda Wisnu Kencana Cultural Park -> Bebek uma Menuh Restaurant", "type": "transfer", "time": "12:27-14:03", "cost": 672, "estimated_coord": true}, {"lat": -8.5706866, "lng": 115.29251359999999, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.6 Bebek uma Menuh Restaurant", "type": "meal", "time": "14:03-15:03", "cost": 200, "estimated_coord": false}, {"lat": -8.566633676453835, "lng": 115.28208937004112, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.7 Local area walk near Bebek uma Menuh Restaurant before Uluwatu Temple", "type": "poi", "time": "15:03-16:39", "cost": 0, "estimated_coord": true}, {"lat": 41.11788679694243, "lng": 16.839948452587766, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.8 Transfer Local area walk near Bebek uma Menuh Restaurant before Uluwatu Temple -> Uluwatu Temple", "type": "transfer", "time": "16:39-18:37", "cost": 826, "estimated_coord": true}, {"lat": -8.829143199999999, "lng": 115.08490690000001, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.9 Uluwatu Temple", "type": "poi", "time": "18:37-20:07", "cost": 300, "estimated_coord": false}, {"lat": 41.10252703169698, "lng": 16.893719695824878, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.10 Transfer Uluwatu Temple -> Bebek Tebasari Resto", "type": "transfer", "time": "20:07-21:39", "cost": 644, "estimated_coord": true}, {"lat": -8.5456567, "lng": 115.25663600000001, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.11 Bebek Tebasari Resto", "type": "meal", "time": "21:39-22:39", "cost": 200, "estimated_coord": false}, {"lat": 41.15607761231285, "lng": 16.863370756784192, "day": 7, "date": "2026-06-16", "city": "Bali", "name": "Day 7.12 Return to Raffles Bali", "type": "transfer", "time": "22:39-22:54", "cost": 105, "estimated_coord": true}, {"lat": 30.297702923546165, "lng": 120.15699577004114, "day": 2, "date": "2026-06-17", "city": "Hangzhou", "name": "Fly Bali (DPS) -> Hangzhou (HGH) [Economy]", "type": "flight", "time": "", "cost": 5211, "route_point": true, "estimated_coord": false}, {"lat": 41.09018767480828, "lng": 16.85065134335928, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.1 Transfer from Raffles Bali to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": -8.621772750391553, "lng": 115.16536567433924, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.2 Warung Nasi Campur khas Bali", "type": "meal", "time": "08:00-08:40", "cost": 200, "estimated_coord": true}, {"lat": -8.627579589025787, "lng": 115.1558068363041, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.3 Local area walk near Warung Nasi Campur khas Bali before lunch", "type": "poi", "time": "08:40-11:43", "cost": 0, "estimated_coord": true}, {"lat": 41.130181245697, "lng": 16.904538091542843, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.4 Transfer Local area walk near Warung Nasi Campur khas Bali before lunch -> Warung Sriwijaya", "type": "transfer", "time": "11:43-12:00", "cost": 119, "estimated_coord": true}, {"lat": -8.674045099999999, "lng": 115.17295709999999, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.5 Warung Sriwijaya", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": false}, {"lat": 41.137090931705586, "lng": 16.837788383067874, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.6 Transfer Warung Sriwijaya -> Raffles Bali", "type": "transfer", "time": "13:00-13:41", "cost": 287, "estimated_coord": true}, {"lat": -8.782386876453835, "lng": 115.15372987004112, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.7 Check-out Raffles Bali", "type": "checkout", "time": "14:15-14:30", "cost": 0, "estimated_coord": true}, {"lat": 41.08690734753502, "lng": 16.88234032154451, "day": 8, "date": "2026-06-17", "city": "Bali", "name": "Day 8.8 Transfer Raffles Bali -> DPS (nearby airport for Bali)", "type": "transfer", "time": "14:30-15:30", "cost": 420, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

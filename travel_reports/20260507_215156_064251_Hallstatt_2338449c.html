@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Shenzhen to Hallstatt</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Shenzhen -> Hallstatt</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-10-08 - 2026-10-16</b></div>
+          <div class="request-item"><span>Travelers</span><b>2</b></div>
+          <div class="request-item"><span>Budget</span><b>23900 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>Not specified</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-10-08 - 2026-10-16</strong></div>
+        <div><span>Travelers</span><strong>2</strong></div>
+        <div><span>Budget</span><strong>23900 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>23888 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>4585 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>4983 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>12400 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>1920 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>23888 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-10-08 | Hallstatt</h2></div><strong>0 CNY</strong></div><ul class="event-list"><li><span class="time">Needs selection</span><span class="event-name">Flight Shenzhen -&gt; Hallstatt unavailable<small class="event-note">No live ticket candidate was returned by the flight search provider.</small></span><span class="event-type">Flight Unavailable</span><span class="cost">0 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-10-09 | Hallstatt</h2></div><strong>3061 CNY</strong></div><div class="hotel-line">Hotel night: <strong>I da Mitt</strong><span>712 CNY</span></div><ul class="event-list"><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Heritage Cafe &amp; Bar Hallstatt -&gt; I da Mitt for check-in</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 09:04</span><span class="event-name">Check-in I da Mitt</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">09:04 - 09:09</span><span class="event-name">Transfer I da Mitt -&gt; Heritage Cafe &amp; Bar Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">09:09 - 09:49</span><span class="event-name">Heritage Cafe &amp; Bar Hallstatt</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">09:49 - 09:54</span><span class="event-name">Transfer Heritage Cafe &amp; Bar Hallstatt -&gt; Pfarrkirche Mariä Himmelfahrt (Maria am Berg)</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">09:54 - 12:01</span><span class="event-name">Pfarrkirche Mariä Himmelfahrt (Maria am Berg)</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">12:01 - 12:10</span><span class="event-name">Transfer Pfarrkirche Mariä Himmelfahrt (Maria am Berg) -&gt; Seecafé Hallstatt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:10 - 13:10</span><span class="event-name">Seecafé Hallstatt</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:10 - 13:15</span><span class="event-name">Transfer Seecafé Hallstatt -&gt; Salzwelten Shop &amp; Infocontainer Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">13:15 - 18:01</span><span class="event-name">Salzwelten Shop &amp; Infocontainer Hallstatt</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">18:01 - 18:10</span><span class="event-name">Transfer Salzwelten Shop &amp; Infocontainer Hallstatt -&gt; Muk´s Schmankerl</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:10 - 19:10</span><span class="event-name">Muk´s Schmankerl</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">19:10 - 19:20</span><span class="event-name">Transfer Muk´s Schmankerl -&gt; 5 Fingers</span><span class="event-type">Transfer</span><span class="cost">70 CNY</span></li><li><span class="time">19:20 - 21:00</span><span class="event-name">5 Fingers</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to I da Mitt</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-10-10 | Hallstatt</h2></div><strong>3342 CNY</strong></div><div class="hotel-line">Hotel night: <strong>I da Mitt</strong><span>712 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from I da Mitt to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Uferwirt Seeraunzn</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">08:40 - 08:51</span><span class="event-name">Transfer Uferwirt Seeraunzn -&gt; Statue of the Holy Trinity</span><span class="event-type">Transfer</span><span class="cost">77 CNY</span></li><li><span class="time">08:51 - 11:55</span><span class="event-name">Statue of the Holy Trinity</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Sweet Tomi</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:05 - 17:55</span><span class="event-name">Marketplace Hallstatt</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Seehotel Grüner Baum</span><span class="event-type">Meal</span><span class="cost">1000 CNY</span></li><li><span class="time">19:00 - 19:09</span><span class="event-name">Transfer Seehotel Grüner Baum -&gt; Hallstatt Skywalk - Hallstättersee</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">19:09 - 20:39</span><span class="event-name">Hallstatt Skywalk - Hallstättersee</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">20:39 - 20:54</span><span class="event-name">Return to I da Mitt</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-10-11 | Hallstatt</h2></div><strong>3273 CNY</strong></div><div class="hotel-line">Hotel night: <strong>I da Mitt</strong><span>712 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from I da Mitt to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Heritage Cafe &amp; Bar Hallstatt</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Heritage Cafe &amp; Bar Hallstatt -&gt; Hallstatt World Heritage Museum</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">08:45 - 11:55</span><span class="event-name">Hallstatt World Heritage Museum</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">11:55 - 12:00</span><span class="event-name">Transfer Hallstatt World Heritage Museum -&gt; Restaurant am See</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Restaurant am See</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Restaurant am See -&gt; Hallstätter Wasserfall</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:09 - 16:01</span><span class="event-name">Hallstätter Wasserfall</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">16:01 - 16:10</span><span class="event-name">Transfer Hallstätter Wasserfall -&gt; Shopping Street Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">16:10 - 17:40</span><span class="event-name">Shopping Street Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:40 - 17:45</span><span class="event-name">Transfer Shopping Street Walk in Hallstatt -&gt; Seewirt Restaurant</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Seewirt Restaurant</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to I da Mitt</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-10-12 | Hallstatt</h2></div><strong>3371 CNY</strong></div><div class="hotel-line">Hotel night: <strong>I da Mitt</strong><span>712 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from I da Mitt to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Muk´s Schmankerl</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Muk´s Schmankerl -&gt; Riverside Photo Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Riverside Photo Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 10:28</span><span class="event-name">Transfer Riverside Photo Walk in Hallstatt -&gt; Alte Schmiede</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">10:28 - 11:51</span><span class="event-name">Alte Schmiede</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Alte Schmiede -&gt; Restaurant Grüner Baum - Lake side Terrace</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Restaurant Grüner Baum - Lake side Terrace</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">13:00 - 15:49</span><span class="event-name">Local area walk near Restaurant Grüner Baum - Lake side Terrace before Museum District Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:49 - 15:54</span><span class="event-name">Transfer Local area walk near Restaurant Grüner Baum - Lake side Terrace before Museum District Walk in Hallstatt -&gt; Museum District Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">15:54 - 17:24</span><span class="event-name">Museum District Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:24 - 17:29</span><span class="event-name">Transfer Museum District Walk in Hallstatt -&gt; Market And Cafe Lane in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">17:29 - 18:59</span><span class="event-name">Market And Cafe Lane in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:59 - 19:04</span><span class="event-name">Transfer Market And Cafe Lane in Hallstatt -&gt; Zum Bader Gastwirtschaft</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">19:04 - 20:04</span><span class="event-name">Zum Bader Gastwirtschaft</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">20:04 - 20:09</span><span class="event-name">Transfer Zum Bader Gastwirtschaft -&gt; 5 Fingers</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">20:09 - 21:00</span><span class="event-name">5 Fingers</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to I da Mitt</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-10-13 | Hallstatt</h2></div><strong>3028 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Rosy&#x27;s House B&amp;B</strong><span>712 CNY</span></div><ul class="event-list"><li><span class="time">07:00 - 07:15</span><span class="event-name">Check-out I da Mitt</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">07:15 - 07:35</span><span class="event-name">Transfer I da Mitt -&gt; Rosy&#x27;s House B&amp;B</span><span class="event-type">Transfer</span><span class="cost">140 CNY</span></li><li><span class="time">07:45 - 08:00</span><span class="event-name">Check-in Rosy&#x27;s House B&amp;B</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">08:00 - 08:13</span><span class="event-name">Transfer Rosy&#x27;s House B&amp;B -&gt; Uferwirt Seeraunzn</span><span class="event-type">Transfer</span><span class="cost">91 CNY</span></li><li><span class="time">08:13 - 08:53</span><span class="event-name">Uferwirt Seeraunzn</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">08:53 - 09:06</span><span class="event-name">Transfer Uferwirt Seeraunzn -&gt; Historic Street Stroll in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">91 CNY</span></li><li><span class="time">09:06 - 10:36</span><span class="event-name">Historic Street Stroll in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:36 - 12:04</span><span class="event-name">Local area walk near Historic Street Stroll in Hallstatt before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:04 - 12:13</span><span class="event-name">Transfer Local area walk near Historic Street Stroll in Hallstatt before lunch -&gt; Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:13 - 13:13</span><span class="event-name">Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">13:13 - 13:22</span><span class="event-name">Transfer Welterbe-Wirtshaus Steegwirt -&gt; City Viewpoint Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:22 - 14:52</span><span class="event-name">City Viewpoint Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:52 - 14:57</span><span class="event-name">Transfer City Viewpoint Walk in Hallstatt -&gt; Design And Gallery Lane in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">14:57 - 16:27</span><span class="event-name">Design And Gallery Lane in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:27 - 16:46</span><span class="event-name">Transfer Design And Gallery Lane in Hallstatt -&gt; Panoramic Viewpoint - Hallstatt</span><span class="event-type">Transfer</span><span class="cost">133 CNY</span></li><li><span class="time">16:46 - 18:08</span><span class="event-name">Panoramic Viewpoint - Hallstatt</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">18:08 - 18:13</span><span class="event-name">Transfer Panoramic Viewpoint - Hallstatt -&gt; Sweet Tomi</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">18:13 - 19:13</span><span class="event-name">Sweet Tomi</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:13 - 19:28</span><span class="event-name">Return to Rosy&#x27;s House B&amp;B</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-10-14 | Hallstatt</h2></div><strong>2791 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Rosy&#x27;s House B&amp;B</strong><span>712 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Rosy&#x27;s House B&amp;B to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Uferwirt Seeraunzn</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">08:40 - 08:53</span><span class="event-name">Transfer Uferwirt Seeraunzn -&gt; Neighborhood Orientation Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">91 CNY</span></li><li><span class="time">08:53 - 10:23</span><span class="event-name">Neighborhood Orientation Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:23 - 11:40</span><span class="event-name">Local area walk near Neighborhood Orientation Walk in Hallstatt before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:40 - 12:00</span><span class="event-name">Transfer Local area walk near Neighborhood Orientation Walk in Hallstatt before lunch -&gt; Sweet Tomi</span><span class="event-type">Transfer</span><span class="cost">140 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Sweet Tomi</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 14:54</span><span class="event-name">Local area walk near Sweet Tomi before Local Park Stroll in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:54 - 15:14</span><span class="event-name">Transfer Local area walk near Sweet Tomi before Local Park Stroll in Hallstatt -&gt; Local Park Stroll in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">140 CNY</span></li><li><span class="time">15:14 - 16:44</span><span class="event-name">Local Park Stroll in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:44 - 16:49</span><span class="event-name">Transfer Local Park Stroll in Hallstatt -&gt; Shopping Street Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">16:49 - 18:19</span><span class="event-name">Shopping Street Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:19 - 18:28</span><span class="event-name">Transfer Shopping Street Walk in Hallstatt -&gt; Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:28 - 19:28</span><span class="event-name">Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">19:28 - 19:43</span><span class="event-name">Return to Rosy&#x27;s House B&amp;B</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 8</p><h2>2026-10-15 | Hallstatt</h2></div><strong>3014 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Rosy&#x27;s House B&amp;B</strong><span>712 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Rosy&#x27;s House B&amp;B to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Uferwirt Seeraunzn</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">08:40 - 08:53</span><span class="event-name">Transfer Uferwirt Seeraunzn -&gt; Riverside Photo Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">91 CNY</span></li><li><span class="time">08:53 - 10:23</span><span class="event-name">Riverside Photo Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:23 - 11:40</span><span class="event-name">Local area walk near Riverside Photo Walk in Hallstatt before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:40 - 12:00</span><span class="event-name">Transfer Local area walk near Riverside Photo Walk in Hallstatt before lunch -&gt; Sweet Tomi</span><span class="event-type">Transfer</span><span class="cost">140 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Sweet Tomi</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 14:54</span><span class="event-name">Local area walk near Sweet Tomi before Museum District Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:54 - 15:14</span><span class="event-name">Transfer Local area walk near Sweet Tomi before Museum District Walk in Hallstatt -&gt; Museum District Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">140 CNY</span></li><li><span class="time">15:14 - 16:44</span><span class="event-name">Museum District Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:44 - 16:49</span><span class="event-name">Transfer Museum District Walk in Hallstatt -&gt; Market And Cafe Lane in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">16:49 - 18:19</span><span class="event-name">Market And Cafe Lane in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:19 - 18:28</span><span class="event-name">Transfer Market And Cafe Lane in Hallstatt -&gt; Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:28 - 19:28</span><span class="event-name">Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">19:28 - 19:37</span><span class="event-name">Transfer Welterbe-Wirtshaus Steegwirt -&gt; 5 Fingers</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">19:37 - 21:00</span><span class="event-name">5 Fingers</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Rosy&#x27;s House B&amp;B</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 9</p><h2>2026-10-16 | Hallstatt</h2></div><strong>2009 CNY</strong></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Rosy&#x27;s House B&amp;B to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Uferwirt Seeraunzn</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">08:40 - 08:53</span><span class="event-name">Transfer Uferwirt Seeraunzn -&gt; Historic Street Stroll in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">91 CNY</span></li><li><span class="time">08:53 - 10:23</span><span class="event-name">Historic Street Stroll in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:23 - 10:28</span><span class="event-name">Transfer Historic Street Stroll in Hallstatt -&gt; Rosy&#x27;s House B&amp;B</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">11:45 - 12:00</span><span class="event-name">Check-out Rosy&#x27;s House B&amp;B</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">12:00 - 12:20</span><span class="event-name">Transfer Rosy&#x27;s House B&amp;B -&gt; Sweet Tomi</span><span class="event-type">Transfer</span><span class="cost">140 CNY</span></li><li><span class="time">12:20 - 13:20</span><span class="event-name">Sweet Tomi</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:20 - 13:40</span><span class="event-name">Transfer Sweet Tomi -&gt; Design And Gallery Lane in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">140 CNY</span></li><li><span class="time">13:40 - 15:10</span><span class="event-name">Design And Gallery Lane in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:10 - 15:15</span><span class="event-name">Transfer Design And Gallery Lane in Hallstatt -&gt; City Viewpoint Walk in Hallstatt</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">15:15 - 16:45</span><span class="event-name">City Viewpoint Walk in Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:45 - 17:51</span><span class="event-name">Local area walk near City Viewpoint Walk in Hallstatt before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near City Viewpoint Walk in Hallstatt before dinner -&gt; Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Welterbe-Wirtshaus Steegwirt</span><span class="event-type">Meal</span><span class="cost">600 CNY</span></li><li><span class="time">Needs selection</span><span class="event-name">Flight Hallstatt -&gt; Shenzhen unavailable<small class="event-note">No live ticket candidate was returned by the flight search provider.</small></span><span class="event-type">Flight Unavailable</span><span class="cost">0 CNY</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 47.562599399999996, "lng": 13.65505, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.2 Check-in I da Mitt", "type": "checkin", "time": "08:49-09:04", "cost": 0, "estimated_coord": false}, {"lat": 47.563037699999995, "lng": 13.655134499999999, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.4 Heritage Cafe & Bar Hallstatt", "type": "meal", "time": "09:09-09:49", "cost": 600, "estimated_coord": false}, {"lat": 47.5634386, "lng": 13.648832599999999, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.6 Pfarrkirche Mariä Himmelfahrt (Maria am Berg)", "type": "poi", "time": "09:54-12:01", "cost": 160, "estimated_coord": false}, {"lat": 47.5563977, "lng": 13.648086900000001, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.8 Seecafé Hallstatt", "type": "meal", "time": "12:10-13:10", "cost": 200, "estimated_coord": false}, {"lat": 47.556049599999994, "lng": 13.645321099999999, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.10 Salzwelten Shop & Infocontainer Hallstatt", "type": "poi", "time": "13:15-18:01", "cost": 160, "estimated_coord": false}, {"lat": 47.5595131, "lng": 13.6533988, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.12 Muk´s Schmankerl", "type": "meal", "time": "18:10-19:10", "cost": 600, "estimated_coord": false}, {"lat": 47.528611999999995, "lng": 13.6980417, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.14 5 Fingers", "type": "poi", "time": "19:20-21:00", "cost": 160, "estimated_coord": false}, {"lat": 47.589988999999996, "lng": 13.6728429, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.2 Uferwirt Seeraunzn", "type": "meal", "time": "08:00-08:40", "cost": 600, "estimated_coord": false}, {"lat": 47.5624168, "lng": 13.649351999999999, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.4 Statue of the Holy Trinity", "type": "poi", "time": "08:51-11:55", "cost": 160, "estimated_coord": false}, {"lat": 47.562509999999996, "lng": 13.6555062, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.5 Sweet Tomi", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": false}, {"lat": 47.5624068, "lng": 13.6492914, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.6 Marketplace Hallstatt", "type": "poi", "time": "13:05-17:55", "cost": 160, "estimated_coord": false}, {"lat": 47.5624666, "lng": 13.6496423, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.7 Seehotel Grüner Baum", "type": "meal", "time": "18:00-19:00", "cost": 1000, "estimated_coord": false}, {"lat": 47.5613186, "lng": 13.6435403, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.9 Hallstatt Skywalk - Hallstättersee", "type": "poi", "time": "19:09-20:39", "cost": 160, "estimated_coord": false}, {"lat": 47.567090623546164, "lng": 13.644710270041132, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.2 Heritage Cafe & Bar Hallstatt", "type": "meal", "time": "08:00-08:40", "cost": 600, "estimated_coord": true}, {"lat": 47.5618954, "lng": 13.648962399999998, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.4 Hallstatt World Heritage Museum", "type": "poi", "time": "08:45-11:55", "cost": 160, "estimated_coord": false}, {"lat": 47.5623222, "lng": 13.649711100000001, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.6 Restaurant am See", "type": "meal", "time": "12:00-13:00", "cost": 600, "estimated_coord": false}, {"lat": 47.5624428, "lng": 13.644995399999999, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.8 Hallstätter Wasserfall", "type": "poi", "time": "13:09-16:01", "cost": 160, "estimated_coord": false}, {"lat": 47.566652323546165, "lng": 13.644625770041133, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.10 Shopping Street Walk in Hallstatt", "type": "poi", "time": "16:10-17:40", "cost": 0, "estimated_coord": true}, {"lat": 47.562202299999996, "lng": 13.648827899999999, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.12 Seewirt Restaurant", "type": "meal", "time": "18:00-19:00", "cost": 600, "estimated_coord": false}, {"lat": 47.563566023546166, "lng": 13.642974570041133, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.2 Muk´s Schmankerl", "type": "meal", "time": "08:00-08:40", "cost": 600, "estimated_coord": true}, {"lat": 47.556622378075346, "lng": 13.64957460357631, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.4 Riverside Photo Walk in Hallstatt", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 47.563443299999996, "lng": 13.637479599999999, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.6 Alte Schmiede", "type": "poi", "time": "10:28-11:51", "cost": 160, "estimated_coord": false}, {"lat": 47.562466199999996, "lng": 13.655906100000001, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.8 Restaurant Grüner Baum - Lake side Terrace", "type": "meal", "time": "12:00-13:00", "cost": 600, "estimated_coord": false}, {"lat": 47.566519123546165, "lng": 13.645481870041134, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.9 Local area walk near Restaurant Grüner Baum - Lake side Terrace before Museum District Walk in Hallstatt", "type": "poi", "time": "13:00-15:49", "cost": 0, "estimated_coord": true}, {"lat": 47.567361049608444, "lng": 13.65270057433925, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.11 Museum District Walk in Hallstatt", "type": "poi", "time": "15:54-17:24", "cost": 0, "estimated_coord": true}, {"lat": 47.56155421097421, "lng": 13.643141736304091, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.13 Market And Cafe Lane in Hallstatt", "type": "poi", "time": "17:29-18:59", "cost": 0, "estimated_coord": true}, {"lat": 47.5620505, "lng": 13.6493855, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.15 Zum Bader Gastwirtschaft", "type": "meal", "time": "19:04-20:04", "cost": 600, "estimated_coord": false}, {"lat": 47.532664923546164, "lng": 13.687617470041133, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.17 5 Fingers", "type": "poi", "time": "20:09-21:00", "cost": 160, "estimated_coord": true}, {"lat": 47.55937913592508, "lng": 13.654112598076853, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.1 Check-out I da Mitt", "type": "checkout", "time": "07:00-07:15", "cost": 0, "estimated_coord": true}, {"lat": 47.615890099999994, "lng": 13.6377047, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.3 Check-in Rosy's House B&B", "type": "checkin", "time": "07:45-08:00", "cost": 0, "estimated_coord": false}, {"lat": 47.594041923546165, "lng": 13.662418670041133, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.5 Uferwirt Seeraunzn", "type": "meal", "time": "08:13-08:53", "cost": 600, "estimated_coord": true}, {"lat": 47.61994302354616, "lng": 13.627280470041134, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.7 Historic Street Stroll in Hallstatt", "type": "poi", "time": "09:06-10:36", "cost": 0, "estimated_coord": true}, {"lat": 47.609913078075344, "lng": 13.632229303576311, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.8 Local area walk near Historic Street Stroll in Hallstatt before lunch", "type": "poi", "time": "10:36-12:04", "cost": 0, "estimated_coord": true}, {"lat": 47.6121245, "lng": 13.6382453, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.10 Welterbe-Wirtshaus Steegwirt", "type": "meal", "time": "12:13-13:13", "cost": 600, "estimated_coord": false}, {"lat": 47.62065174960844, "lng": 13.63535527433925, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.12 City Viewpoint Walk in Hallstatt", "type": "poi", "time": "13:22-14:52", "cost": 0, "estimated_coord": true}, {"lat": 47.614844910974206, "lng": 13.625796436304093, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.14 Design And Gallery Lane in Hallstatt", "type": "poi", "time": "14:57-16:27", "cost": 0, "estimated_coord": true}, {"lat": 47.5645953, "lng": 13.6499746, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.16 Panoramic Viewpoint - Hallstatt", "type": "poi", "time": "16:46-18:08", "cost": 160, "estimated_coord": false}, {"lat": 47.566562923546165, "lng": 13.645081970041133, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.18 Sweet Tomi", "type": "meal", "time": "18:13-19:13", "cost": 200, "estimated_coord": true}, {"lat": 47.584011978075345, "lng": 13.66736750357631, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.2 Uferwirt Seeraunzn", "type": "meal", "time": "08:00-08:40", "cost": 600, "estimated_coord": true}, {"lat": 47.612669835925075, "lng": 13.636767298076855, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.4 Neighborhood Orientation Walk in Hallstatt", "type": "poi", "time": "08:53-10:23", "cost": 0, "estimated_coord": true}, {"lat": 47.62168435195769, "lng": 13.630146931002132, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.5 Local area walk near Neighborhood Orientation Walk in Hallstatt before lunch", "type": "poi", "time": "10:23-11:40", "cost": 0, "estimated_coord": true}, {"lat": 47.556532978075346, "lng": 13.65003080357631, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.7 Sweet Tomi", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.56727164960844, "lng": 13.65315677433925, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.8 Local area walk near Sweet Tomi before Local Park Stroll in Hallstatt", "type": "poi", "time": "13:00-14:54", "cost": 0, "estimated_coord": true}, {"lat": 47.610565329708095, "lng": 13.628939411346265, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.10 Local Park Stroll in Hallstatt", "type": "poi", "time": "15:14-16:44", "cost": 0, "estimated_coord": true}, {"lat": 47.62000693491761, "lng": 13.642976419933582, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.12 Shopping Street Walk in Hallstatt", "type": "poi", "time": "16:49-18:19", "cost": 0, "estimated_coord": true}, {"lat": 47.61617742354617, "lng": 13.627821070041133, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.14 Welterbe-Wirtshaus Steegwirt", "type": "meal", "time": "18:28-19:28", "cost": 600, "estimated_coord": true}, {"lat": 47.59475064960844, "lng": 13.67049347433925, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.2 Uferwirt Seeraunzn", "type": "meal", "time": "08:00-08:40", "cost": 600, "estimated_coord": true}, {"lat": 47.620468365791055, "lng": 13.620612383634768, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.4 Riverside Photo Walk in Hallstatt", "type": "poi", "time": "08:53-10:23", "cost": 0, "estimated_coord": true}, {"lat": 47.605021498191554, "lng": 13.636791299525182, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.5 Local area walk near Riverside Photo Walk in Hallstatt before lunch", "type": "poi", "time": "10:23-11:40", "cost": 0, "estimated_coord": true}, {"lat": 47.56146481097421, "lng": 13.643597936304092, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.7 Sweet Tomi", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.55928973592508, "lng": 13.654568798076854, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.8 Local area walk near Sweet Tomi before Museum District Walk in Hallstatt", "type": "poi", "time": "13:00-14:54", "cost": 0, "estimated_coord": true}, {"lat": 47.627340232119565, "lng": 13.635295587695875, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.10 Museum District Walk in Hallstatt", "type": "poi", "time": "15:14-16:44", "cost": 0, "estimated_coord": true}, {"lat": 47.609872695956305, "lng": 13.621322462833811, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.12 Market And Cafe Lane in Hallstatt", "type": "poi", "time": "16:49-18:19", "cost": 0, "estimated_coord": true}, {"lat": 47.60614747807535, "lng": 13.63276990357631, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.14 Welterbe-Wirtshaus Steegwirt", "type": "meal", "time": "18:28-19:28", "cost": 600, "estimated_coord": true}, {"lat": 47.522634978075345, "lng": 13.69256630357631, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.16 5 Fingers", "type": "poi", "time": "19:37-21:00", "cost": 160, "estimated_coord": true}, {"lat": 22.54554, "lng": 114.0683, "day": 0, "date": "2026-10-16", "city": "Shenzhen", "name": "Transfer Hallstatt -> Shenzhen", "type": "inbound", "time": "", "cost": 0, "route_point": true}, {"lat": 47.58894381097421, "lng": 13.660934636304091, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.2 Uferwirt Seeraunzn", "type": "meal", "time": "08:00-08:40", "cost": 600, "estimated_coord": true}, {"lat": 47.613314094295326, "lng": 13.643424947207697, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.4 Historic Street Stroll in Hallstatt", "type": "poi", "time": "08:53-10:23", "cost": 0, "estimated_coord": true}, {"lat": 47.62570645124796, "lng": 13.624802580892318, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.6 Check-out Rosy's House B&B", "type": "checkout", "time": "11:45-12:00", "cost": 0, "estimated_coord": true}, {"lat": 47.56830425195769, "lng": 13.647948431002131, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.8 Sweet Tomi", "type": "meal", "time": "12:20-13:20", "cost": 200, "estimated_coord": true}, {"lat": 47.60398950727867, "lng": 13.630163306837597, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.10 Design And Gallery Lane in Hallstatt", "type": "poi", "time": "13:40-15:10", "cost": 0, "estimated_coord": true}, {"lat": 47.627491052551036, "lng": 13.645467617565274, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.12 City Viewpoint Walk in Hallstatt", "type": "poi", "time": "15:15-16:45", "cost": 0, "estimated_coord": true}, {"lat": 47.616632561806085, "lng": 13.613720019005706, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.13 Local area walk near City Viewpoint Walk in Hallstatt before dinner", "type": "poi", "time": "16:45-17:51", "cost": 0, "estimated_coord": true}, {"lat": 47.61688614960845, "lng": 13.63589587433925, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.15 Welterbe-Wirtshaus Steegwirt", "type": "meal", "time": "18:00-19:00", "cost": 600, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

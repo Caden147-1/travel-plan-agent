@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Beijing to Paris</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Beijing -> Paris</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-11-03 - 2026-11-10</b></div>
+          <div class="request-item"><span>Travelers</span><b>1</b></div>
+          <div class="request-item"><span>Budget</span><b>18900 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>budget hotel; food: local, street_food; attractions: mixed</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-11-03 - 2026-11-10</strong></div>
+        <div><span>Travelers</span><strong>1</strong></div>
+        <div><span>Budget</span><strong>18900 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>18849 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>15913 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>1386 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>670 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>880 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>18849 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-11-03 | Paris</h2></div><strong>4520 CNY</strong></div><ul class="event-list"><li><span class="time">12:30 - 00:11 (+1 day)</span><span class="event-name">Flight Beijing -&gt; Paris</span><span class="event-type">Flight (Economy)</span><span class="cost">4520 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-11-04 | Paris</h2></div><strong>4035 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Paris France Hotel</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">00:41 - 08:00</span><span class="event-name">Transfer LBG Airport -&gt; Paris France Hotel for check-in</span><span class="event-type">Transfer</span><span class="cost">3073 CNY</span></li><li><span class="time">08:00 - 08:15</span><span class="event-name">Check-in Paris France Hotel</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">08:15 - 08:24</span><span class="event-name">Transfer Paris France Hotel -&gt; Baguett&#x27;s Café</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:24 - 09:04</span><span class="event-name">Baguett&#x27;s Café</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">09:04 - 09:09</span><span class="event-name">Transfer Baguett&#x27;s Café -&gt; Domaine National du Palais-Royal</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">09:09 - 12:09</span><span class="event-name">Domaine National du Palais-Royal</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">12:09 - 12:18</span><span class="event-name">Transfer Domaine National du Palais-Royal -&gt; Abra Patisserie</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:18 - 13:18</span><span class="event-name">Abra Patisserie</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">13:18 - 13:27</span><span class="event-name">Transfer Abra Patisserie -&gt; Notre-Dame Cathedral of Paris</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:27 - 18:09</span><span class="event-name">Notre-Dame Cathedral of Paris</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">18:09 - 18:18</span><span class="event-name">Transfer Notre-Dame Cathedral of Paris -&gt; Le Ju&#x27;</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:18 - 19:18</span><span class="event-name">Le Ju&#x27;</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">19:18 - 19:24</span><span class="event-name">Transfer Le Ju&#x27; -&gt; Eiffel Tower</span><span class="event-type">Transfer</span><span class="cost">42 CNY</span></li><li><span class="time">19:24 - 21:00</span><span class="event-name">Eiffel Tower</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Paris France Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-11-05 | Paris</h2></div><strong>1067 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Paris France Hotel</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Paris France Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">BO&amp;MIE</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer BO&amp;MIE -&gt; Place des Vosges</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 11:51</span><span class="event-name">Place des Vosges</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Place des Vosges -&gt; Moon Croissant</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Moon Croissant</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Moon Croissant -&gt; Panthéon</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:09 - 17:55</span><span class="event-name">Panthéon</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">17:55 - 18:00</span><span class="event-name">Transfer Panthéon -&gt; BOULANGERIE MODERNE</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">BOULANGERIE MODERNE</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer BOULANGERIE MODERNE -&gt; Basilique du Sacré-Cœur de Montmartre</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 20:45</span><span class="event-name">Basilique du Sacré-Cœur de Montmartre</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">20:45 - 21:00</span><span class="event-name">Return to Paris France Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-11-06 | Paris</h2></div><strong>1081 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Paris France Hotel</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Paris France Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Boulangerie Guyot Ferreira</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Boulangerie Guyot Ferreira -&gt; Sainte-Chapelle</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 11:51</span><span class="event-name">Sainte-Chapelle</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Sainte-Chapelle -&gt; Bouillon République</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Bouillon République</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Bouillon République -&gt; Louvre Museum</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:09 - 17:51</span><span class="event-name">Louvre Museum</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Louvre Museum -&gt; La Jacobine</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">La Jacobine</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">19:00 - 19:13</span><span class="event-name">Transfer La Jacobine -&gt; Arc de Triomphe</span><span class="event-type">Transfer</span><span class="cost">91 CNY</span></li><li><span class="time">19:13 - 20:43</span><span class="event-name">Arc de Triomphe</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">20:43 - 20:58</span><span class="event-name">Return to Paris France Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-11-07 | Paris</h2></div><strong>1015 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Paris France Hotel</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Paris France Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Abra Patisserie</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Abra Patisserie -&gt; Louvre Pyramid</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 11:51</span><span class="event-name">Louvre Pyramid</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Louvre Pyramid -&gt; Au Bourguignon du Marais</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Au Bourguignon du Marais</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Au Bourguignon du Marais -&gt; Market And Cafe Lane in Paris</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:09 - 14:39</span><span class="event-name">Market And Cafe Lane in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:39 - 17:51</span><span class="event-name">Local area walk near Market And Cafe Lane in Paris before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near Market And Cafe Lane in Paris before dinner -&gt; Le Colimaçon</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Le Colimaçon</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Le Colimaçon -&gt; Eiffel Tower</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">Eiffel Tower</span><span class="event-type">Poi</span><span class="cost">80 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Paris France Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-11-08 | Paris</h2></div><strong>785 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Paris France Hotel</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Paris France Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">BO&amp;MIE</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer BO&amp;MIE -&gt; Historic Street Stroll in Paris</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Historic Street Stroll in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 10:24</span><span class="event-name">Transfer Historic Street Stroll in Paris -&gt; City Viewpoint Walk in Paris</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">10:33 - 12:03</span><span class="event-name">City Viewpoint Walk in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:03 - 12:12</span><span class="event-name">Transfer City Viewpoint Walk in Paris -&gt; Bagel Baget Café</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:12 - 13:12</span><span class="event-name">Bagel Baget Café</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">13:12 - 13:21</span><span class="event-name">Transfer Bagel Baget Café -&gt; Design And Gallery Lane in Paris</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:21 - 14:51</span><span class="event-name">Design And Gallery Lane in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:51 - 18:12</span><span class="event-name">Local area walk near Design And Gallery Lane in Paris before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:12 - 18:21</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in Paris before dinner -&gt; À la Biche au Bois</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:21 - 19:21</span><span class="event-name">À la Biche au Bois</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">19:21 - 19:36</span><span class="event-name">Return to Paris France Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-11-09 | Paris</h2></div><strong>785 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Paris France Hotel</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Paris France Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Moon Croissant</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Moon Croissant -&gt; Neighborhood Orientation Walk in Paris</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Neighborhood Orientation Walk in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Neighborhood Orientation Walk in Paris before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Neighborhood Orientation Walk in Paris before lunch -&gt; L&#x27;Escargot Bar</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">L&#x27;Escargot Bar</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">13:00 - 15:46</span><span class="event-name">Local area walk near L&#x27;Escargot Bar before Local Park Stroll in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:46 - 15:55</span><span class="event-name">Transfer Local area walk near L&#x27;Escargot Bar before Local Park Stroll in Paris -&gt; Local Park Stroll in Paris</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">15:55 - 17:25</span><span class="event-name">Local Park Stroll in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:25 - 17:30</span><span class="event-name">Transfer Local Park Stroll in Paris -&gt; Shopping Street Walk in Paris</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">17:30 - 19:00</span><span class="event-name">Shopping Street Walk in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">19:00 - 19:09</span><span class="event-name">Transfer Shopping Street Walk in Paris -&gt; Sacrée Fleur Montmartre</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">19:09 - 20:09</span><span class="event-name">Sacrée Fleur Montmartre</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">20:09 - 20:24</span><span class="event-name">Return to Paris France Hotel</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 8</p><h2>2026-11-10 | Paris</h2></div><strong>5364 CNY</strong></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Paris France Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Le Ju&#x27;</span><span class="event-type">Meal</span><span class="cost">30 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Le Ju&#x27; -&gt; Riverside Photo Walk in Paris</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Riverside Photo Walk in Paris</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Riverside Photo Walk in Paris before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Riverside Photo Walk in Paris before lunch -&gt; Bouillon République</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Bouillon République</span><span class="event-type">Meal</span><span class="cost">100 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Bouillon République -&gt; Paris France Hotel</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">14:15 - 14:30</span><span class="event-name">Check-out Paris France Hotel</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">14:30 - 15:30</span><span class="event-name">Transfer Paris France Hotel -&gt; LBG</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">17:00 - 04:41 (+1 day)</span><span class="event-name">Flight Paris -&gt; Beijing</span><span class="event-type">Flight (Economy)</span><span class="cost">4520 CNY</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 39.9075, "lng": 116.40323, "day": 0, "date": "", "city": "Beijing", "name": "Start: Beijing", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 48.85341, "lng": 2.3488, "day": 1, "date": "2026-11-03", "city": "Paris", "name": "Fly Beijing (PEK) -> Paris (LBG) [Economy]", "type": "flight", "time": "", "cost": 4520, "route_point": true}, {"lat": 48.85341, "lng": 2.3548, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.1 Transfer LBG Airport -> Paris France Hotel for check-in", "type": "transfer", "time": "00:41-08:00", "cost": 3073, "estimated_coord": true}, {"lat": 48.866341399999996, "lng": 2.3666007, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.2 Check-in Paris France Hotel", "type": "checkin", "time": "08:00-08:15", "cost": 0, "estimated_coord": false}, {"lat": 48.857462923546166, "lng": 2.3443757700411334, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.3 Transfer Paris France Hotel -> Baguett's Café", "type": "transfer", "time": "08:15-08:24", "cost": 63, "estimated_coord": true}, {"lat": 48.8653203, "lng": 2.3365346, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.4 Baguett's Café", "type": "meal", "time": "08:24-09:04", "cost": 30, "estimated_coord": false}, {"lat": 48.84743297807535, "lng": 2.3493246035763122, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.5 Transfer Baguett's Café -> Domaine National du Palais-Royal", "type": "transfer", "time": "09:04-09:09", "cost": 35, "estimated_coord": true}, {"lat": 48.8637569, "lng": 2.3371261000000003, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.6 Domaine National du Palais-Royal", "type": "poi", "time": "09:09-12:09", "cost": 80, "estimated_coord": false}, {"lat": 48.858171649608444, "lng": 2.3524505743392514, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.7 Transfer Domaine National du Palais-Royal -> Abra Patisserie", "type": "transfer", "time": "12:09-12:18", "cost": 63, "estimated_coord": true}, {"lat": 48.8568346, "lng": 2.3609839999999997, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.8 Abra Patisserie", "type": "meal", "time": "12:18-13:18", "cost": 30, "estimated_coord": false}, {"lat": 48.85236481097421, "lng": 2.342891736304093, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.9 Transfer Abra Patisserie -> Notre-Dame Cathedral of Paris", "type": "transfer", "time": "13:18-13:27", "cost": 63, "estimated_coord": true}, {"lat": 48.85296820000001, "lng": 2.3499021, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.10 Notre-Dame Cathedral of Paris", "type": "poi", "time": "13:27-18:09", "cost": 80, "estimated_coord": false}, {"lat": 48.85018973592508, "lng": 2.353862598076855, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.11 Transfer Notre-Dame Cathedral of Paris -> Le Ju'", "type": "transfer", "time": "18:09-18:18", "cost": 63, "estimated_coord": true}, {"lat": 48.8576911, "lng": 2.3608054, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.12 Le Ju'", "type": "meal", "time": "18:18-19:18", "cost": 30, "estimated_coord": false}, {"lat": 48.85920425195769, "lng": 2.347242231002133, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.13 Transfer Le Ju' -> Eiffel Tower", "type": "transfer", "time": "19:18-19:24", "cost": 42, "estimated_coord": true}, {"lat": 48.858370099999995, "lng": 2.3004812999999995, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.14 Eiffel Tower", "type": "poi", "time": "19:24-21:00", "cost": 80, "estimated_coord": false}, {"lat": 48.8480852297081, "lng": 2.346034711346265, "day": 2, "date": "2026-11-04", "city": "Paris", "name": "Day 2.15 Return to Paris France Hotel", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 48.857526834917614, "lng": 2.3600717199335812, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.1 Transfer from Paris France Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 48.8640778, "lng": 2.3564508999999996, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.2 BO&MIE", "type": "meal", "time": "08:00-08:40", "cost": 30, "estimated_coord": false}, {"lat": 48.85798826579106, "lng": 2.337707683634768, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.3 Transfer BO&MIE -> Place des Vosges", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 48.85561140000001, "lng": 2.3655266, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.4 Place des Vosges", "type": "poi", "time": "08:49-11:51", "cost": 80, "estimated_coord": false}, {"lat": 48.84254139819156, "lng": 2.3538865995251825, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.5 Transfer Place des Vosges -> Moon Croissant", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 48.8596353, "lng": 2.3739177, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.6 Moon Croissant", "type": "meal", "time": "12:00-13:00", "cost": 30, "estimated_coord": false}, {"lat": 48.86486013211957, "lng": 2.352390887695876, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.7 Transfer Moon Croissant -> Panthéon", "type": "transfer", "time": "13:00-13:09", "cost": 63, "estimated_coord": true}, {"lat": 48.846221799999995, "lng": 2.3464138, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.8 Panthéon", "type": "poi", "time": "13:09-17:55", "cost": 80, "estimated_coord": false}, {"lat": 48.84739259595631, "lng": 2.3384177628338114, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.9 Transfer Panthéon -> BOULANGERIE MODERNE", "type": "transfer", "time": "17:55-18:00", "cost": 35, "estimated_coord": true}, {"lat": 48.845496999999995, "lng": 2.3441853000000004, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.10 BOULANGERIE MODERNE", "type": "meal", "time": "18:00-19:00", "cost": 30, "estimated_coord": false}, {"lat": 48.85083399429533, "lng": 2.360520247207696, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.11 Transfer BOULANGERIE MODERNE -> Basilique du Sacré-Cœur de Montmartre", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 48.886704599999995, "lng": 2.3431043, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.12 Basilique du Sacré-Cœur de Montmartre", "type": "poi", "time": "19:15-20:45", "cost": 80, "estimated_coord": false}, {"lat": 48.86322635124796, "lng": 2.3418978808923177, "day": 3, "date": "2026-11-05", "city": "Paris", "name": "Day 3.13 Return to Paris France Hotel", "type": "transfer", "time": "20:45-21:00", "cost": 105, "estimated_coord": true}, {"lat": 48.84150940727867, "lng": 2.3472586068375967, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.1 Transfer from Paris France Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 48.84664180000001, "lng": 2.3513604999999997, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.2 Boulangerie Guyot Ferreira", "type": "meal", "time": "08:00-08:40", "cost": 30, "estimated_coord": false}, {"lat": 48.86501095255104, "lng": 2.362562917565273, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.3 Transfer Boulangerie Guyot Ferreira -> Sainte-Chapelle", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 48.855374999999995, "lng": 2.3449609, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.4 Sainte-Chapelle", "type": "poi", "time": "08:49-11:51", "cost": 80, "estimated_coord": false}, {"lat": 48.85415246180609, "lng": 2.3308153190057066, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.5 Transfer Sainte-Chapelle -> Bouillon République", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 48.8661074, "lng": 2.3706338, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.6 Bouillon République", "type": "meal", "time": "12:00-13:00", "cost": 30, "estimated_coord": false}, {"lat": 48.840714106860354, "lng": 2.3615598705866, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.7 Transfer Bouillon République -> Louvre Museum", "type": "transfer", "time": "13:00-13:09", "cost": 63, "estimated_coord": true}, {"lat": 48.8606111, "lng": 2.337644, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.8 Louvre Museum", "type": "poi", "time": "13:09-17:51", "cost": 80, "estimated_coord": false}, {"lat": 48.87139072178824, "lng": 2.347967147087461, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.9 Transfer Louvre Museum -> La Jacobine", "type": "transfer", "time": "17:51-18:00", "cost": 63, "estimated_coord": true}, {"lat": 48.853381899999995, "lng": 2.3389252, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.10 La Jacobine", "type": "meal", "time": "18:00-19:00", "cost": 30, "estimated_coord": false}, {"lat": 48.83958894380044, "lng": 2.337268373682396, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.11 Transfer La Jacobine -> Arc de Triomphe", "type": "transfer", "time": "19:00-19:13", "cost": 91, "estimated_coord": true}, {"lat": 48.8737917, "lng": 2.2950274999999998, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.12 Arc de Triomphe", "type": "poi", "time": "19:13-20:43", "cost": 80, "estimated_coord": false}, {"lat": 48.85581178851217, "lng": 2.3666390417888072, "day": 4, "date": "2026-11-06", "city": "Paris", "name": "Day 4.13 Return to Paris France Hotel", "type": "transfer", "time": "20:43-20:58", "cost": 105, "estimated_coord": true}, {"lat": 48.863689034636074, "lng": 2.334023618611098, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.1 Transfer from Paris France Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 48.86088752354617, "lng": 2.350559770041133, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.2 Abra Patisserie", "type": "meal", "time": "08:00-08:40", "cost": 30, "estimated_coord": true}, {"lat": 48.8358492738261, "lng": 2.352752327952668, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.3 Transfer Abra Patisserie -> Louvre Pyramid", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 48.8610135, "lng": 2.3358583, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.4 Louvre Pyramid", "type": "poi", "time": "08:49-11:51", "cost": 80, "estimated_coord": false}, {"lat": 48.874234705302115, "lng": 2.3607302828583316, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.5 Transfer Louvre Pyramid -> Au Bourguignon du Marais", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 48.855441299999995, "lng": 2.3575828, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.6 Au Bourguignon du Marais", "type": "meal", "time": "12:00-13:00", "cost": 30, "estimated_coord": false}, {"lat": 48.84611320653779, "lng": 2.325936124449914, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.7 Transfer Au Bourguignon du Marais -> Market And Cafe Lane in Paris", "type": "transfer", "time": "13:00-13:09", "cost": 63, "estimated_coord": true}, {"lat": 48.870394323546165, "lng": 2.356176470041133, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.8 Market And Cafe Lane in Paris", "type": "poi", "time": "13:09-14:39", "cost": 0, "estimated_coord": true}, {"lat": 48.860364378075346, "lng": 2.361125303576312, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.9 Local area walk near Market And Cafe Lane in Paris before dinner", "type": "poi", "time": "14:39-17:51", "cost": 0, "estimated_coord": true}, {"lat": 48.843346192110936, "lng": 2.3705880648698336, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.10 Transfer Local area walk near Market And Cafe Lane in Paris before dinner -> Le Colimaçon", "type": "transfer", "time": "17:51-18:00", "cost": 63, "estimated_coord": true}, {"lat": 48.85795100000001, "lng": 2.3582685999999997, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.11 Le Colimaçon", "type": "meal", "time": "18:00-19:00", "cost": 30, "estimated_coord": false}, {"lat": 48.875548326916565, "lng": 2.3395320724358015, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.12 Transfer Le Colimaçon -> Eiffel Tower", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 48.862423023546164, "lng": 2.290057070041133, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.13 Eiffel Tower", "type": "poi", "time": "19:15-21:00", "cost": 80, "estimated_coord": true}, {"lat": 48.830825458161236, "lng": 2.340679749392212, "day": 5, "date": "2026-11-07", "city": "Paris", "name": "Day 5.14 Return to Paris France Hotel", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 48.86457807528687, "lng": 2.3700432129016935, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.1 Transfer from Paris France Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 48.868130723546166, "lng": 2.346026670041133, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.2 BO&MIE", "type": "meal", "time": "08:00-08:40", "cost": 30, "estimated_coord": true}, {"lat": 48.859524497416395, "lng": 2.325591964293702, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.3 Transfer BO&MIE -> Historic Street Stroll in Paris", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 48.87110304960844, "lng": 2.364251274339251, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.4 Historic Street Stroll in Paris", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 48.833224610495435, "lng": 2.3617826827177266, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.5 Transfer Historic Street Stroll in Paris -> City Viewpoint Walk in Paris", "type": "transfer", "time": "10:19-10:24", "cost": 35, "estimated_coord": true}, {"lat": 48.86529621097421, "lng": 2.354692436304093, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.6 City Viewpoint Walk in Paris", "type": "poi", "time": "10:33-12:03", "cost": 0, "estimated_coord": true}, {"lat": 48.88297721363678, "lng": 2.353877388871945, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.7 Transfer City Viewpoint Walk in Paris -> Bagel Baget Café", "type": "transfer", "time": "12:03-12:12", "cost": 63, "estimated_coord": true}, {"lat": 48.8587578, "lng": 2.3507925, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.8 Bagel Baget Café", "type": "meal", "time": "12:12-13:12", "cost": 30, "estimated_coord": false}, {"lat": 48.83503768609001, "lng": 2.3250838012828177, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.9 Transfer Bagel Baget Café -> Design And Gallery Lane in Paris", "type": "transfer", "time": "13:12-13:21", "cost": 63, "estimated_coord": true}, {"lat": 48.86312113592508, "lng": 2.365663298076855, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.10 Design And Gallery Lane in Paris", "type": "poi", "time": "13:21-14:51", "cost": 0, "estimated_coord": true}, {"lat": 48.87213565195769, "lng": 2.359042931002133, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.11 Local area walk near Design And Gallery Lane in Paris before dinner", "type": "poi", "time": "14:51-18:12", "cost": 0, "estimated_coord": true}, {"lat": 48.850937233567976, "lng": 2.378697916753056, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.12 Transfer Local area walk near Design And Gallery Lane in Paris before dinner -> À la Biche au Bois", "type": "transfer", "time": "18:12-18:21", "cost": 63, "estimated_coord": true}, {"lat": 48.848029, "lng": 2.371106, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.13 À la Biche au Bois", "type": "meal", "time": "18:21-19:21", "cost": 30, "estimated_coord": false}, {"lat": 48.8754290096866, "lng": 2.32842444571499, "day": 6, "date": "2026-11-08", "city": "Paris", "name": "Day 6.14 Return to Paris France Hotel", "type": "transfer", "time": "19:21-19:36", "cost": 105, "estimated_coord": true}, {"lat": 48.82341037899201, "lng": 2.3489507958123648, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.1 Transfer from Paris France Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 48.86368822354617, "lng": 2.363493470041133, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.2 Moon Croissant", "type": "meal", "time": "08:00-08:40", "cost": 30, "estimated_coord": true}, {"lat": 48.875632730986126, "lng": 2.3689531691680985, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.3 Transfer Moon Croissant -> Neighborhood Orientation Walk in Paris", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 48.8610166297081, "lng": 2.3578354113462647, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.4 Neighborhood Orientation Walk in Paris", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 48.87045823491761, "lng": 2.371872419933581, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.5 Local area walk near Neighborhood Orientation Walk in Paris before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 48.850636796942425, "lng": 2.3189284525877643, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.6 Transfer Local area walk near Neighborhood Orientation Walk in Paris before lunch -> L'Escargot Bar", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 48.877040799999996, "lng": 2.3939527999999997, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.7 L'Escargot Bar", "type": "meal", "time": "12:00-13:00", "cost": 30, "estimated_coord": false}, {"lat": 48.881093723546165, "lng": 2.383528570041133, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.8 Local area walk near L'Escargot Bar before Local Park Stroll in Paris", "type": "poi", "time": "13:00-15:46", "cost": 0, "estimated_coord": true}, {"lat": 48.835277031696975, "lng": 2.372699695824878, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.9 Transfer Local area walk near L'Escargot Bar before Local Park Stroll in Paris -> Local Park Stroll in Paris", "type": "transfer", "time": "15:46-15:55", "cost": 63, "estimated_coord": true}, {"lat": 48.87091966579106, "lng": 2.3495083836347677, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.10 Local Park Stroll in Paris", "type": "poi", "time": "15:55-17:25", "cost": 0, "estimated_coord": true}, {"lat": 48.888827612312845, "lng": 2.342350756784191, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.11 Transfer Local Park Stroll in Paris -> Shopping Street Walk in Paris", "type": "transfer", "time": "17:25-17:30", "cost": 35, "estimated_coord": true}, {"lat": 48.855472798191556, "lng": 2.3656872995251823, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.12 Shopping Street Walk in Paris", "type": "poi", "time": "17:30-19:00", "cost": 0, "estimated_coord": true}, {"lat": 48.82293767480827, "lng": 2.329631343359281, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.13 Transfer Shopping Street Walk in Paris -> Sacrée Fleur Montmartre", "type": "transfer", "time": "19:00-19:09", "cost": 63, "estimated_coord": true}, {"lat": 48.8876187, "lng": 2.3479882, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.14 Sacrée Fleur Montmartre", "type": "meal", "time": "19:09-20:09", "cost": 30, "estimated_coord": false}, {"lat": 48.862931245697, "lng": 2.383518091542844, "day": 7, "date": "2026-11-09", "city": "Paris", "name": "Day 7.15 Return to Paris France Hotel", "type": "transfer", "time": "20:09-20:24", "cost": 105, "estimated_coord": true}, {"lat": 39.91155292354617, "lng": 116.39280577004112, "day": 2, "date": "2026-11-10", "city": "Beijing", "name": "Fly Paris (LBG) -> Beijing (PEK) [Economy]", "type": "flight", "time": "", "cost": 4520, "route_point": true, "estimated_coord": false}, {"lat": 48.86984093170558, "lng": 2.316768383067875, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.1 Transfer from Paris France Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 48.861744023546166, "lng": 2.3503811700411332, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.2 Le Ju'", "type": "meal", "time": "08:00-08:40", "cost": 30, "estimated_coord": true}, {"lat": 48.81965734753501, "lng": 2.3613203215445093, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.3 Transfer Le Ju' -> Riverside Photo Walk in Paris", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 48.877791532119566, "lng": 2.364191587695876, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.4 Riverside Photo Walk in Paris", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 48.86032399595631, "lng": 2.350218462833811, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.5 Local area walk near Riverside Photo Walk in Paris before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 48.88675556703668, "lng": 2.362367356374838, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.6 Transfer Local area walk near Riverside Photo Walk in Paris before lunch -> Bouillon République", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 48.870160323546166, "lng": 2.360209570041133, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.7 Bouillon République", "type": "meal", "time": "12:00-13:00", "cost": 100, "estimated_coord": true}, {"lat": 48.837986500238614, "lng": 2.3162713102767643, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.8 Transfer Bouillon République -> Paris France Hotel", "type": "transfer", "time": "13:00-13:09", "cost": 63, "estimated_coord": true}, {"lat": 48.86376539429533, "lng": 2.3723209472076956, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.9 Check-out Paris France Hotel", "type": "checkout", "time": "14:15-14:30", "cost": 0, "estimated_coord": true}, {"lat": 48.84281013620161, "lng": 2.3832041114905715, "day": 8, "date": "2026-11-10", "city": "Paris", "name": "Day 8.10 Transfer Paris France Hotel -> LBG", "type": "transfer", "time": "14:30-15:30", "cost": 420, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

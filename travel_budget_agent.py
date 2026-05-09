@@ -304,6 +304,8 @@ def _get_effective_cities(parsed_request: Dict[str, Any]) -> List[Dict[str, Any]
         return []
 
     result: List[Dict[str, Any]] = []
+    city_plan_mode = _normalize_text(city_plan.get("mode"))
+    total_days = _get_duration_days(parsed_request)
     for item in planned_cities:
         if not isinstance(item, dict):
             continue
@@ -320,6 +322,13 @@ def _get_effective_cities(parsed_request: Dict[str, Any]) -> List[Dict[str, Any]
             "days": days,
             "source": source
         })
+
+    if (
+        len(result) == 1
+        and city_plan_mode != "user_explicit_city_days"
+        and result[0].get("days", 0) < total_days
+    ):
+        result[0]["days"] = total_days
 
     return result
 

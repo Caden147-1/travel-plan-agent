@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>guangzhou to Manchester, Oxford, London, Edinburgh</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>guangzhou -> Manchester, Oxford, London, Edinburgh</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-07-01 - 2026-07-12</b></div>
+          <div class="request-item"><span>Travelers</span><b>3</b></div>
+          <div class="request-item"><span>Budget</span><b>225000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>luxury hotel; food: fine_dining</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-07-01 - 2026-07-12</strong></div>
+        <div><span>Travelers</span><strong>3</strong></div>
+        <div><span>Budget</span><strong>225000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>222750 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>130537 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>39211 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>49402 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>3600 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>222750 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-07-01 | Manchester</h2></div><strong>42783 CNY</strong></div><ul class="event-list"><li><span class="time">09:10 - 19:00 (+1 day)</span><span class="event-name">Flight guangzhou -&gt; Manchester</span><span class="event-type">Flight (Business) x3</span><span class="cost">42783 CNY total</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-07-02 | Manchester</h2></div><strong>1970 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Edwardian Manchester Hotel</strong><span>1970 CNY</span></div><ul class="event-list"><li><span class="time">20:37 - 20:52</span><span class="event-name">Check-in The Edwardian Manchester Hotel</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-07-03 | Manchester</h2></div><strong>10384 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Edwardian Manchester Hotel</strong><span>1970 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The Edwardian Manchester Hotel</span><span class="event-type">Meal</span><span class="cost">2255 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Hotel breakfast cafe at The Edwardian Manchester Hotel -&gt; Manchester Museum</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Manchester Museum</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Manchester Museum before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Manchester Museum before lunch -&gt; Hotel lunch restaurant at The Edwardian Manchester Hotel</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Hotel lunch restaurant at The Edwardian Manchester Hotel</span><span class="event-type">Meal</span><span class="cost">2255 CNY</span></li><li><span class="time">13:00 - 15:46</span><span class="event-name">Local area walk near Hotel lunch restaurant at The Edwardian Manchester Hotel before Manchester Art Gallery</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:46 - 15:55</span><span class="event-name">Transfer Local area walk near Hotel lunch restaurant at The Edwardian Manchester Hotel before Manchester Art Gallery -&gt; Manchester Art Gallery</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">15:55 - 17:25</span><span class="event-name">Manchester Art Gallery</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">17:25 - 17:34</span><span class="event-name">Transfer Manchester Art Gallery -&gt; Science and Industry Museum</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">17:34 - 19:04</span><span class="event-name">Science and Industry Museum</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">19:04 - 19:13</span><span class="event-name">Transfer Science and Industry Museum -&gt; Hotel dinner restaurant at The Edwardian Manchester Hotel</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">19:13 - 20:13</span><span class="event-name">Hotel dinner restaurant at The Edwardian Manchester Hotel</span><span class="event-type">Meal</span><span class="cost">2255 CNY</span></li><li><span class="time">20:13 - 20:22</span><span class="event-name">Transfer Hotel dinner restaurant at The Edwardian Manchester Hotel -&gt; National Football Museum</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">20:22 - 21:00</span><span class="event-name">National Football Museum</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to The Edwardian Manchester Hotel</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-07-04 | Oxford</h2></div><strong>12478 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Old Bank Hotel</strong><span>4676 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Check-out The Edwardian Manchester Hotel</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">08:00 - 09:00</span><span class="event-name">Transfer The Edwardian Manchester Hotel -&gt; MAN (nearby airport for Manchester)</span><span class="event-type">Transfer</span><span class="cost">600 CNY</span></li><li><span class="time">10:30 - 12:00</span><span class="event-name">Flight Manchester -&gt; Oxford</span><span class="event-type">Flight (Business) x3</span><span class="cost">3673 CNY total</span></li><li><span class="time">12:30 - 13:30</span><span class="event-name">Transfer OXF (nearby airport for Oxford) -&gt; Old Bank Hotel for check-in</span><span class="event-type">Transfer</span><span class="cost">600 CNY</span></li><li><span class="time">13:30 - 13:45</span><span class="event-name">Check-in Old Bank Hotel</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">13:45 - 13:54</span><span class="event-name">Transfer Old Bank Hotel -&gt; Oxford University Museum of Natural History</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">13:54 - 15:24</span><span class="event-name">Oxford University Museum of Natural History</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">15:24 - 15:59</span><span class="event-name">Local area walk near Oxford University Museum of Natural History before Ashmolean Museum</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:59 - 16:08</span><span class="event-name">Transfer Local area walk near Oxford University Museum of Natural History before Ashmolean Museum -&gt; Ashmolean Museum</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">16:08 - 17:38</span><span class="event-name">Ashmolean Museum</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">17:38 - 18:38</span><span class="event-name">Local area walk near Ashmolean Museum before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:38 - 18:47</span><span class="event-name">Transfer Local area walk near Ashmolean Museum before dinner -&gt; Dishoom Permit Room Oxford</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:47 - 19:47</span><span class="event-name">Dishoom Permit Room Oxford</span><span class="event-type">Meal</span><span class="cost">2029 CNY</span></li><li><span class="time">19:47 - 20:02</span><span class="event-name">Return to Old Bank Hotel</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-07-05 | Oxford</h2></div><strong>12029 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Old Bank Hotel</strong><span>4676 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Old Bank Hotel</span><span class="event-type">Meal</span><span class="cost">2255 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at Old Bank Hotel -&gt; Bodleian Library</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Bodleian Library</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">10:15 - 11:51</span><span class="event-name">Local area walk near Bodleian Library before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Bodleian Library before lunch -&gt; Dishoom Permit Room Oxford</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Dishoom Permit Room Oxford</span><span class="event-type">Meal</span><span class="cost">2029 CNY</span></li><li><span class="time">13:00 - 15:54</span><span class="event-name">Local area walk near Dishoom Permit Room Oxford before Oxford Botanic Garden</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:54 - 16:03</span><span class="event-name">Transfer Local area walk near Dishoom Permit Room Oxford before Oxford Botanic Garden -&gt; Oxford Botanic Garden</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">16:03 - 17:33</span><span class="event-name">Oxford Botanic Garden</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">17:33 - 17:42</span><span class="event-name">Transfer Oxford Botanic Garden -&gt; Market And Cafe Lane in Oxford</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">17:42 - 19:12</span><span class="event-name">Market And Cafe Lane in Oxford</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">19:12 - 19:21</span><span class="event-name">Transfer Market And Cafe Lane in Oxford -&gt; Dishoom Permit Room Oxford</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">19:21 - 20:21</span><span class="event-name">Dishoom Permit Room Oxford</span><span class="event-type">Meal</span><span class="cost">2029 CNY</span></li><li><span class="time">20:21 - 20:36</span><span class="event-name">Return to Old Bank Hotel</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-07-06 | Oxford</h2></div><strong>11469 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Old Bank Hotel</strong><span>4676 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Old Bank Hotel</span><span class="event-type">Meal</span><span class="cost">2255 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at Old Bank Hotel -&gt; Historic Street Stroll in Oxford</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Historic Street Stroll in Oxford</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:15 - 10:20</span><span class="event-name">Transfer Historic Street Stroll in Oxford -&gt; City Viewpoint Walk in Oxford</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">10:25 - 11:55</span><span class="event-name">City Viewpoint Walk in Oxford</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:55 - 12:00</span><span class="event-name">Transfer City Viewpoint Walk in Oxford -&gt; Dishoom Permit Room Oxford</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Dishoom Permit Room Oxford</span><span class="event-type">Meal</span><span class="cost">2029 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Dishoom Permit Room Oxford -&gt; Design And Gallery Lane in Oxford</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">13:09 - 14:39</span><span class="event-name">Design And Gallery Lane in Oxford</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:39 - 17:51</span><span class="event-name">Local area walk near Design And Gallery Lane in Oxford before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in Oxford before dinner -&gt; Dishoom Permit Room Oxford</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Dishoom Permit Room Oxford</span><span class="event-type">Meal</span><span class="cost">2029 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Old Bank Hotel</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-07-07 | London</h2></div><strong>11872 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Kimpton Fitzroy London</strong><span>3653 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:15</span><span class="event-name">Check-out Old Bank Hotel</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">08:15 - 09:38</span><span class="event-name">Drive Oxford -&gt; London</span><span class="event-type">Drive</span><span class="cost">500 CNY</span></li><li><span class="time">09:38 - 09:53</span><span class="event-name">Transfer Drive Oxford -&gt; London -&gt; Hotel breakfast cafe at Kimpton Fitzroy London</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">09:53 - 10:33</span><span class="event-name">Hotel breakfast cafe at Kimpton Fitzroy London</span><span class="event-type">Meal</span><span class="cost">2327 CNY</span></li><li><span class="time">10:33 - 10:48</span><span class="event-name">Check-in Kimpton Fitzroy London</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">10:48 - 11:51</span><span class="event-name">Local area walk near Kimpton Fitzroy London before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Kimpton Fitzroy London before lunch -&gt; Circolo Popolare</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Circolo Popolare</span><span class="event-type">Meal</span><span class="cost">2159 CNY</span></li><li><span class="time">13:00 - 14:34</span><span class="event-name">Local area walk near Circolo Popolare before London Eye</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:34 - 14:43</span><span class="event-name">Transfer Local area walk near Circolo Popolare before London Eye -&gt; London Eye</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">14:43 - 16:13</span><span class="event-name">London Eye</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">16:13 - 16:22</span><span class="event-name">Transfer London Eye -&gt; Buckingham Palace</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">16:22 - 17:52</span><span class="event-name">Buckingham Palace</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">17:52 - 18:31</span><span class="event-name">Local area walk near Buckingham Palace before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:31 - 18:40</span><span class="event-name">Transfer Local area walk near Buckingham Palace before dinner -&gt; Ave Mario</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:40 - 19:40</span><span class="event-name">Ave Mario</span><span class="event-type">Meal</span><span class="cost">2094 CNY</span></li><li><span class="time">19:40 - 19:55</span><span class="event-name">Return to Kimpton Fitzroy London</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 8</p><h2>2026-07-08 | London</h2></div><strong>10967 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Kimpton Fitzroy London</strong><span>3653 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Kimpton Fitzroy London</span><span class="event-type">Meal</span><span class="cost">2327 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Hotel breakfast cafe at Kimpton Fitzroy London -&gt; The London Dungeon</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">The London Dungeon</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near The London Dungeon before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near The London Dungeon before lunch -&gt; Brother Marcus Covent Garden</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Brother Marcus Covent Garden</span><span class="event-type">Meal</span><span class="cost">2094 CNY</span></li><li><span class="time">13:00 - 15:46</span><span class="event-name">Local area walk near Brother Marcus Covent Garden before Museum District Walk in London</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:46 - 15:55</span><span class="event-name">Transfer Local area walk near Brother Marcus Covent Garden before Museum District Walk in London -&gt; Museum District Walk in London</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">15:55 - 17:25</span><span class="event-name">Museum District Walk in London</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:25 - 17:30</span><span class="event-name">Transfer Museum District Walk in London -&gt; Market And Cafe Lane in London</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">17:30 - 19:00</span><span class="event-name">Market And Cafe Lane in London</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">19:00 - 19:09</span><span class="event-name">Transfer Market And Cafe Lane in London -&gt; Evelyn&#x27;s Table</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">19:09 - 20:09</span><span class="event-name">Evelyn&#x27;s Table</span><span class="event-type">Meal</span><span class="cost">2094 CNY</span></li><li><span class="time">20:09 - 20:24</span><span class="event-name">Return to Kimpton Fitzroy London</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 9</p><h2>2026-07-09 | London</h2></div><strong>10712 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Kimpton Fitzroy London</strong><span>3653 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Kimpton Fitzroy London</span><span class="event-type">Meal</span><span class="cost">2327 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at Kimpton Fitzroy London -&gt; Historic Street Stroll in London</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Historic Street Stroll in London</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:15 - 10:20</span><span class="event-name">Transfer Historic Street Stroll in London -&gt; City Viewpoint Walk in London</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">10:25 - 11:55</span><span class="event-name">City Viewpoint Walk in London</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:55 - 12:00</span><span class="event-name">Transfer City Viewpoint Walk in London -&gt; Circolo Popolare</span><span class="event-type">Transfer</span><span class="cost">50 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Circolo Popolare</span><span class="event-type">Meal</span><span class="cost">2159 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Circolo Popolare -&gt; Design And Gallery Lane in London</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">13:09 - 14:39</span><span class="event-name">Design And Gallery Lane in London</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:39 - 17:51</span><span class="event-name">Local area walk near Design And Gallery Lane in London before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in London before dinner -&gt; Brother Marcus Covent Garden</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Brother Marcus Covent Garden</span><span class="event-type">Meal</span><span class="cost">2094 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Kimpton Fitzroy London</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 10</p><h2>2026-07-10 | Edinburgh</h2></div><strong>11076 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Bonham Hotel</strong><span>3428 CNY</span></div><ul class="event-list"><li><span class="time">19:30 - 19:45</span><span class="event-name">Check-out Kimpton Fitzroy London</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">19:45 - 20:15</span><span class="event-name">Transfer Kimpton Fitzroy London -&gt; Heathrow Airport</span><span class="event-type">Transfer</span><span class="cost">300 CNY</span></li><li><span class="time">21:45 - 23:00</span><span class="event-name">Flight London -&gt; Edinburgh</span><span class="event-type">Flight (Business) x3</span><span class="cost">7238 CNY total</span></li><li><span class="time">23:30 - 23:41</span><span class="event-name">Transfer Edinburgh Airport -&gt; The Bonham Hotel for check-in</span><span class="event-type">Transfer</span><span class="cost">110 CNY</span></li><li><span class="time">23:41 - 23:56</span><span class="event-name">Check-in The Bonham Hotel</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 11</p><h2>2026-07-11 | Edinburgh</h2></div><strong>11488 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The Bonham Hotel</strong><span>3428 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from The Bonham Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Dishoom Edinburgh</span><span class="event-type">Meal</span><span class="cost">2051 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Dishoom Edinburgh -&gt; National Museum of Scotland</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">National Museum of Scotland</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near National Museum of Scotland before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near National Museum of Scotland before lunch -&gt; Under The Table</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Under The Table</span><span class="event-type">Meal</span><span class="cost">2051 CNY</span></li><li><span class="time">13:00 - 15:46</span><span class="event-name">Local area walk near Under The Table before Royal Mile</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:46 - 15:55</span><span class="event-name">Transfer Local area walk near Under The Table before Royal Mile -&gt; Royal Mile</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">15:55 - 17:25</span><span class="event-name">Royal Mile</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">17:25 - 17:34</span><span class="event-name">Transfer Royal Mile -&gt; Edinburgh Castle</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">17:34 - 19:04</span><span class="event-name">Edinburgh Castle</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">19:04 - 19:13</span><span class="event-name">Transfer Edinburgh Castle -&gt; LYLA Restaurant &amp; Rooms</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">19:13 - 20:13</span><span class="event-name">LYLA Restaurant &amp; Rooms</span><span class="event-type">Meal</span><span class="cost">2159 CNY</span></li><li><span class="time">20:13 - 20:22</span><span class="event-name">Transfer LYLA Restaurant &amp; Rooms -&gt; The Scotch Whisky Experience</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">20:22 - 21:00</span><span class="event-name">The Scotch Whisky Experience</span><span class="event-type">Poi</span><span class="cost">240 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to The Bonham Hotel</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 12</p><h2>2026-07-12 | Edinburgh</h2></div><strong>72094 CNY</strong></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from The Bonham Hotel to first stop</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Dishoom Edinburgh</span><span class="event-type">Meal</span><span class="cost">2051 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Dishoom Edinburgh -&gt; Historic Street Stroll in Edinburgh</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Historic Street Stroll in Edinburgh</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:00 - 11:50 (+1 day)</span><span class="event-name">Flight Edinburgh -&gt; guangzhou</span><span class="event-type">Flight (Business) x3</span><span class="cost">69803 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 23.11667, "lng": 113.256, "day": 0, "date": "", "city": "guangzhou", "name": "Start: guangzhou", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 53.48095, "lng": -2.23743, "day": 1, "date": "2026-07-01", "city": "Manchester", "name": "Fly guangzhou (CAN) -> Manchester (MAN) [Business]", "type": "flight", "time": "", "cost": 42783, "route_point": true}, {"lat": 53.477712399999994, "lng": -2.2412234000000004, "day": 2, "date": "2026-07-02", "city": "Manchester", "name": "Day 2.1 Check-in The Edwardian Manchester Hotel", "type": "checkin", "time": "20:37-20:52", "cost": 0, "estimated_coord": false}, {"lat": 53.48176532354616, "lng": -2.251647629958867, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.1 Hotel breakfast cafe at The Edwardian Manchester Hotel", "type": "meal", "time": "08:00-08:40", "cost": 2255, "estimated_coord": true}, {"lat": 53.48095, "lng": -2.23143, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.2 Transfer Hotel breakfast cafe at The Edwardian Manchester Hotel -> Manchester Museum", "type": "transfer", "time": "08:40-08:49", "cost": 90, "estimated_coord": true}, {"lat": 53.4664686, "lng": -2.2282519, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.3 Manchester Museum", "type": "poi", "time": "08:49-10:19", "cost": 240, "estimated_coord": false}, {"lat": 53.47052152354617, "lng": -2.2386761299588667, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.4 Local area walk near Manchester Museum before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 53.48500292354617, "lng": -2.2418542299588666, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.5 Transfer Local area walk near Manchester Museum before lunch -> Hotel lunch restaurant at The Edwardian Manchester Hotel", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 53.471735378075344, "lng": -2.246698796423688, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.6 Hotel lunch restaurant at The Edwardian Manchester Hotel", "type": "meal", "time": "12:00-13:00", "cost": 2255, "estimated_coord": true}, {"lat": 53.48247404960844, "lng": -2.243572825660749, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.7 Local area walk near Hotel lunch restaurant at The Edwardian Manchester Hotel before Manchester Art Gallery", "type": "poi", "time": "13:00-15:46", "cost": 0, "estimated_coord": true}, {"lat": 53.47497297807535, "lng": -2.236905396423688, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.8 Transfer Local area walk near Hotel lunch restaurant at The Edwardian Manchester Hotel before Manchester Art Gallery -> Manchester Art Gallery", "type": "transfer", "time": "15:46-15:55", "cost": 90, "estimated_coord": true}, {"lat": 53.4786943, "lng": -2.2413604, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.9 Manchester Art Gallery", "type": "poi", "time": "15:55-17:25", "cost": 240, "estimated_coord": false}, {"lat": 53.48571164960845, "lng": -2.2337794256607486, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.10 Transfer Manchester Art Gallery -> Science and Industry Museum", "type": "transfer", "time": "17:25-17:34", "cost": 90, "estimated_coord": true}, {"lat": 53.477135800000006, "lng": -2.2545821, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.11 Science and Industry Museum", "type": "poi", "time": "17:34-19:04", "cost": 240, "estimated_coord": false}, {"lat": 53.47990481097421, "lng": -2.243338263695907, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.12 Transfer Science and Industry Museum -> Hotel dinner restaurant at The Edwardian Manchester Hotel", "type": "transfer", "time": "19:04-19:13", "cost": 90, "estimated_coord": true}, {"lat": 53.476667210974206, "lng": -2.2531316636959073, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.13 Hotel dinner restaurant at The Edwardian Manchester Hotel", "type": "meal", "time": "19:13-20:13", "cost": 2255, "estimated_coord": true}, {"lat": 53.47772973592508, "lng": -2.232367401923145, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.14 Transfer Hotel dinner restaurant at The Edwardian Manchester Hotel -> National Football Museum", "type": "transfer", "time": "20:13-20:22", "cost": 90, "estimated_coord": true}, {"lat": 53.48592980000001, "lng": -2.2421548, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.15 National Football Museum", "type": "poi", "time": "20:22-21:00", "cost": 240, "estimated_coord": false}, {"lat": 53.486744251957695, "lng": -2.238987768997867, "day": 3, "date": "2026-07-03", "city": "Manchester", "name": "Day 3.16 Return to The Edwardian Manchester Hotel", "type": "transfer", "time": "21:00-21:15", "cost": 150, "estimated_coord": true}, {"lat": 51.75222, "lng": -1.25596, "day": 2, "date": "2026-07-04", "city": "Oxford", "name": "Fly Manchester (MAN) -> Oxford (OXF) [Business]", "type": "flight", "time": "", "cost": 3673, "route_point": true}, {"lat": 53.474492135925075, "lng": -2.2421608019231454, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.1 Check-out The Edwardian Manchester Hotel", "type": "checkout", "time": "07:45-08:00", "cost": 0, "estimated_coord": true}, {"lat": 51.75222, "lng": -1.24996, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.2 Transfer The Edwardian Manchester Hotel -> MAN (nearby airport for Manchester)", "type": "transfer", "time": "08:00-09:00", "cost": 600, "estimated_coord": true}, {"lat": 51.75627292354617, "lng": -1.2603842299588668, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.4 Transfer OXF (nearby airport for Oxford) -> Old Bank Hotel for check-in", "type": "transfer", "time": "12:30-13:30", "cost": 600, "estimated_coord": true}, {"lat": 51.7524564, "lng": -1.2472571, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.5 Check-in Old Bank Hotel", "type": "checkin", "time": "13:30-13:45", "cost": 0, "estimated_coord": false}, {"lat": 51.74624297807535, "lng": -1.2554353964236882, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.6 Transfer Old Bank Hotel -> Oxford University Museum of Natural History", "type": "transfer", "time": "13:45-13:54", "cost": 90, "estimated_coord": true}, {"lat": 51.758703, "lng": -1.2494669999999999, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.7 Oxford University Museum of Natural History", "type": "poi", "time": "13:54-15:24", "cost": 240, "estimated_coord": false}, {"lat": 51.762755923546166, "lng": -1.2598912299588667, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.8 Local area walk near Oxford University Museum of Natural History before Ashmolean Museum", "type": "poi", "time": "15:24-15:59", "cost": 0, "estimated_coord": true}, {"lat": 51.75698164960845, "lng": -1.252309425660749, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.9 Transfer Local area walk near Oxford University Museum of Natural History before Ashmolean Museum -> Ashmolean Museum", "type": "transfer", "time": "15:59-16:08", "cost": 90, "estimated_coord": true}, {"lat": 51.755427999999995, "lng": -1.2540725, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.10 Ashmolean Museum", "type": "poi", "time": "16:08-17:38", "cost": 240, "estimated_coord": false}, {"lat": 51.759480923546164, "lng": -1.2644967299588667, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.11 Local area walk near Ashmolean Museum before dinner", "type": "poi", "time": "17:38-18:38", "cost": 0, "estimated_coord": true}, {"lat": 51.75117481097421, "lng": -1.2618682636959069, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.12 Transfer Local area walk near Ashmolean Museum before dinner -> Dishoom Permit Room Oxford", "type": "transfer", "time": "18:38-18:47", "cost": 90, "estimated_coord": true}, {"lat": 51.7520856, "lng": -1.2538639999999999, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.13 Dishoom Permit Room Oxford", "type": "meal", "time": "18:47-19:47", "cost": 2029, "estimated_coord": false}, {"lat": 51.74899973592508, "lng": -1.2508974019231451, "day": 4, "date": "2026-07-04", "city": "Oxford", "name": "Day 4.14 Return to Old Bank Hotel", "type": "transfer", "time": "19:47-20:02", "cost": 150, "estimated_coord": true}, {"lat": 51.75650932354617, "lng": -1.2576813299588667, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.1 Hotel breakfast cafe at Old Bank Hotel", "type": "meal", "time": "08:00-08:40", "cost": 2255, "estimated_coord": true}, {"lat": 51.7580142519577, "lng": -1.2575177689978674, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.2 Transfer Hotel breakfast cafe at Old Bank Hotel -> Bodleian Library", "type": "transfer", "time": "08:40-08:45", "cost": 50, "estimated_coord": true}, {"lat": 51.754073, "lng": -1.2480419999999999, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.3 Bodleian Library", "type": "poi", "time": "08:45-10:15", "cost": 240, "estimated_coord": false}, {"lat": 51.75812592354617, "lng": -1.2584662299588667, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.4 Local area walk near Bodleian Library before lunch", "type": "poi", "time": "10:15-11:51", "cost": 0, "estimated_coord": true}, {"lat": 51.7468952297081, "lng": -1.258725288653735, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.5 Transfer Local area walk near Bodleian Library before lunch -> Dishoom Permit Room Oxford", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 51.75613852354617, "lng": -1.2642882299588667, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.6 Dishoom Permit Room Oxford", "type": "meal", "time": "12:00-13:00", "cost": 2029, "estimated_coord": true}, {"lat": 51.74610857807535, "lng": -1.259339396423688, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.7 Local area walk near Dishoom Permit Room Oxford before Oxford Botanic Garden", "type": "poi", "time": "13:00-15:54", "cost": 0, "estimated_coord": true}, {"lat": 51.75633683491762, "lng": -1.2446882800664187, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.8 Transfer Local area walk near Dishoom Permit Room Oxford before Oxford Botanic Garden -> Oxford Botanic Garden", "type": "transfer", "time": "15:54-16:03", "cost": 90, "estimated_coord": true}, {"lat": 51.7509617, "lng": -1.2476935999999998, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.9 Oxford Botanic Garden", "type": "poi", "time": "16:03-17:33", "cost": 240, "estimated_coord": false}, {"lat": 51.75679826579106, "lng": -1.267052316365232, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.10 Transfer Oxford Botanic Garden -> Market And Cafe Lane in Oxford", "type": "transfer", "time": "17:33-17:42", "cost": 90, "estimated_coord": true}, {"lat": 51.74647937807535, "lng": -1.2527324964236881, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.11 Market And Cafe Lane in Oxford", "type": "poi", "time": "17:42-19:12", "cost": 0, "estimated_coord": true}, {"lat": 51.74135139819156, "lng": -1.2508734004748177, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.12 Transfer Market And Cafe Lane in Oxford -> Dishoom Permit Room Oxford", "type": "transfer", "time": "19:12-19:21", "cost": 90, "estimated_coord": true}, {"lat": 51.75684724960845, "lng": -1.256213425660749, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.13 Dishoom Permit Room Oxford", "type": "meal", "time": "19:21-20:21", "cost": 2029, "estimated_coord": true}, {"lat": 51.76367013211957, "lng": -1.2523691123041243, "day": 5, "date": "2026-07-05", "city": "Oxford", "name": "Day 5.14 Return to Old Bank Hotel", "type": "transfer", "time": "20:21-20:36", "cost": 150, "estimated_coord": true}, {"lat": 51.75721804960845, "lng": -1.249606525660749, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.1 Hotel breakfast cafe at Old Bank Hotel", "type": "meal", "time": "08:00-08:40", "cost": 2255, "estimated_coord": true}, {"lat": 51.74620259595631, "lng": -1.266342237166189, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.2 Transfer Hotel breakfast cafe at Old Bank Hotel -> Historic Street Stroll in Oxford", "type": "transfer", "time": "08:40-08:45", "cost": 50, "estimated_coord": true}, {"lat": 51.75141121097421, "lng": -1.2591653636959068, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.3 Historic Street Stroll in Oxford", "type": "poi", "time": "08:45-10:15", "cost": 0, "estimated_coord": true}, {"lat": 51.74964399429533, "lng": -1.2442397527923041, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.4 Transfer Historic Street Stroll in Oxford -> City Viewpoint Walk in Oxford", "type": "transfer", "time": "10:15-10:20", "cost": 50, "estimated_coord": true}, {"lat": 51.74923613592508, "lng": -1.248194501923145, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.5 City Viewpoint Walk in Oxford", "type": "poi", "time": "10:25-11:55", "cost": 0, "estimated_coord": true}, {"lat": 51.762036351247964, "lng": -1.2628621191076823, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.6 Transfer City Viewpoint Walk in Oxford -> Dishoom Permit Room Oxford", "type": "transfer", "time": "11:55-12:00", "cost": 50, "estimated_coord": true}, {"lat": 51.75104041097421, "lng": -1.2657722636959068, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.7 Dishoom Permit Room Oxford", "type": "meal", "time": "12:00-13:00", "cost": 2029, "estimated_coord": true}, {"lat": 51.740319407278676, "lng": -1.2575013931624035, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.8 Transfer Dishoom Permit Room Oxford -> Design And Gallery Lane in Oxford", "type": "transfer", "time": "13:00-13:09", "cost": 90, "estimated_coord": true}, {"lat": 51.758250651957695, "lng": -1.2548148689978673, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.9 Design And Gallery Lane in Oxford", "type": "poi", "time": "13:09-14:39", "cost": 0, "estimated_coord": true}, {"lat": 51.7471316297081, "lng": -1.256022388653735, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.10 Local area walk near Design And Gallery Lane in Oxford before dinner", "type": "poi", "time": "14:39-17:51", "cost": 0, "estimated_coord": true}, {"lat": 51.76382095255104, "lng": -1.2421970824347268, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.11 Transfer Local area walk near Design And Gallery Lane in Oxford before dinner -> Dishoom Permit Room Oxford", "type": "transfer", "time": "17:51-18:00", "cost": 90, "estimated_coord": true}, {"lat": 51.74886533592508, "lng": -1.254801401923145, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.12 Dishoom Permit Room Oxford", "type": "meal", "time": "18:00-19:00", "cost": 2029, "estimated_coord": true}, {"lat": 51.75296246180609, "lng": -1.2739446809942934, "day": 6, "date": "2026-07-06", "city": "Oxford", "name": "Day 6.13 Return to Old Bank Hotel", "type": "transfer", "time": "19:00-19:15", "cost": 150, "estimated_coord": true}, {"lat": 51.50853, "lng": -0.12574, "day": 3, "date": "2026-07-07", "city": "London", "name": "Transfer Oxford -> London", "type": "direct_drive", "time": "", "cost": 500, "route_point": true}, {"lat": 51.75657323491762, "lng": -1.2419853800664187, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.1 Check-out Old Bank Hotel", "type": "checkout", "time": "08:00-08:15", "cost": 0, "estimated_coord": true}, {"lat": 51.50853, "lng": -0.11973999999999999, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.3 Transfer Drive Oxford -> London -> Hotel breakfast cafe at Kimpton Fitzroy London", "type": "transfer", "time": "09:38-09:53", "cost": 150, "estimated_coord": true}, {"lat": 51.5226417, "lng": -0.1191206, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.4 Hotel breakfast cafe at Kimpton Fitzroy London", "type": "meal", "time": "09:53-10:33", "cost": 2327, "estimated_coord": false}, {"lat": 51.52669462354617, "lng": -0.12954482995886693, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.5 Check-in Kimpton Fitzroy London", "type": "checkin", "time": "10:33-10:48", "cost": 0, "estimated_coord": true}, {"lat": 51.51666467807535, "lng": -0.12459599642368813, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.6 Local area walk near Kimpton Fitzroy London before lunch", "type": "poi", "time": "10:48-11:51", "cost": 0, "estimated_coord": true}, {"lat": 51.51258292354617, "lng": -0.13016422995886692, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.7 Transfer Local area walk near Kimpton Fitzroy London before lunch -> Circolo Popolare", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 51.5171895, "lng": -0.12786789999999998, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.8 Circolo Popolare", "type": "meal", "time": "12:00-13:00", "cost": 2159, "estimated_coord": false}, {"lat": 51.52124242354617, "lng": -0.13829212995886692, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.9 Local area walk near Circolo Popolare before London Eye", "type": "poi", "time": "13:00-14:34", "cost": 0, "estimated_coord": true}, {"lat": 51.50255297807535, "lng": -0.12521539642368812, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.10 Transfer Local area walk near Circolo Popolare before London Eye -> London Eye", "type": "transfer", "time": "14:34-14:43", "cost": 90, "estimated_coord": true}, {"lat": 51.5031864, "lng": -0.11951919999999999, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.11 London Eye", "type": "poi", "time": "14:43-16:13", "cost": 240, "estimated_coord": false}, {"lat": 51.51329164960845, "lng": -0.12208942566074897, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.12 Transfer London Eye -> Buckingham Palace", "type": "transfer", "time": "16:13-16:22", "cost": 90, "estimated_coord": true}, {"lat": 51.501363999999995, "lng": -0.13588999999999998, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.13 Buckingham Palace", "type": "poi", "time": "16:22-17:52", "cost": 240, "estimated_coord": false}, {"lat": 51.505416923546164, "lng": -0.14631422995886692, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.14 Local area walk near Buckingham Palace before dinner", "type": "poi", "time": "17:52-18:31", "cost": 0, "estimated_coord": true}, {"lat": 51.50748481097421, "lng": -0.13164826369590693, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.15 Transfer Local area walk near Buckingham Palace before dinner -> Ave Mario", "type": "transfer", "time": "18:31-18:40", "cost": 90, "estimated_coord": true}, {"lat": 51.5108639, "lng": -0.12397300000000001, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.16 Ave Mario", "type": "meal", "time": "18:40-19:40", "cost": 2094, "estimated_coord": false}, {"lat": 51.50530973592508, "lng": -0.12067740192314524, "day": 7, "date": "2026-07-07", "city": "London", "name": "Day 7.17 Return to Kimpton Fitzroy London", "type": "transfer", "time": "19:40-19:55", "cost": 150, "estimated_coord": true}, {"lat": 51.52740334960845, "lng": -0.12147002566074898, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.1 Hotel breakfast cafe at Kimpton Fitzroy London", "type": "meal", "time": "08:00-08:40", "cost": 2327, "estimated_coord": true}, {"lat": 51.514324251957696, "lng": -0.12729776899786732, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.2 Transfer Hotel breakfast cafe at Kimpton Fitzroy London -> The London Dungeon", "type": "transfer", "time": "08:40-08:49", "cost": 90, "estimated_coord": true}, {"lat": 51.502511899999995, "lng": -0.11276279999999998, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.3 The London Dungeon", "type": "poi", "time": "08:49-10:19", "cost": 240, "estimated_coord": false}, {"lat": 51.506564823546164, "lng": -0.1231870299588669, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.4 Local area walk near The London Dungeon before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 51.5032052297081, "lng": -0.12850528865373514, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.5 Transfer Local area walk near The London Dungeon before lunch -> Brother Marcus Covent Garden", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 51.5127993, "lng": -0.1203622, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.6 Brother Marcus Covent Garden", "type": "meal", "time": "12:00-13:00", "cost": 2094, "estimated_coord": false}, {"lat": 51.51685222354617, "lng": -0.13078642995886694, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.7 Local area walk near Brother Marcus Covent Garden before Museum District Walk in London", "type": "poi", "time": "13:00-15:46", "cost": 0, "estimated_coord": true}, {"lat": 51.51264683491762, "lng": -0.11446828006641876, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.8 Transfer Local area walk near Brother Marcus Covent Garden before Museum District Walk in London -> Museum District Walk in London", "type": "transfer", "time": "15:46-15:55", "cost": 90, "estimated_coord": true}, {"lat": 51.52159651097421, "lng": -0.13102886369590694, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.9 Museum District Walk in London", "type": "poi", "time": "15:55-17:25", "cost": 0, "estimated_coord": true}, {"lat": 51.51310826579106, "lng": -0.1368323163652322, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.10 Transfer Museum District Walk in London -> Market And Cafe Lane in London", "type": "transfer", "time": "17:25-17:30", "cost": 50, "estimated_coord": true}, {"lat": 51.51942143592508, "lng": -0.12005800192314525, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.11 Market And Cafe Lane in London", "type": "poi", "time": "17:30-19:00", "cost": 0, "estimated_coord": true}, {"lat": 51.49766139819156, "lng": -0.12065340047481779, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.12 Transfer Market And Cafe Lane in London -> Evelyn's Table", "type": "transfer", "time": "19:00-19:09", "cost": 90, "estimated_coord": true}, {"lat": 51.511125899999996, "lng": -0.13261770000000003, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.13 Evelyn's Table", "type": "meal", "time": "19:09-20:09", "cost": 2094, "estimated_coord": false}, {"lat": 51.51998013211957, "lng": -0.12214911230412426, "day": 8, "date": "2026-07-08", "city": "London", "name": "Day 8.14 Return to Kimpton Fitzroy London", "type": "transfer", "time": "20:09-20:24", "cost": 150, "estimated_coord": true}, {"lat": 51.5284359519577, "lng": -0.12667836899786733, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.1 Hotel breakfast cafe at Kimpton Fitzroy London", "type": "meal", "time": "08:00-08:40", "cost": 2327, "estimated_coord": true}, {"lat": 51.50251259595631, "lng": -0.13612223716618893, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.2 Transfer Hotel breakfast cafe at Kimpton Fitzroy London -> Historic Street Stroll in London", "type": "transfer", "time": "08:40-08:45", "cost": 50, "estimated_coord": true}, {"lat": 51.5173169297081, "lng": -0.12788588865373515, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.3 Historic Street Stroll in London", "type": "poi", "time": "08:45-10:15", "cost": 0, "estimated_coord": true}, {"lat": 51.50595399429533, "lng": -0.1140197527923042, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.4 Transfer Historic Street Stroll in London -> City Viewpoint Walk in London", "type": "transfer", "time": "10:15-10:20", "cost": 50, "estimated_coord": true}, {"lat": 51.52675853491762, "lng": -0.11384888006641877, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.5 City Viewpoint Walk in London", "type": "poi", "time": "10:25-11:55", "cost": 0, "estimated_coord": true}, {"lat": 51.51834635124796, "lng": -0.13264211910768242, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.6 Transfer City Viewpoint Walk in London -> Circolo Popolare", "type": "transfer", "time": "11:55-12:00", "cost": 50, "estimated_coord": true}, {"lat": 51.51121247807535, "lng": -0.1333432964236881, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.7 Circolo Popolare", "type": "meal", "time": "12:00-13:00", "cost": 2159, "estimated_coord": true}, {"lat": 51.496629407278675, "lng": -0.12728139316240358, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.8 Transfer Circolo Popolare -> Design And Gallery Lane in London", "type": "transfer", "time": "13:00-13:09", "cost": 90, "estimated_coord": true}, {"lat": 51.52721996579106, "lng": -0.1362129163652322, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.9 Design And Gallery Lane in London", "type": "poi", "time": "13:09-14:39", "cost": 0, "estimated_coord": true}, {"lat": 51.51177309819156, "lng": -0.1200340004748178, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.10 Local area walk near Design And Gallery Lane in London before dinner", "type": "poi", "time": "14:39-17:51", "cost": 0, "estimated_coord": true}, {"lat": 51.52013095255104, "lng": -0.11197708243472693, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.11 Transfer Local area walk near Design And Gallery Lane in London before dinner -> Brother Marcus Covent Garden", "type": "transfer", "time": "17:51-18:00", "cost": 90, "estimated_coord": true}, {"lat": 51.50682227807535, "lng": -0.12583759642368814, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.12 Brother Marcus Covent Garden", "type": "meal", "time": "18:00-19:00", "cost": 2094, "estimated_coord": true}, {"lat": 51.50927246180609, "lng": -0.14372468099429347, "day": 9, "date": "2026-07-09", "city": "London", "name": "Day 9.13 Return to Kimpton Fitzroy London", "type": "transfer", "time": "19:00-19:15", "cost": 150, "estimated_coord": true}, {"lat": 55.95206, "lng": -3.19648, "day": 4, "date": "2026-07-10", "city": "Edinburgh", "name": "Fly London (LHR) -> Edinburgh (EDI) [Business]", "type": "flight", "time": "", "cost": 7238, "route_point": true}, {"lat": 51.53409183211957, "lng": -0.12152971230412427, "day": 10, "date": "2026-07-10", "city": "Edinburgh", "name": "Day 10.1 Check-out Kimpton Fitzroy London", "type": "checkout", "time": "19:30-19:45", "cost": 0, "estimated_coord": true}, {"lat": 55.95206, "lng": -3.1904800000000004, "day": 10, "date": "2026-07-10", "city": "Edinburgh", "name": "Day 10.2 Transfer Kimpton Fitzroy London -> Heathrow Airport", "type": "transfer", "time": "19:45-20:15", "cost": 300, "estimated_coord": true}, {"lat": 55.95611292354617, "lng": -3.200904229958867, "day": 10, "date": "2026-07-10", "city": "Edinburgh", "name": "Day 10.4 Transfer Edinburgh Airport -> The Bonham Hotel for check-in", "type": "transfer", "time": "23:30-23:41", "cost": 110, "estimated_coord": true}, {"lat": 55.9514655, "lng": -3.2098289, "day": 10, "date": "2026-07-10", "city": "Edinburgh", "name": "Day 10.5 Check-in The Bonham Hotel", "type": "checkin", "time": "23:41-23:56", "cost": 0, "estimated_coord": false}, {"lat": 55.94608297807535, "lng": -3.195955396423688, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.1 Transfer from The Bonham Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 150, "estimated_coord": true}, {"lat": 55.9535721, "lng": -3.1865221, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.2 Dishoom Edinburgh", "type": "meal", "time": "08:00-08:40", "cost": 2051, "estimated_coord": false}, {"lat": 55.95682164960845, "lng": -3.192829425660749, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.3 Transfer Dishoom Edinburgh -> National Museum of Scotland", "type": "transfer", "time": "08:40-08:49", "cost": 90, "estimated_coord": true}, {"lat": 55.9469995, "lng": -3.1845666, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.4 National Museum of Scotland", "type": "poi", "time": "08:49-10:19", "cost": 240, "estimated_coord": false}, {"lat": 55.951052423546166, "lng": -3.1949908299588667, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.5 Local area walk near National Museum of Scotland before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 55.951014810974215, "lng": -3.2023882636959073, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.6 Transfer Local area walk near National Museum of Scotland before lunch -> Under The Table", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 55.9561011, "lng": -3.1923972000000003, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.7 Under The Table", "type": "meal", "time": "12:00-13:00", "cost": 2051, "estimated_coord": false}, {"lat": 55.96015402354617, "lng": -3.202821429958867, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.8 Local area walk near Under The Table before Royal Mile", "type": "poi", "time": "13:00-15:46", "cost": 0, "estimated_coord": true}, {"lat": 55.948839735925084, "lng": -3.1914174019231454, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.9 Transfer Local area walk near Under The Table before Royal Mile -> Royal Mile", "type": "transfer", "time": "15:46-15:55", "cost": 90, "estimated_coord": true}, {"lat": 55.9501093, "lng": -3.188021, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.10 Royal Mile", "type": "poi", "time": "15:55-17:25", "cost": 240, "estimated_coord": false}, {"lat": 55.9578542519577, "lng": -3.1980377689978674, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.11 Transfer Royal Mile -> Edinburgh Castle", "type": "transfer", "time": "17:25-17:34", "cost": 90, "estimated_coord": true}, {"lat": 55.9485947, "lng": -3.1999134999999996, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.12 Edinburgh Castle", "type": "poi", "time": "17:34-19:04", "cost": 240, "estimated_coord": false}, {"lat": 55.9467352297081, "lng": -3.1992452886537355, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.13 Transfer Edinburgh Castle -> LYLA Restaurant & Rooms", "type": "transfer", "time": "19:04-19:13", "cost": 90, "estimated_coord": true}, {"lat": 55.956811599999995, "lng": -3.1808145, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.14 LYLA Restaurant & Rooms", "type": "meal", "time": "19:13-20:13", "cost": 2159, "estimated_coord": false}, {"lat": 55.95617683491762, "lng": -3.185208280066419, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.15 Transfer LYLA Restaurant & Rooms -> The Scotch Whisky Experience", "type": "transfer", "time": "20:13-20:22", "cost": 90, "estimated_coord": true}, {"lat": 55.9487452, "lng": -3.1958982, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.16 The Scotch Whisky Experience", "type": "poi", "time": "20:22-21:00", "cost": 240, "estimated_coord": false}, {"lat": 55.956638265791064, "lng": -3.2075723163652325, "day": 11, "date": "2026-07-11", "city": "Edinburgh", "name": "Day 11.17 Return to The Bonham Hotel", "type": "transfer", "time": "21:00-21:15", "cost": 150, "estimated_coord": true}, {"lat": 23.120722923546165, "lng": 113.24557577004113, "day": 5, "date": "2026-07-12", "city": "guangzhou", "name": "Fly Edinburgh (EDI) -> guangzhou (CAN) [Business]", "type": "flight", "time": "", "cost": 69803, "route_point": true, "estimated_coord": false}, {"lat": 55.94119139819156, "lng": -3.191393400474818, "day": 12, "date": "2026-07-12", "city": "Edinburgh", "name": "Day 12.1 Transfer from The Bonham Hotel to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 150, "estimated_coord": true}, {"lat": 55.95762502354617, "lng": -3.1969463299588665, "day": 12, "date": "2026-07-12", "city": "Edinburgh", "name": "Day 12.2 Dishoom Edinburgh", "type": "meal", "time": "08:00-08:40", "cost": 2051, "estimated_coord": true}, {"lat": 55.96351013211957, "lng": -3.1928891123041243, "day": 12, "date": "2026-07-12", "city": "Edinburgh", "name": "Day 12.3 Transfer Dishoom Edinburgh -> Historic Street Stroll in Edinburgh", "type": "transfer", "time": "08:40-08:49", "cost": 90, "estimated_coord": true}, {"lat": 55.95551842354617, "lng": -3.220253129958867, "day": 12, "date": "2026-07-12", "city": "Edinburgh", "name": "Day 12.4 Historic Street Stroll in Edinburgh", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

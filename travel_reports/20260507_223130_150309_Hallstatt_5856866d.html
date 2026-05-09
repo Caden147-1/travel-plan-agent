@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Shenzhen to Hallstatt</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Shenzhen -> Hallstatt</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-10-08 - 2026-10-16</b></div>
+          <div class="request-item"><span>Travelers</span><b>2</b></div>
+          <div class="request-item"><span>Budget</span><b>52000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>budget hotel; food: fine_dining</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-10-08 - 2026-10-16</strong></div>
+        <div><span>Travelers</span><strong>2</strong></div>
+        <div><span>Budget</span><strong>52000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>35079 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>27932 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>1386 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>4482 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>1280 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>35079 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-10-08 | Hallstatt</h2></div><strong>9766 CNY</strong></div><ul class="event-list"><li><span class="time">12:30 - 01:07 (+1 day)</span><span class="event-name">Flight Shenzhen -&gt; Hallstatt</span><span class="event-type">Flight (Economy) x2</span><span class="cost">9766 CNY total</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-10-09 | Hallstatt</h2></div><strong>5357 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Dachsteinkönig – Familux Resort</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">01:37 - 08:00</span><span class="event-name">Transfer SZG Airport (nearby airport for Hallstatt) -&gt; Dachsteinkönig – Familux Resort for check-in</span><span class="event-type">Transfer</span><span class="cost">2681 CNY</span></li><li><span class="time">08:00 - 08:15</span><span class="event-name">Check-in Dachsteinkönig – Familux Resort</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">08:15 - 08:55</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">08:55 - 09:26</span><span class="event-name">Transfer Hotel breakfast cafe at Dachsteinkönig – Familux Resort -&gt; Salzwelten Shop &amp; Infocontainer Hallstatt</span><span class="event-type">Transfer</span><span class="cost">217 CNY</span></li><li><span class="time">09:26 - 10:56</span><span class="event-name">Salzwelten Shop &amp; Infocontainer Hallstatt</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">10:56 - 11:46</span><span class="event-name">Transfer Salzwelten Shop &amp; Infocontainer Hallstatt -&gt; Winterstellgut</span><span class="event-type">Transfer</span><span class="cost">350 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Winterstellgut</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 13:52</span><span class="event-name">Transfer Winterstellgut -&gt; Marketplace Hallstatt</span><span class="event-type">Transfer</span><span class="cost">364 CNY</span></li><li><span class="time">13:52 - 15:22</span><span class="event-name">Marketplace Hallstatt</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">15:22 - 15:31</span><span class="event-name">Transfer Marketplace Hallstatt -&gt; Hallstatt Skywalk - Hallstättersee</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">16:23 - 17:53</span><span class="event-name">Hallstatt Skywalk - Hallstättersee</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">17:53 - 18:00</span><span class="event-name">Transfer Hallstatt Skywalk - Hallstättersee -&gt; Bräugasthof</span><span class="event-type">Transfer</span><span class="cost">49 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bräugasthof</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Bräugasthof -&gt; 5 Fingers</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">5 Fingers</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-10-10 | Hallstatt</h2></div><strong>1754 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Dachsteinkönig – Familux Resort</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">08:40 - 09:26</span><span class="event-name">Transfer Hotel breakfast cafe at Dachsteinkönig – Familux Resort -&gt; Dachstein Krippenstein</span><span class="event-type">Transfer</span><span class="cost">322 CNY</span></li><li><span class="time">09:26 - 10:56</span><span class="event-name">Dachstein Krippenstein</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">10:56 - 11:10</span><span class="event-name">Transfer Dachstein Krippenstein -&gt; Salz Stüberl</span><span class="event-type">Transfer</span><span class="cost">98 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Salz Stüberl</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 14:49</span><span class="event-name">Local area walk near Salz Stüberl before Panoramic Viewpoint - Hallstatt</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:49 - 14:58</span><span class="event-name">Transfer Local area walk near Salz Stüberl before Panoramic Viewpoint - Hallstatt -&gt; Panoramic Viewpoint - Hallstatt</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">14:58 - 16:28</span><span class="event-name">Panoramic Viewpoint - Hallstatt</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">16:28 - 16:37</span><span class="event-name">Transfer Panoramic Viewpoint - Hallstatt -&gt; Bräugasthof</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bräugasthof</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-10-11 | Hallstatt</h2></div><strong>1406 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Dachsteinkönig – Familux Resort</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">11:38 - 12:00</span><span class="event-name">Transfer Hotel breakfast cafe at Dachsteinkönig – Familux Resort -&gt; Winterstellgut</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Winterstellgut</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">17:08 - 18:00</span><span class="event-name">Transfer Winterstellgut -&gt; Bräugasthof</span><span class="event-type">Transfer</span><span class="cost">364 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bräugasthof</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-10-12 | Hallstatt</h2></div><strong>1671 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Dachsteinkönig – Familux Resort</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">11:38 - 12:00</span><span class="event-name">Transfer Hotel breakfast cafe at Dachsteinkönig – Familux Resort -&gt; Winterstellgut</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Winterstellgut</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">17:08 - 18:00</span><span class="event-name">Transfer Winterstellgut -&gt; Bräugasthof</span><span class="event-type">Transfer</span><span class="cost">364 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bräugasthof</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Bräugasthof -&gt; 5 Fingers</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">5 Fingers</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-10-13 | Hallstatt</h2></div><strong>1168 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Dachsteinkönig – Familux Resort</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">11:29 - 12:00</span><span class="event-name">Transfer Hotel breakfast cafe at Dachsteinkönig – Familux Resort -&gt; Salz Stüberl</span><span class="event-type">Transfer</span><span class="cost">217 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Salz Stüberl</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Salz Stüberl -&gt; Bräugasthof</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bräugasthof</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-10-14 | Hallstatt</h2></div><strong>1406 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Dachsteinkönig – Familux Resort</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">11:38 - 12:00</span><span class="event-name">Transfer Hotel breakfast cafe at Dachsteinkönig – Familux Resort -&gt; Winterstellgut</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Winterstellgut</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">17:08 - 18:00</span><span class="event-name">Transfer Winterstellgut -&gt; Bräugasthof</span><span class="event-type">Transfer</span><span class="cost">364 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bräugasthof</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 8</p><h2>2026-10-15 | Hallstatt</h2></div><strong>1671 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Dachsteinkönig – Familux Resort</strong><span>198 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">11:38 - 12:00</span><span class="event-name">Transfer Hotel breakfast cafe at Dachsteinkönig – Familux Resort -&gt; Winterstellgut</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Winterstellgut</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">17:08 - 18:00</span><span class="event-name">Transfer Winterstellgut -&gt; Bräugasthof</span><span class="event-type">Transfer</span><span class="cost">364 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Bräugasthof</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Bräugasthof -&gt; 5 Fingers</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">5 Fingers</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 9</p><h2>2026-10-16 | Hallstatt</h2></div><strong>10879 CNY</strong></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Dachsteinkönig – Familux Resort</span><span class="event-type">Meal</span><span class="cost">185 CNY</span></li><li><span class="time">08:40 - 11:38</span><span class="event-name">Local area walk near Hotel breakfast cafe at Dachsteinkönig – Familux Resort before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:38 - 12:00</span><span class="event-name">Transfer Local area walk near Hotel breakfast cafe at Dachsteinkönig – Familux Resort before lunch -&gt; Winterstellgut</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Winterstellgut</span><span class="event-type">Meal</span><span class="cost">200 CNY</span></li><li><span class="time">13:00 - 13:22</span><span class="event-name">Transfer Winterstellgut -&gt; Dachsteinkönig – Familux Resort</span><span class="event-type">Transfer</span><span class="cost">154 CNY</span></li><li><span class="time">14:15 - 14:30</span><span class="event-name">Check-out Dachsteinkönig – Familux Resort</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">14:30 - 15:30</span><span class="event-name">Transfer Dachsteinkönig – Familux Resort -&gt; SZG (nearby airport for Hallstatt)</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">17:00 - 05:37 (+1 day)</span><span class="event-name">Flight Hallstatt -&gt; Shenzhen</span><span class="event-type">Flight (Economy) x2</span><span class="cost">9766 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 47.5659346, "lng": 13.526277499999999, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.2 Check-in Dachsteinkönig – Familux Resort", "type": "checkin", "time": "08:00-08:15", "cost": 0, "estimated_coord": false}, {"lat": 47.56998752354617, "lng": 13.515853270041132, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.3 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:15-08:55", "cost": 185, "estimated_coord": true}, {"lat": 47.556049599999994, "lng": 13.645321099999999, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.5 Salzwelten Shop & Infocontainer Hallstatt", "type": "poi", "time": "09:26-10:56", "cost": 160, "estimated_coord": false}, {"lat": 47.535978799999995, "lng": 13.445240499999999, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.7 Winterstellgut", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": false}, {"lat": 47.5624068, "lng": 13.6492914, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.9 Marketplace Hallstatt", "type": "poi", "time": "13:52-15:22", "cost": 160, "estimated_coord": false}, {"lat": 47.5613186, "lng": 13.6435403, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.11 Hallstatt Skywalk - Hallstättersee", "type": "poi", "time": "16:23-17:53", "cost": 160, "estimated_coord": false}, {"lat": 47.560576, "lng": 13.6539323, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.13 Bräugasthof", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": false}, {"lat": 47.528611999999995, "lng": 13.6980417, "day": 2, "date": "2026-10-09", "city": "Hallstatt", "name": "Day 2.15 5 Fingers", "type": "poi", "time": "19:15-21:00", "cost": 160, "estimated_coord": false}, {"lat": 47.55995757807535, "lng": 13.52080210357631, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.1 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:00-08:40", "cost": 185, "estimated_coord": true}, {"lat": 47.548288, "lng": 13.705221, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.3 Dachstein Krippenstein", "type": "poi", "time": "09:26-10:56", "cost": 160, "estimated_coord": false}, {"lat": 47.5613264, "lng": 13.654497400000002, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.5 Salz Stüberl", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": false}, {"lat": 47.56537932354617, "lng": 13.644073170041136, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.6 Local area walk near Salz Stüberl before Panoramic Viewpoint - Hallstatt", "type": "poi", "time": "13:00-14:49", "cost": 0, "estimated_coord": true}, {"lat": 47.5645953, "lng": 13.6499746, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.8 Panoramic Viewpoint - Hallstatt", "type": "poi", "time": "14:58-16:28", "cost": 160, "estimated_coord": false}, {"lat": 47.56462892354617, "lng": 13.643508070041133, "day": 3, "date": "2026-10-10", "city": "Hallstatt", "name": "Day 3.10 Bräugasthof", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": true}, {"lat": 47.570696249608446, "lng": 13.52392807433925, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.1 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:00-08:40", "cost": 185, "estimated_coord": true}, {"lat": 47.540031723546164, "lng": 13.434816270041132, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.3 Winterstellgut", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.55459897807535, "lng": 13.64845690357631, "day": 4, "date": "2026-10-11", "city": "Hallstatt", "name": "Day 4.5 Bräugasthof", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": true}, {"lat": 47.56488941097421, "lng": 13.514369236304091, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.1 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:00-08:40", "cost": 185, "estimated_coord": true}, {"lat": 47.530001778075345, "lng": 13.43976510357631, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.3 Winterstellgut", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.565337649608445, "lng": 13.65158287433925, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.5 Bräugasthof", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": true}, {"lat": 47.532664923546164, "lng": 13.687617470041133, "day": 5, "date": "2026-10-12", "city": "Hallstatt", "name": "Day 5.7 5 Fingers", "type": "poi", "time": "19:15-21:00", "cost": 160, "estimated_coord": true}, {"lat": 47.56271433592508, "lng": 13.525340098076853, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.1 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:00-08:40", "cost": 185, "estimated_coord": true}, {"lat": 47.55534937807535, "lng": 13.649022003576313, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.3 Salz Stüberl", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.55953081097421, "lng": 13.642024036304091, "day": 6, "date": "2026-10-13", "city": "Hallstatt", "name": "Day 6.5 Bräugasthof", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": true}, {"lat": 47.571728851957694, "lng": 13.51871973100213, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.1 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:00-08:40", "cost": 185, "estimated_coord": true}, {"lat": 47.54074044960844, "lng": 13.442891074339249, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.3 Winterstellgut", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.55735573592508, "lng": 13.652994898076853, "day": 7, "date": "2026-10-14", "city": "Hallstatt", "name": "Day 7.5 Bräugasthof", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": true}, {"lat": 47.5606098297081, "lng": 13.517512211346263, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.1 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:00-08:40", "cost": 185, "estimated_coord": true}, {"lat": 47.53493361097421, "lng": 13.433332236304091, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.3 Winterstellgut", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.56637025195769, "lng": 13.646374531002131, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.5 Bräugasthof", "type": "meal", "time": "18:00-19:00", "cost": 200, "estimated_coord": true}, {"lat": 47.522634978075345, "lng": 13.69256630357631, "day": 8, "date": "2026-10-15", "city": "Hallstatt", "name": "Day 8.7 5 Fingers", "type": "poi", "time": "19:15-21:00", "cost": 160, "estimated_coord": true}, {"lat": 22.54554, "lng": 114.0683, "day": 0, "date": "2026-10-16", "city": "Shenzhen", "name": "Fly Hallstatt (SZG) -> Shenzhen (SZX) [Economy]", "type": "flight", "time": "", "cost": 9766, "route_point": true}, {"lat": 47.570051434917616, "lng": 13.53154921993358, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.1 Hotel breakfast cafe at Dachsteinkönig – Familux Resort", "type": "meal", "time": "08:00-08:40", "cost": 185, "estimated_coord": true}, {"lat": 47.57051286579106, "lng": 13.509185183634767, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.2 Local area walk near Hotel breakfast cafe at Dachsteinkönig – Familux Resort before lunch", "type": "poi", "time": "08:40-11:38", "cost": 0, "estimated_coord": true}, {"lat": 47.532758535925076, "lng": 13.444303098076853, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.4 Winterstellgut", "type": "meal", "time": "12:00-13:00", "cost": 200, "estimated_coord": true}, {"lat": 47.55506599819156, "lng": 13.52536409952518, "day": 9, "date": "2026-10-16", "city": "Hallstatt", "name": "Day 9.6 Check-out Dachsteinkönig – Familux Resort", "type": "checkout", "time": "14:15-14:30", "cost": 0, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

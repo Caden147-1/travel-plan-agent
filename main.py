@@ -1,8 +1,11 @@
 from __future__ import annotations
 
 import json
+import math
 import mimetypes
 import os
+import re
+import copy
 import shutil
 import socket
 import subprocess
@@ -19,6 +22,7 @@ from urllib.parse import unquote, urlparse
 
 from router import get_router_backend_status, run_budget_pipeline
 from travel_time import get_today_date
+from travel_report_generator import write_travel_report
 from travel_requirement_parser_llm_agent import _call_llm
 from travel_requirement_parser_llm_agent import travel_requirement_parser_llm_agent
 
@@ -31,6 +35,8 @@ API_PORT = int(os.getenv("TRAVEL_API_PORT", "8000"))
 FRONTEND_PORT = int(os.getenv("TRAVEL_FRONTEND_PORT", "3000"))
 API_PROCESS_STARTED_AT = get_today_date().isoformat() + " " + time.strftime("%H:%M:%S")
 API_CODE_VERSION = datetime.fromtimestamp(Path(__file__).resolve().stat().st_mtime).isoformat(timespec="seconds")
+RECOVERABLE_BUDGET_RESULTS: Dict[str, Dict[str, Any]] = {}
+RECOVERABLE_BUDGET_ORDER: list[str] = []
 
 
 def _compact_json(value: Any, limit: int = 2500) -> str:
@@ -75,12 +81,49 @@ def _build_preference_hint(user_request: str, parsed: dict) -> str:
 def _fallback_guidance(user_request: str, result: dict) -> str:
     example_departure_date = _example_departure_date()
     example_start_date, example_end_date = _example_date_range()
+    def money_text(amount: Any, currency: str) -> str:
+        if isinstance(amount, (int, float)):
+            numeric = float(amount)
+            if numeric.is_integer():
+                return f"{int(numeric)} {currency}"
+            return f"{round(numeric, 2)} {currency}"
+        return f"{amount} {currency}"
+
+    if result.get("stage") == "agent4_itinerary_planning":
+        missing_transport = result.get("missing_required_transport") or []
+        if missing_transport:
+            routes = []
+            for item in missing_transport[:4]:
+                from_city = item.get("from_city")
+                to_city = item.get("to_city")
+                from_airports = item.get("candidate_from_airports") or []
+                to_airports = item.get("candidate_to_airports") or []
+                airport_note = ""
+                if from_airports or to_airports:
+                    airport_note = (
+                        f" (tried {','.join(from_airports) or 'no departure airport'}"
+                        f" -> {','.join(to_airports) or 'no arrival airport'})"
+                    )
+                routes.append(f"{from_city} -> {to_city}{airport_note}")
+            more = "" if len(missing_transport) <= 4 else f" and {len(missing_transport) - 4} more leg(s)"
+            return (
+                "I could not generate a report because required transport could not be selected after trying the available city and nearby airport candidates. "
+                f"Missing leg(s): {'; '.join(routes)}{more}. "
+                "Please retry after the flight search backend is available, or change the route/dates."
+            )
+        if result.get("error"):
+            return str(result.get("error"))
+        return (
+            "The request had enough information, but the itinerary assembly step failed internally before a report could be generated. "
+            "This is a system issue, not something you need to answer with another preference. Please retry after the backend fix is applied."
+        )
     if result.get("stage") == "budget_feasibility":
+        user_text = (user_request or "").lower()
         trip = result.get("trip_summary") or {}
         budget = (trip.get("budget") or {}).get("total")
         budget_currency = (trip.get("budget") or {}).get("currency") or "CNY"
         duration_days = trip.get("duration_days")
-        budget_text = f"{budget} {budget_currency}" if budget else f"your {budget_currency} cap"
+        budget_text = money_text(budget, budget_currency) if budget else f"your {budget_currency} cap"
 
         budget_check = result.get("budget_check") or {}
         flight_spend = budget_check.get("selected_total_flight_spend")
@@ -89,9 +132,59 @@ def _fallback_guidance(user_request: str, result: dict) -> str:
         flight_line = "Flight costs are too high for this budget."
         if isinstance(flight_spend, (int, float)) and float(flight_spend) > 0:
             flight_line = f"Flight costs alone are about {int(round(float(flight_spend)))} {budget_currency} roundtrip."
+        flight_exceeds_budget = (
+            isinstance(flight_spend, (int, float))
+            and isinstance(budget, (int, float))
+            and float(flight_spend) > float(budget)
+        )
+        warning_text = "\n".join(str(item) for item in result.get("warnings", []) or []).lower()
+        paid_attractions_already_removed = (
+            "removed paid attraction" in warning_text
+            or "paid attraction removed" in warning_text
+            or "remove all paid" in user_text
+            or "remove paid" in user_text
+        )
+        shortened_trip_already_applied = bool(
+            re.search(
+                r"\b(shorten|shorter|fewer days?|reduce.*days?|cut.*days?)\b|\b\d+\s*days?\s+instead of\s+\d+\s*days?\b|缩短|少.*天|改成.*天",
+                user_text,
+            )
+        )
+        dates_already_changed = bool(
+            re.search(
+                r"\b(change|changed|shift|moved|try|use)\b.{0,24}\b(date|dates|departure|departing|start|leave|leaving)\b|different dates?|new dates?|改日期|换日期|调整日期|换时间|改时间",
+                user_text,
+            )
+        )
+
+        minimum_budget_required = result.get("minimum_budget_required")
+        rough_minimum_budget_required = (result.get("rough_budget_check") or {}).get("minimum_budget_required")
+        if minimum_budget_required is None:
+            minimum_budget_required = rough_minimum_budget_required
 
         suggested_budget_text = f"more than {budget_text}"
-        if isinstance(budget, (int, float)) and float(budget) > 0:
+        budget_reason_line = "The current budget is below the minimum needed by the budget precheck."
+        applied_budget_line = ""
+        if isinstance(minimum_budget_required, (int, float)) and float(minimum_budget_required) > 0:
+            suggested_budget_text = money_text(round(float(minimum_budget_required)), budget_currency)
+            if result.get("itinerary") or (result.get("budget_check") or {}).get("itinerary_total_selected_estimated"):
+                budget_reason_line = (
+                    "The planner finished a minimum executable itinerary and used its final estimated cost, "
+                    f"so the minimum total budget is about {suggested_budget_text}."
+                )
+            else:
+                budget_reason_line = (
+                    "The budget precheck keeps core transport, hotels, and meals under about 70% of the total budget, "
+                    f"so the suggested minimum total budget is about {suggested_budget_text}."
+                )
+            if isinstance(budget, (int, float)) and float(budget) > 0:
+                gap = int(round(float(minimum_budget_required) - float(budget)))
+                if gap > 0:
+                    applied_budget_line = (
+                        f"I applied the current budget as {budget_text}, but it is still about "
+                        f"{gap} {budget_currency} below that minimum.\n\n"
+                    )
+        elif isinstance(budget, (int, float)) and float(budget) > 0:
             suggested_budget = int(round(float(budget) * 1.2 / 1000.0) * 1000)
             if suggested_budget <= int(round(float(budget))):
                 suggested_budget = int(round(float(budget))) + 1000
@@ -105,17 +198,45 @@ def _fallback_guidance(user_request: str, result: dict) -> str:
             current_day_label = "day" if current_days == 1 else "days"
             shorten_example = f"{shorter_days} {day_label} instead of {current_days} {current_day_label}"
 
+        option_lines = [
+            f"- Increase your budget to at least {suggested_budget_text}",
+        ]
+        if not shortened_trip_already_applied:
+            option_lines.append(f"- Shorten the trip (for example, {shorten_example})")
+        if not paid_attractions_already_removed and not flight_exceeds_budget:
+            option_lines.append("- Remove paid attractions")
+
+        already_tried_line = ""
+        if paid_attractions_already_removed:
+            already_tried_line = (
+                "I removed paid attraction costs, but the remaining fixed costs are still above the budget.\n\n"
+            )
+        elif flight_exceeds_budget:
+            already_tried_line = (
+                "Removing paid attractions will not be enough because the flight cost alone is already above the current budget.\n\n"
+            )
+        if shortened_trip_already_applied:
+            already_tried_line += "I applied the shorter trip length, but the remaining fixed costs are still above the budget.\n\n"
+        if dates_already_changed:
+            already_tried_line += "I applied the changed dates, but the trip is still above the budget.\n\n"
+
+        example_options = [f'"Increase budget to {suggested_budget_text}"']
+        if not shortened_trip_already_applied:
+            example_options.append(f'"Shorten the trip to {shorten_example}."')
+        elif not paid_attractions_already_removed and not flight_exceeds_budget:
+            example_options.append('"Remove paid attractions."')
+
         return (
             f"This trip is over budget.\n\n"
             f"{flight_line}\n\n"
+            f"{budget_reason_line}\n\n"
+            f"{applied_budget_line}"
+            f"{already_tried_line}"
             "Options:\n"
-            "- Increase your budget\n"
-            f"- Shorten the trip (for example, {shorten_example})\n"
-            "- Remove paid attractions\n"
-            "- Change dates\n\n"
+            + "\n".join(option_lines)
+            + "\n\n"
             "Reply with one option.\n"
-            f'For example: "Increase budget to {suggested_budget_text}" or '
-            f'"Keep {budget_text} but remove all paid activities."'
+            f"For example: {' or '.join(example_options)}"
         )
 
     parsed = result.get("parsed_request") or {}
@@ -196,6 +317,8 @@ Planner failure result:
 
 
 def _build_guidance(user_request: str, result: dict) -> str:
+    if result.get("stage") in {"agent4_itinerary_planning", "budget_feasibility"}:
+        return _fallback_guidance(user_request, result)
     try:
         guidance = _call_llm(_build_guidance_prompt(user_request, result)).strip()
         return guidance or _fallback_guidance(user_request, result)
@@ -361,6 +484,376 @@ def _report_url_from_result(result: Dict[str, Any]) -> Optional[str]:
     return f"http://{API_HOST}:{API_PORT}/reports/{relative.as_posix()}"
 
 
+def _safe_float(value: Any, default: float = 0.0) -> float:
+    try:
+        if value is None or value == "":
+            return default
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
+def _round_up_to_100(value: float) -> int:
+    if value <= 0:
+        return 0
+    return int(math.ceil(float(value) / 100.0) * 100)
+
+
+def _event_type(event: Dict[str, Any]) -> str:
+    return str(event.get("type") or "").strip().lower()
+
+
+def _hotel_cost_for_recovery_day(day: Dict[str, Any]) -> float:
+    hotel = day.get("hotel") or {}
+    if not isinstance(hotel, dict) or not str(hotel.get("name") or "").strip():
+        return 0.0
+    if str(day.get("missing_required_outbound_transport") or "").strip().lower() == "true":
+        return 0.0
+
+    nightly = _safe_float(hotel.get("estimated_nightly_per_room"), 0.0)
+    if nightly <= 0:
+        nightly = _safe_float(hotel.get("realtime_nightly_per_room"), 0.0)
+    if nightly > 0:
+        return nightly
+
+    total = _safe_float(hotel.get("estimated_total_cost"), 0.0)
+    if total <= 0:
+        return 0.0
+
+    day_date = str(day.get("date") or "").strip()
+    check_in = str(day.get("check_in") or "").strip()
+    check_out = str(day.get("check_out") or "").strip()
+    nights = 1
+    try:
+        if day_date and check_in and check_out:
+            day_dt = datetime.strptime(day_date, "%Y-%m-%d")
+            check_in_dt = datetime.strptime(check_in, "%Y-%m-%d")
+            check_out_dt = datetime.strptime(check_out, "%Y-%m-%d")
+            if not (check_in_dt <= day_dt < check_out_dt):
+                return 0.0
+            nights = max(1, (check_out_dt - check_in_dt).days)
+        elif check_in and check_out:
+            nights = max(1, (datetime.strptime(check_out, "%Y-%m-%d") - datetime.strptime(check_in, "%Y-%m-%d")).days)
+        else:
+            day_index = int(_safe_float(day.get("day_index_in_city"), 0.0))
+            days_in_city = int(_safe_float(day.get("days_in_city"), 0.0))
+            if day_index > 0 and days_in_city > 0 and day_index >= days_in_city:
+                return 0.0
+            if days_in_city > 1:
+                nights = max(1, days_in_city - 1)
+    except Exception:
+        nights = 1
+    return total / float(max(1, nights))
+
+
+def _traveler_count(result: Dict[str, Any]) -> int:
+    trip = result.get("trip_summary") or {}
+    travelers = trip.get("travelers") or trip.get("traveler_count") or trip.get("people")
+    if isinstance(travelers, dict):
+        travelers = travelers.get("total") or travelers.get("count")
+    count = int(_safe_float(travelers, 1.0))
+    return max(1, count)
+
+
+def _rebuild_cost_rollup(daily_plan: list[dict]) -> Dict[str, float]:
+    transport = 0.0
+    food = 0.0
+    attractions = 0.0
+    hotels = 0.0
+    for day in daily_plan:
+        if not isinstance(day, dict):
+            continue
+        hotels += _hotel_cost_for_recovery_day(day)
+        for event in day.get("events", []) or []:
+            if not isinstance(event, dict):
+                continue
+            cost = _safe_float(event.get("cost_estimated"), 0.0)
+            kind = _event_type(event)
+            if kind in {"meal", "restaurant"}:
+                food += cost
+            elif kind in {"poi", "attraction", "activity"}:
+                attractions += cost
+            elif kind in {"flight", "transfer", "drive", "rental_car", "intercity", "local_transport"}:
+                transport += cost
+    total = transport + food + attractions + hotels
+    return {
+        "transport": round(transport, 2),
+        "food": round(food, 2),
+        "attractions": round(attractions, 2),
+        "hotel_reference": round(hotels, 2),
+        "total_selected_estimated": round(total, 2),
+        "total_cost": round(total, 2),
+    }
+
+
+def _cache_recoverable_budget_result(request_id: str, result: Dict[str, Any]) -> None:
+    itinerary = result.get("itinerary") or {}
+    daily_plan = itinerary.get("daily_plan")
+    if result.get("stage") != "budget_feasibility" or not isinstance(daily_plan, list) or not daily_plan:
+        return
+    RECOVERABLE_BUDGET_RESULTS[request_id] = copy.deepcopy(result)
+    RECOVERABLE_BUDGET_ORDER.append(request_id)
+    while len(RECOVERABLE_BUDGET_ORDER) > 20:
+        old_id = RECOVERABLE_BUDGET_ORDER.pop(0)
+        RECOVERABLE_BUDGET_RESULTS.pop(old_id, None)
+
+
+def _recoverable_estimated_total(result: Dict[str, Any]) -> float:
+    itinerary = result.get("itinerary") or {}
+    cost_rollup = itinerary.get("cost_rollup") or {}
+    budget_check = itinerary.get("budget_check") or {}
+    result_budget_check = result.get("budget_check") or {}
+    return _safe_float(
+        cost_rollup.get("total_selected_estimated")
+        or budget_check.get("estimated_total")
+        or budget_check.get("selected_total")
+        or result_budget_check.get("itinerary_total_selected_estimated")
+        or result_budget_check.get("selected_total"),
+        0.0,
+    )
+
+
+def _find_latest_recoverable_within_budget(budget_total: Optional[float]) -> Optional[Dict[str, Any]]:
+    if budget_total is None or budget_total <= 0:
+        return None
+    for recover_id in reversed(RECOVERABLE_BUDGET_ORDER):
+        candidate = RECOVERABLE_BUDGET_RESULTS.get(recover_id)
+        if not isinstance(candidate, dict):
+            continue
+        estimated_total = _recoverable_estimated_total(candidate)
+        if estimated_total > 0 and estimated_total <= budget_total:
+            return copy.deepcopy(candidate)
+    return None
+
+
+def _budget_recovery_actions(payload: Dict[str, Any]) -> list[str]:
+    raw = payload.get("budget_recovery_actions")
+    if isinstance(raw, list):
+        actions = [str(item).strip().lower() for item in raw if str(item).strip()]
+    else:
+        actions = []
+    return [
+        item for item in actions
+        if item in {"increase_budget", "lower_hotels", "lower_food", "remove_paid_attractions", "use_public_transport"}
+    ]
+
+
+def _apply_fast_budget_recovery(result: Dict[str, Any], actions: list[str], new_total_budget: Optional[float]) -> list[str]:
+    notes: list[str] = []
+    itinerary = result.setdefault("itinerary", {})
+    daily_plan = itinerary.get("daily_plan")
+    if not isinstance(daily_plan, list):
+        return notes
+
+    travelers = _traveler_count(result)
+    action_set = set(actions)
+
+    if "lower_hotels" in action_set:
+        for day in daily_plan:
+            if not isinstance(day, dict):
+                continue
+            hotel = day.get("hotel")
+            if not isinstance(hotel, dict):
+                continue
+            old_cost = _safe_float(hotel.get("estimated_total_cost"), 0.0)
+            if old_cost <= 0:
+                continue
+            hotel["estimated_total_cost"] = round(max(old_cost * 0.62, 380.0 * travelers), 2)
+            hotel["name"] = hotel.get("name") or f"Budget hotel in {day.get('city') or 'destination city'}"
+            hotel["fast_recovery_note"] = "Downgraded to a budget-level hotel estimate without rerunning hotel search."
+        notes.append("Downgraded hotel estimates to budget-level accommodation.")
+
+    if "lower_food" in action_set:
+        for day in daily_plan:
+            if not isinstance(day, dict):
+                continue
+            for event in day.get("events", []) or []:
+                if not isinstance(event, dict) or _event_type(event) not in {"meal", "restaurant"}:
+                    continue
+                old_cost = _safe_float(event.get("cost_estimated"), 0.0)
+                if old_cost <= 0:
+                    continue
+                budget_meal = 85.0 * travelers
+                event["cost_estimated"] = round(min(old_cost * 0.55, budget_meal), 2)
+                event.setdefault("metadata", {})
+                if isinstance(event["metadata"], dict):
+                    event["metadata"]["fast_recovery_note"] = "Downgraded to a budget/local meal estimate without rerunning restaurant search."
+        notes.append("Downgraded meal estimates to budget local meals.")
+
+    if "remove_paid_attractions" in action_set:
+        for day in daily_plan:
+            if not isinstance(day, dict):
+                continue
+            kept_events = []
+            for event in day.get("events", []) or []:
+                if isinstance(event, dict) and _event_type(event) in {"poi", "attraction", "activity"} and _safe_float(event.get("cost_estimated"), 0.0) > 0:
+                    event["cost_estimated"] = 0
+                    event.setdefault("metadata", {})
+                    if isinstance(event["metadata"], dict):
+                        event["metadata"]["fast_recovery_note"] = "Paid attraction removed from budget; use free exterior visit or nearby free alternative."
+                kept_events.append(event)
+            day["events"] = kept_events
+        notes.append("Removed paid attraction costs and kept free/exterior alternatives.")
+
+    if "use_public_transport" in action_set:
+        for day in daily_plan:
+            if not isinstance(day, dict):
+                continue
+            for event in day.get("events", []) or []:
+                if not isinstance(event, dict) or _event_type(event) not in {"drive", "rental_car"}:
+                    continue
+                old_cost = _safe_float(event.get("cost_estimated"), 0.0)
+                if old_cost > 0:
+                    event["cost_estimated"] = round(max(old_cost * 0.35, 90.0 * travelers), 2)
+                event["type"] = "intercity"
+                name = str(event.get("name") or "").strip()
+                event["name"] = name.replace("Drive", "Public transport").replace("Rental car", "Public transport") or "Public intercity transport"
+                event.setdefault("metadata", {})
+                if isinstance(event["metadata"], dict):
+                    event["metadata"]["transport_mode"] = "public_intercity_transport"
+                    event["metadata"]["fast_recovery_note"] = "Changed rental car/drive segment to public intercity transport without rerunning live searches."
+        notes.append("Changed rental-car or drive segments to public intercity transport estimates.")
+
+    if action_set != {"increase_budget"}:
+        itinerary["cost_rollup"] = _rebuild_cost_rollup(daily_plan)
+    budget_total = new_total_budget
+    trip_budget = result.setdefault("trip_summary", {}).setdefault("budget", {})
+    if budget_total is None:
+        budget_total = _safe_float(trip_budget.get("total"), 0.0)
+    if budget_total and budget_total > 0:
+        trip_budget["total"] = budget_total
+        trip_budget.setdefault("currency", "CNY")
+
+    estimated_total = _safe_float((itinerary.get("cost_rollup") or {}).get("total_selected_estimated"), 0.0)
+    feasible = bool(budget_total and estimated_total <= budget_total)
+    budget_check = itinerary.setdefault("budget_check", {})
+    budget_check["budget_feasible"] = feasible
+    budget_check["total_budget"] = budget_total
+    budget_check["selected_total"] = estimated_total
+    budget_check["delta"] = round(estimated_total - _safe_float(budget_total, 0.0), 2)
+    summary = itinerary.setdefault("itinerary_summary", {})
+    summary["budget_feasible"] = feasible
+    summary["estimated_total_cost"] = estimated_total
+    result["planning_baseline"] = {
+        **(result.get("planning_baseline") or {}),
+        "request": result.get("planning_baseline", {}).get("request") or "",
+        "total_budget": budget_total,
+        "selected_total": estimated_total,
+    }
+    return notes
+
+
+def _set_recovery_budget_total(result: Dict[str, Any], budget_total: float) -> None:
+    if budget_total <= 0:
+        return
+    trip_budget = result.setdefault("trip_summary", {}).setdefault("budget", {})
+    trip_budget["total"] = budget_total
+    trip_budget.setdefault("currency", "CNY")
+    itinerary = result.setdefault("itinerary", {})
+    budget_check = itinerary.setdefault("budget_check", {})
+    estimated_total = _recoverable_estimated_total(result)
+    budget_check["budget_feasible"] = estimated_total <= budget_total if estimated_total > 0 else True
+    budget_check["total_budget"] = budget_total
+    budget_check["selected_total"] = estimated_total
+    budget_check["delta"] = round(budget_total - estimated_total, 2)
+    summary = itinerary.setdefault("itinerary_summary", {})
+    summary["budget_feasible"] = budget_check["budget_feasible"]
+    summary["total_budget"] = budget_total
+    summary["estimated_total_cost"] = estimated_total
+    summary["budget_delta"] = budget_check["delta"]
+    result["planning_baseline"] = {
+        **(result.get("planning_baseline") or {}),
+        "request": result.get("planning_baseline", {}).get("request") or "",
+        "total_budget": budget_total,
+        "selected_total": estimated_total,
+    }
+
+
+def _recover_budget_plan(payload: Dict[str, Any], user_request: str) -> tuple[Dict[str, Any], int]:
+    recover_id = str(payload.get("recover_budget_request_id") or "").strip()
+    cached = RECOVERABLE_BUDGET_RESULTS.get(recover_id)
+    if not cached:
+        return {
+            "success": False,
+            "stage": "budget_recovery",
+            "error": "The previous budget-failed plan is no longer available. Please rerun the full request.",
+        }, 404
+
+    new_total_budget = payload.get("new_total_budget")
+    parsed_budget = _safe_float(new_total_budget, 0.0) if new_total_budget is not None else None
+    if parsed_budget is not None and parsed_budget <= 0:
+        parsed_budget = None
+
+    actions = _budget_recovery_actions(payload)
+    if parsed_budget is not None and "increase_budget" not in actions:
+        actions.append("increase_budget")
+    if not actions:
+        return {
+            "success": False,
+            "stage": "budget_recovery",
+            "error": "No fast budget recovery action was provided.",
+        }, 400
+    cached_minimum = _safe_float(cached.get("minimum_budget_required"), 0.0)
+    if cached_minimum <= 0:
+        cached_minimum = _safe_float((cached.get("budget_check") or {}).get("minimum_budget_required"), 0.0)
+
+    result = copy.deepcopy(cached)
+    notes = _apply_fast_budget_recovery(result, actions, parsed_budget)
+    itinerary = result.get("itinerary") or {}
+    estimated_total = _safe_float((itinerary.get("cost_rollup") or {}).get("total_selected_estimated"), 0.0)
+    budget_total = _safe_float(((result.get("trip_summary") or {}).get("budget") or {}).get("total"), 0.0)
+    if parsed_budget is not None and estimated_total > 0 and estimated_total <= parsed_budget:
+        _set_recovery_budget_total(result, parsed_budget)
+        budget_total = parsed_budget
+    if not budget_total or estimated_total > budget_total:
+        fallback = _find_latest_recoverable_within_budget(parsed_budget)
+        if fallback is not None:
+            result = fallback
+            notes = _apply_fast_budget_recovery(result, actions, parsed_budget)
+            itinerary = result.get("itinerary") or {}
+            estimated_total = _safe_float((itinerary.get("cost_rollup") or {}).get("total_selected_estimated"), 0.0)
+            budget_total = _safe_float(((result.get("trip_summary") or {}).get("budget") or {}).get("total"), 0.0)
+            if parsed_budget is not None and estimated_total > 0 and estimated_total <= parsed_budget:
+                _set_recovery_budget_total(result, parsed_budget)
+                budget_total = parsed_budget
+        if budget_total and estimated_total <= budget_total:
+            result["success"] = True
+            result["stage"] = "fast_budget_recovery"
+            result["error"] = None
+            result.setdefault("warnings", []).extend(notes)
+            result["warnings"].append("Fast budget recovery reused the latest feasible minimum-cost plan because the requested recovery id was stale.")
+            sys.stdout.write(
+                f"[api] fast_budget_recovery fallback success requested_budget={parsed_budget} "
+                f"applied_budget={budget_total} estimated={estimated_total}\n"
+            )
+            sys.stdout.flush()
+            result["report"] = write_travel_report(result, user_request, auto_open=False)
+            return result, 200
+        minimum = _round_up_to_100(estimated_total)
+        result["success"] = False
+        result["stage"] = "budget_feasibility"
+        result["error"] = (
+            f"Fast budget recovery still exceeds the budget: {round(estimated_total, 2)} CNY "
+            f"against budget {round(budget_total, 2)} CNY."
+        )
+        result["minimum_budget_required"] = minimum
+        result.setdefault("warnings", []).extend(notes)
+        return result, 422
+
+    result["success"] = True
+    result["stage"] = "fast_budget_recovery"
+    result["error"] = None
+    result.setdefault("warnings", []).extend(notes)
+    result["warnings"].append("Fast budget recovery reused the previous plan and regenerated the report without rerunning live searches.")
+    sys.stdout.write(
+        f"[api] fast_budget_recovery success requested_budget={parsed_budget} "
+        f"applied_budget={budget_total} estimated={estimated_total}\n"
+    )
+    sys.stdout.flush()
+    result["report"] = write_travel_report(result, user_request, auto_open=False)
+    return result, 200
+
+
 class TravelApiHandler(BaseHTTPRequestHandler):
     server_version = "TravelAI/1.0"
 
@@ -426,6 +919,13 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             return
 
         sys.stdout.write(f"[api] [{request_id}] {parsed.path} started\n")
+        if parsed.path == "/api/plan":
+            sys.stdout.write(
+                f"[api] [{request_id}] plan payload recover_id={payload.get('recover_budget_request_id')} "
+                f"new_total_budget={payload.get('new_total_budget')} "
+                f"actions={payload.get('budget_recovery_actions')}\n"
+            )
+            sys.stdout.flush()
 
         if parsed.path == "/api/guidance":
             guidance_response = _run_intake_check(user_request)
@@ -435,9 +935,36 @@ class TravelApiHandler(BaseHTTPRequestHandler):
             return
 
         try:
-            result = run_budget_pipeline(user_request, auto_open_report=False, refinement_context=refinement_context)
+            if payload.get("recover_budget_request_id"):
+                result, recovery_status = _recover_budget_plan(payload, user_request)
+                if recovery_status == 404 and result.get("stage") == "budget_recovery":
+                    result = run_budget_pipeline(user_request, auto_open_report=False, refinement_context=refinement_context)
+                    recovery_status = None
+                _cache_recoverable_budget_result(request_id, result)
+            else:
+                result = run_budget_pipeline(user_request, auto_open_report=False, refinement_context=refinement_context)
+                recovery_status = None
+                _cache_recoverable_budget_result(request_id, result)
             report_url = _report_url_from_result(result)
             success = bool(result.get("success"))
+            itinerary = result.get("itinerary") or {}
+            cost_rollup = itinerary.get("cost_rollup") or {}
+            itinerary_budget_check = itinerary.get("budget_check") or {}
+            result_budget_check = result.get("budget_check") or {}
+            estimated_total = _safe_float(
+                cost_rollup.get("total_selected_estimated")
+                or itinerary_budget_check.get("estimated_total")
+                or result_budget_check.get("itinerary_total_selected_estimated")
+                or result_budget_check.get("selected_total"),
+                0.0,
+            )
+            minimum_budget_required = result.get("minimum_budget_required")
+            if result.get("stage") == "budget_feasibility" and estimated_total > 0:
+                minimum_budget_required = max(
+                    _safe_float(itinerary_budget_check.get("minimum_budget_required"), 0.0),
+                    _safe_float(result_budget_check.get("minimum_budget_required"), 0.0),
+                    _round_up_to_100(estimated_total),
+                )
             response = {
                 "request_id": request_id,
                 "success": success,
@@ -446,10 +973,13 @@ class TravelApiHandler(BaseHTTPRequestHandler):
                 "guidance": None if success else _build_guidance(user_request, result),
                 "warnings": result.get("warnings", []),
                 "trip_summary": result.get("trip_summary", {}),
-                "itinerary_summary": (result.get("itinerary") or {}).get("itinerary_summary", {}),
+                "itinerary_summary": itinerary.get("itinerary_summary", {}),
                 "refinement_state": result.get("refinement_state", {}),
                 "upgrade_status": result.get("upgrade_status", []),
                 "planning_baseline": result.get("planning_baseline", {}),
+                "minimum_budget_required": minimum_budget_required,
+                "recoverable_budget_request_id": request_id if result.get("stage") == "budget_feasibility" and estimated_total > 0 else None,
+                "recoverable_estimated_total": estimated_total or None,
                 "report": result.get("report", {}),
                 "report_url": report_url,
                 "runtime": {
@@ -459,7 +989,7 @@ class TravelApiHandler(BaseHTTPRequestHandler):
                 },
             }
             failure_status = 422 if response["stage"] in {"agent1_parse", "agent1_validation", "budget_feasibility", "refinement_non_decrease"} else 500
-            _json_response(self, 200 if success else failure_status, response)
+            _json_response(self, 200 if success else (recovery_status or failure_status), response)
             sys.stdout.write(
                 f"[api] [{request_id}] {parsed.path} finished success={success} stage={response.get('stage')}\n"
             )

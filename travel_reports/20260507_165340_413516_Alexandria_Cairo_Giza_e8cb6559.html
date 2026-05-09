@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Chengdu to Alexandria, Cairo, Giza</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Chengdu -> Alexandria, Cairo, Giza</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-07-15 - 2026-07-23</b></div>
+          <div class="request-item"><span>Travelers</span><b>2</b></div>
+          <div class="request-item"><span>Budget</span><b>78000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>luxury hotel; food: fine_dining; attractions: mixed</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-07-15 - 2026-07-23</strong></div>
+        <div><span>Travelers</span><strong>2</strong></div>
+        <div><span>Budget</span><strong>78000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>77220 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>22926 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>31125 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>22528 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>640 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>77220 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-07-15 | Alexandria</h2></div><strong>11656 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Rixos Montaza Alexandria</strong><span>3447 CNY</span></div><ul class="event-list"><li><span class="time">09:30 - 19:35</span><span class="event-name">Flight Chengdu -&gt; Alexandria</span><span class="event-type">Flight (Economy) x2</span><span class="cost">7789 CNY total</span></li><li><span class="time">20:05 - 21:05</span><span class="event-name">Transfer HBE -&gt; Rixos Montaza Alexandria for check-in</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">21:05 - 21:20</span><span class="event-name">Check-in Rixos Montaza Alexandria</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-07-16 | Alexandria</h2></div><strong>7370 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Rixos Montaza Alexandria</strong><span>3447 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Rixos Montaza Alexandria to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">La Alexandria Asian Restaurant &amp; Cafe</span><span class="event-type">Meal</span><span class="cost">885 CNY</span></li><li><span class="time">08:40 - 09:20</span><span class="event-name">Transfer La Alexandria Asian Restaurant &amp; Cafe -&gt; Riverside Photo Walk in Alexandria</span><span class="event-type">Transfer</span><span class="cost">280 CNY</span></li><li><span class="time">09:20 - 10:50</span><span class="event-name">Riverside Photo Walk in Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:50 - 11:42</span><span class="event-name">Local area walk near Riverside Photo Walk in Alexandria before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:42 - 12:00</span><span class="event-name">Transfer Local area walk near Riverside Photo Walk in Alexandria before lunch -&gt; BRANZINO</span><span class="event-type">Transfer</span><span class="cost">126 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">BRANZINO</span><span class="event-type">Meal</span><span class="cost">1039 CNY</span></li><li><span class="time">13:00 - 13:43</span><span class="event-name">Transfer BRANZINO -&gt; Museum District Walk in Alexandria</span><span class="event-type">Transfer</span><span class="cost">301 CNY</span></li><li><span class="time">13:52 - 15:22</span><span class="event-name">Museum District Walk in Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:22 - 15:27</span><span class="event-name">Transfer Museum District Walk in Alexandria -&gt; Market And Cafe Lane in Alexandria</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">15:27 - 16:57</span><span class="event-name">Market And Cafe Lane in Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:57 - 17:39</span><span class="event-name">Local area walk near Market And Cafe Lane in Alexandria before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:39 - 18:00</span><span class="event-name">Transfer Local area walk near Market And Cafe Lane in Alexandria before dinner -&gt; Ma sera restaurant</span><span class="event-type">Transfer</span><span class="cost">147 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Ma sera restaurant</span><span class="event-type">Meal</span><span class="cost">795 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Ma sera restaurant -&gt; Alexandria night view walk near Rixos Montaza Alexandria</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">Alexandria night view walk near Rixos Montaza Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Rixos Montaza Alexandria</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-07-17 | Alexandria</h2></div><strong>6964 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Rixos Montaza Alexandria</strong><span>3447 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Rixos Montaza Alexandria to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">La Alexandria Asian Restaurant &amp; Cafe</span><span class="event-type">Meal</span><span class="cost">885 CNY</span></li><li><span class="time">08:40 - 09:20</span><span class="event-name">Transfer La Alexandria Asian Restaurant &amp; Cafe -&gt; Historic Street Stroll in Alexandria</span><span class="event-type">Transfer</span><span class="cost">280 CNY</span></li><li><span class="time">09:20 - 10:50</span><span class="event-name">Historic Street Stroll in Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:50 - 11:52</span><span class="event-name">Local area walk near Historic Street Stroll in Alexandria before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:52 - 12:10</span><span class="event-name">Transfer Local area walk near Historic Street Stroll in Alexandria before lunch -&gt; BRANZINO</span><span class="event-type">Transfer</span><span class="cost">126 CNY</span></li><li><span class="time">12:10 - 13:10</span><span class="event-name">BRANZINO</span><span class="event-type">Meal</span><span class="cost">1039 CNY</span></li><li><span class="time">13:10 - 13:15</span><span class="event-name">Transfer BRANZINO -&gt; City Viewpoint Walk in Alexandria</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">13:15 - 14:45</span><span class="event-name">City Viewpoint Walk in Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:45 - 15:23</span><span class="event-name">Local area walk near City Viewpoint Walk in Alexandria before Design And Gallery Lane in Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:28 - 16:58</span><span class="event-name">Design And Gallery Lane in Alexandria</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:58 - 19:42</span><span class="event-name">Local area walk near Design And Gallery Lane in Alexandria before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">19:42 - 20:03</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in Alexandria before dinner -&gt; Ma sera restaurant</span><span class="event-type">Transfer</span><span class="cost">147 CNY</span></li><li><span class="time">20:03 - 21:03</span><span class="event-name">Ma sera restaurant</span><span class="event-type">Meal</span><span class="cost">795 CNY</span></li><li><span class="time">21:03 - 21:18</span><span class="event-name">Return to Rixos Montaza Alexandria</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-07-18 | Cairo</h2></div><strong>6910 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The St. Regis Cairo</strong><span>3447 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:15</span><span class="event-name">Check-out Rixos Montaza Alexandria</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">08:15 - 11:15</span><span class="event-name">Drive Alexandria -&gt; Cairo</span><span class="event-type">Drive</span><span class="cost">500 CNY</span></li><li><span class="time">11:15 - 11:30</span><span class="event-name">Transfer Drive Alexandria -&gt; Cairo -&gt; The St. Regis Cairo for check-in</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">11:30 - 11:45</span><span class="event-name">Check-in The St. Regis Cairo</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">11:45 - 11:50</span><span class="event-name">Transfer The St. Regis Cairo -&gt; LUUMA</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">LUUMA</span><span class="event-type">Meal</span><span class="cost">1018 CNY</span></li><li><span class="time">13:00 - 13:12</span><span class="event-name">Transfer LUUMA -&gt; Saladin Citadel</span><span class="event-type">Transfer</span><span class="cost">84 CNY</span></li><li><span class="time">13:12 - 14:42</span><span class="event-name">Saladin Citadel</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">14:42 - 14:53</span><span class="event-name">Transfer Saladin Citadel -&gt; The Egyptian Museum in Cairo</span><span class="event-type">Transfer</span><span class="cost">77 CNY</span></li><li><span class="time">14:53 - 16:23</span><span class="event-name">The Egyptian Museum in Cairo</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">16:23 - 17:51</span><span class="event-name">Local area walk near The Egyptian Museum in Cairo before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near The Egyptian Museum in Cairo before dinner -&gt; Dahabiya Cairo</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Dahabiya Cairo</span><span class="event-type">Meal</span><span class="cost">890 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Dahabiya Cairo -&gt; Khan el-Khalili</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">Khan el-Khalili</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to The St. Regis Cairo</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-07-19 | Cairo</h2></div><strong>6804 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The St. Regis Cairo</strong><span>3447 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The St. Regis Cairo</span><span class="event-type">Meal</span><span class="cost">933 CNY</span></li><li><span class="time">08:40 - 11:44</span><span class="event-name">Local area walk near Hotel breakfast cafe at The St. Regis Cairo before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:44 - 12:00</span><span class="event-name">Transfer Local area walk near Hotel breakfast cafe at The St. Regis Cairo before lunch -&gt; Al Khal Egyptian Restaurant</span><span class="event-type">Transfer</span><span class="cost">112 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Al Khal Egyptian Restaurant</span><span class="event-type">Meal</span><span class="cost">1001 CNY</span></li><li><span class="time">13:00 - 13:35</span><span class="event-name">Transfer Al Khal Egyptian Restaurant -&gt; Museum District Walk in Cairo</span><span class="event-type">Transfer</span><span class="cost">245 CNY</span></li><li><span class="time">13:35 - 15:05</span><span class="event-name">Museum District Walk in Cairo</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:05 - 15:10</span><span class="event-name">Transfer Museum District Walk in Cairo -&gt; Market And Cafe Lane in Cairo</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">15:10 - 16:40</span><span class="event-name">Market And Cafe Lane in Cairo</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">16:40 - 17:55</span><span class="event-name">Local area walk near Market And Cafe Lane in Cairo before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:55 - 18:00</span><span class="event-name">Transfer Local area walk near Market And Cafe Lane in Cairo before dinner -&gt; Dahabiya Cairo</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Dahabiya Cairo</span><span class="event-type">Meal</span><span class="cost">890 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to The St. Regis Cairo</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-07-20 | Cairo</h2></div><strong>6597 CNY</strong></div><div class="hotel-line">Hotel night: <strong>The St. Regis Cairo</strong><span>3447 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at The St. Regis Cairo</span><span class="event-type">Meal</span><span class="cost">933 CNY</span></li><li><span class="time">08:40 - 08:45</span><span class="event-name">Transfer Hotel breakfast cafe at The St. Regis Cairo -&gt; Historic Street Stroll in Cairo</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">08:45 - 10:15</span><span class="event-name">Historic Street Stroll in Cairo</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:15 - 10:20</span><span class="event-name">Transfer Historic Street Stroll in Cairo -&gt; City Viewpoint Walk in Cairo</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">10:25 - 11:55</span><span class="event-name">City Viewpoint Walk in Cairo</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:55 - 12:00</span><span class="event-name">Transfer City Viewpoint Walk in Cairo -&gt; LUUMA</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">LUUMA</span><span class="event-type">Meal</span><span class="cost">1018 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer LUUMA -&gt; Design And Gallery Lane in Cairo</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">13:09 - 14:39</span><span class="event-name">Design And Gallery Lane in Cairo</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:39 - 17:55</span><span class="event-name">Local area walk near Design And Gallery Lane in Cairo before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:55 - 18:00</span><span class="event-name">Transfer Local area walk near Design And Gallery Lane in Cairo before dinner -&gt; Dahabiya Cairo</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Dahabiya Cairo</span><span class="event-type">Meal</span><span class="cost">890 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to The St. Regis Cairo</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-07-21 | Giza</h2></div><strong>10539 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Sofitel Cairo Nile El Gezirah</strong><span>5221 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:15</span><span class="event-name">Check-out The St. Regis Cairo</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">08:15 - 08:22</span><span class="event-name">Drive Cairo -&gt; Giza</span><span class="event-type">Drive</span><span class="cost">500 CNY</span></li><li><span class="time">08:22 - 08:37</span><span class="event-name">Transfer Drive Cairo -&gt; Giza -&gt; Sofitel Cairo Nile El Gezirah for check-in</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:37 - 08:52</span><span class="event-name">Check-in Sofitel Cairo Nile El Gezirah</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">08:52 - 09:01</span><span class="event-name">Transfer Sofitel Cairo Nile El Gezirah -&gt; Zitouni</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">09:01 - 09:41</span><span class="event-name">Zitouni</span><span class="event-type">Meal</span><span class="cost">1421 CNY</span></li><li><span class="time">09:41 - 09:55</span><span class="event-name">Transfer Zitouni -&gt; Pharaonic Village</span><span class="event-type">Transfer</span><span class="cost">98 CNY</span></li><li><span class="time">09:55 - 11:25</span><span class="event-name">Pharaonic Village</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">11:25 - 12:24</span><span class="event-name">Local area walk near Pharaonic Village before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">12:24 - 12:39</span><span class="event-name">Transfer Local area walk near Pharaonic Village before lunch -&gt; Sapporo Japanese Restaurant</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">12:39 - 13:39</span><span class="event-name">Sapporo Japanese Restaurant</span><span class="event-type">Meal</span><span class="cost">865 CNY</span></li><li><span class="time">13:39 - 14:20</span><span class="event-name">Local area walk near Sapporo Japanese Restaurant before Local Park Stroll in Giza</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">14:20 - 14:29</span><span class="event-name">Transfer Local area walk near Sapporo Japanese Restaurant before Local Park Stroll in Giza -&gt; Local Park Stroll in Giza</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">14:29 - 15:59</span><span class="event-name">Local Park Stroll in Giza</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:59 - 18:03</span><span class="event-name">Local area walk near Local Park Stroll in Giza before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">18:03 - 18:39</span><span class="event-name">Transfer Local area walk near Local Park Stroll in Giza before dinner -&gt; SACHI Heliopolis</span><span class="event-type">Transfer</span><span class="cost">252 CNY</span></li><li><span class="time">18:39 - 19:39</span><span class="event-name">SACHI Heliopolis</span><span class="event-type">Meal</span><span class="cost">1328 CNY</span></li><li><span class="time">19:39 - 20:15</span><span class="event-name">Transfer SACHI Heliopolis -&gt; Giza night view walk near Sofitel Cairo Nile El Gezirah</span><span class="event-type">Transfer</span><span class="cost">252 CNY</span></li><li><span class="time">20:15 - 21:00</span><span class="event-name">Giza night view walk near Sofitel Cairo Nile El Gezirah</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Sofitel Cairo Nile El Gezirah</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 8</p><h2>2026-07-22 | Giza</h2></div><strong>9711 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Sofitel Cairo Nile El Gezirah</strong><span>5221 CNY</span></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Sofitel Cairo Nile El Gezirah to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Zitouni</span><span class="event-type">Meal</span><span class="cost">1421 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Zitouni -&gt; Riverside Photo Walk in Giza</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Riverside Photo Walk in Giza</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 11:24</span><span class="event-name">Local area walk near Riverside Photo Walk in Giza before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:24 - 12:00</span><span class="event-name">Transfer Local area walk near Riverside Photo Walk in Giza before lunch -&gt; SACHI Heliopolis</span><span class="event-type">Transfer</span><span class="cost">252 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">SACHI Heliopolis</span><span class="event-type">Meal</span><span class="cost">1328 CNY</span></li><li><span class="time">13:00 - 13:36</span><span class="event-name">Transfer SACHI Heliopolis -&gt; Museum District Walk in Giza</span><span class="event-type">Transfer</span><span class="cost">252 CNY</span></li><li><span class="time">14:05 - 15:35</span><span class="event-name">Museum District Walk in Giza</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">15:35 - 15:40</span><span class="event-name">Transfer Museum District Walk in Giza -&gt; Market And Cafe Lane in Giza</span><span class="event-type">Transfer</span><span class="cost">35 CNY</span></li><li><span class="time">15:40 - 17:10</span><span class="event-name">Market And Cafe Lane in Giza</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:10 - 17:51</span><span class="event-name">Local area walk near Market And Cafe Lane in Giza before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:51 - 18:00</span><span class="event-name">Transfer Local area walk near Market And Cafe Lane in Giza before dinner -&gt; Sapporo Japanese Restaurant</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Sapporo Japanese Restaurant</span><span class="event-type">Meal</span><span class="cost">865 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Sofitel Cairo Nile El Gezirah</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 9</p><h2>2026-07-23 | Giza</h2></div><strong>10669 CNY</strong></div><ul class="event-list"><li><span class="time">07:45 - 08:00</span><span class="event-name">Transfer from Sofitel Cairo Nile El Gezirah to first stop</span><span class="event-type">Transfer</span><span class="cost">105 CNY</span></li><li><span class="time">08:00 - 08:40</span><span class="event-name">Zitouni</span><span class="event-type">Meal</span><span class="cost">1421 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Zitouni -&gt; Historic Street Stroll in Giza</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Historic Street Stroll in Giza</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Historic Street Stroll in Giza before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Historic Street Stroll in Giza before lunch -&gt; Sapporo Japanese Restaurant</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Sapporo Japanese Restaurant</span><span class="event-type">Meal</span><span class="cost">865 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Sapporo Japanese Restaurant -&gt; Sofitel Cairo Nile El Gezirah</span><span class="event-type">Transfer</span><span class="cost">63 CNY</span></li><li><span class="time">14:15 - 14:30</span><span class="event-name">Check-out Sofitel Cairo Nile El Gezirah</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">14:30 - 15:30</span><span class="event-name">Transfer Sofitel Cairo Nile El Gezirah -&gt; CAI (nearby airport for Giza)</span><span class="event-type">Transfer</span><span class="cost">420 CNY</span></li><li><span class="time">17:00 - 02:55 (+1 day)</span><span class="event-name">Flight Giza -&gt; Chengdu</span><span class="event-type">Flight (Economy) x2</span><span class="cost">7669 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 30.66667, "lng": 104.07267, "day": 0, "date": "", "city": "Chengdu", "name": "Start: Chengdu", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 31.20176, "lng": 29.91582, "day": 1, "date": "2026-07-15", "city": "Alexandria", "name": "Fly Chengdu (CTU) -> Alexandria (HBE) [Economy]", "type": "flight", "time": "", "cost": 7789, "route_point": true}, {"lat": 31.20176, "lng": 29.92182, "day": 1, "date": "2026-07-15", "city": "Alexandria", "name": "Day 1.2 Transfer HBE -> Rixos Montaza Alexandria for check-in", "type": "transfer", "time": "20:05-21:05", "cost": 420, "estimated_coord": true}, {"lat": 31.2879816, "lng": 30.0269911, "day": 1, "date": "2026-07-15", "city": "Alexandria", "name": "Day 1.3 Check-in Rixos Montaza Alexandria", "type": "checkin", "time": "21:05-21:20", "cost": 0, "estimated_coord": false}, {"lat": 31.205812923546166, "lng": 29.911395770041132, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.1 Transfer from Rixos Montaza Alexandria to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 31.211586099999995, "lng": 29.931236800000004, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.2 La Alexandria Asian Restaurant & Cafe", "type": "meal", "time": "08:00-08:40", "cost": 885, "estimated_coord": false}, {"lat": 31.195782978075353, "lng": 29.916344603576313, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.3 Transfer La Alexandria Asian Restaurant & Cafe -> Riverside Photo Walk in Alexandria", "type": "transfer", "time": "08:40-09:20", "cost": 280, "estimated_coord": true}, {"lat": 31.292034523546164, "lng": 30.01656687004113, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.4 Riverside Photo Walk in Alexandria", "type": "poi", "time": "09:20-10:50", "cost": 0, "estimated_coord": true}, {"lat": 31.28200457807535, "lng": 30.021515703576313, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.5 Local area walk near Riverside Photo Walk in Alexandria before lunch", "type": "poi", "time": "10:50-11:42", "cost": 0, "estimated_coord": true}, {"lat": 31.206521649608444, "lng": 29.91947057433925, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.6 Transfer Local area walk near Riverside Photo Walk in Alexandria before lunch -> BRANZINO", "type": "transfer", "time": "11:42-12:00", "cost": 126, "estimated_coord": true}, {"lat": 31.2119846, "lng": 29.9214695, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.7 BRANZINO", "type": "meal", "time": "12:00-13:00", "cost": 1039, "estimated_coord": false}, {"lat": 31.200714810974212, "lng": 29.909911736304092, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.8 Transfer BRANZINO -> Museum District Walk in Alexandria", "type": "transfer", "time": "13:00-13:43", "cost": 301, "estimated_coord": true}, {"lat": 31.292743249608442, "lng": 30.02464167433925, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.9 Museum District Walk in Alexandria", "type": "poi", "time": "13:52-15:22", "cost": 0, "estimated_coord": true}, {"lat": 31.198539735925078, "lng": 29.920882598076854, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.10 Transfer Museum District Walk in Alexandria -> Market And Cafe Lane in Alexandria", "type": "transfer", "time": "15:22-15:27", "cost": 35, "estimated_coord": true}, {"lat": 31.28693641097421, "lng": 30.015082836304092, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.11 Market And Cafe Lane in Alexandria", "type": "poi", "time": "15:27-16:57", "cost": 0, "estimated_coord": true}, {"lat": 31.284761335925076, "lng": 30.026053698076854, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.12 Local area walk near Market And Cafe Lane in Alexandria before dinner", "type": "poi", "time": "16:57-17:39", "cost": 0, "estimated_coord": true}, {"lat": 31.2075542519577, "lng": 29.914262231002134, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.13 Transfer Local area walk near Market And Cafe Lane in Alexandria before dinner -> Ma sera restaurant", "type": "transfer", "time": "17:39-18:00", "cost": 147, "estimated_coord": true}, {"lat": 31.198504200000002, "lng": 29.913948200000004, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.14 Ma sera restaurant", "type": "meal", "time": "18:00-19:00", "cost": 795, "estimated_coord": false}, {"lat": 31.196435229708097, "lng": 29.913054711346266, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.15 Transfer Ma sera restaurant -> Alexandria night view walk near Rixos Montaza Alexandria", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 31.293775851957697, "lng": 30.019433331002134, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.16 Alexandria night view walk near Rixos Montaza Alexandria", "type": "poi", "time": "19:15-21:00", "cost": 0, "estimated_coord": true}, {"lat": 31.205876834917618, "lng": 29.927091719933582, "day": 2, "date": "2026-07-16", "city": "Alexandria", "name": "Day 2.17 Return to Rixos Montaza Alexandria", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 31.20633826579106, "lng": 29.904727683634768, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.1 Transfer from Rixos Montaza Alexandria to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 31.21563902354616, "lng": 29.920812570041136, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.2 La Alexandria Asian Restaurant & Cafe", "type": "meal", "time": "08:00-08:40", "cost": 885, "estimated_coord": true}, {"lat": 31.19089139819156, "lng": 29.920906599525182, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.3 Transfer La Alexandria Asian Restaurant & Cafe -> Historic Street Stroll in Alexandria", "type": "transfer", "time": "08:40-09:20", "cost": 280, "estimated_coord": true}, {"lat": 31.282656829708095, "lng": 30.018225811346266, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.4 Historic Street Stroll in Alexandria", "type": "poi", "time": "09:20-10:50", "cost": 0, "estimated_coord": true}, {"lat": 31.292098434917616, "lng": 30.03226281993358, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.5 Local area walk near Historic Street Stroll in Alexandria before lunch", "type": "poi", "time": "10:50-11:52", "cost": 0, "estimated_coord": true}, {"lat": 31.21321013211957, "lng": 29.919410887695875, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.6 Transfer Local area walk near Historic Street Stroll in Alexandria before lunch -> BRANZINO", "type": "transfer", "time": "11:52-12:10", "cost": 126, "estimated_coord": true}, {"lat": 31.216037523546166, "lng": 29.911045270041132, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.7 BRANZINO", "type": "meal", "time": "12:10-13:10", "cost": 1039, "estimated_coord": true}, {"lat": 31.19574259595631, "lng": 29.90543776283381, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.8 Transfer BRANZINO -> City Viewpoint Walk in Alexandria", "type": "transfer", "time": "13:10-13:15", "cost": 35, "estimated_coord": true}, {"lat": 31.29255986579106, "lng": 30.009898783634767, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.9 City Viewpoint Walk in Alexandria", "type": "poi", "time": "13:15-14:45", "cost": 0, "estimated_coord": true}, {"lat": 31.27711299819156, "lng": 30.02607769952518, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.10 Local area walk near City Viewpoint Walk in Alexandria before Design And Gallery Lane in Alexandria", "type": "poi", "time": "14:45-15:23", "cost": 0, "estimated_coord": true}, {"lat": 31.29943173211957, "lng": 30.024581987695875, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.11 Design And Gallery Lane in Alexandria", "type": "poi", "time": "15:28-16:58", "cost": 0, "estimated_coord": true}, {"lat": 31.28196419595631, "lng": 30.01060886283381, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.12 Local area walk near Design And Gallery Lane in Alexandria before dinner", "type": "poi", "time": "16:58-19:42", "cost": 0, "estimated_coord": true}, {"lat": 31.19918399429533, "lng": 29.927540247207695, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.13 Transfer Local area walk near Design And Gallery Lane in Alexandria before dinner -> Ma sera restaurant", "type": "transfer", "time": "19:42-20:03", "cost": 147, "estimated_coord": true}, {"lat": 31.202557123546168, "lng": 29.903523970041135, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.14 Ma sera restaurant", "type": "meal", "time": "20:03-21:03", "cost": 795, "estimated_coord": true}, {"lat": 31.211576351247963, "lng": 29.908917880892318, "day": 3, "date": "2026-07-17", "city": "Alexandria", "name": "Day 3.15 Return to Rixos Montaza Alexandria", "type": "transfer", "time": "21:03-21:18", "cost": 105, "estimated_coord": true}, {"lat": 30.06263, "lng": 31.24967, "day": 2, "date": "2026-07-18", "city": "Cairo", "name": "Transfer Alexandria -> Cairo", "type": "direct_drive", "time": "", "cost": 500, "route_point": true}, {"lat": 31.285405594295327, "lng": 30.032711347207695, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.1 Check-out Rixos Montaza Alexandria", "type": "checkout", "time": "08:00-08:15", "cost": 0, "estimated_coord": true}, {"lat": 30.06263, "lng": 31.25567, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.3 Transfer Drive Alexandria -> Cairo -> The St. Regis Cairo for check-in", "type": "transfer", "time": "11:15-11:30", "cost": 105, "estimated_coord": true}, {"lat": 30.0629354, "lng": 31.2334123, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.4 Check-in The St. Regis Cairo", "type": "checkin", "time": "11:30-11:45", "cost": 0, "estimated_coord": false}, {"lat": 30.066682923546164, "lng": 31.24524577004113, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.5 Transfer The St. Regis Cairo -> LUUMA", "type": "transfer", "time": "11:45-11:50", "cost": 35, "estimated_coord": true}, {"lat": 30.071250199999994, "lng": 31.225659999999998, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.6 LUUMA", "type": "meal", "time": "12:00-13:00", "cost": 1018, "estimated_coord": false}, {"lat": 30.056652978075352, "lng": 31.25019460357631, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.7 Transfer LUUMA -> Saladin Citadel", "type": "transfer", "time": "13:00-13:12", "cost": 84, "estimated_coord": true}, {"lat": 30.028745699999998, "lng": 31.2597144, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.8 Saladin Citadel", "type": "poi", "time": "13:12-14:42", "cost": 160, "estimated_coord": false}, {"lat": 30.067391649608442, "lng": 31.25332057433925, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.9 Transfer Saladin Citadel -> The Egyptian Museum in Cairo", "type": "transfer", "time": "14:42-14:53", "cost": 77, "estimated_coord": true}, {"lat": 30.0483167, "lng": 31.2396674, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.10 The Egyptian Museum in Cairo", "type": "poi", "time": "14:53-16:23", "cost": 160, "estimated_coord": false}, {"lat": 30.052369623546166, "lng": 31.22924317004113, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.11 Local area walk near The Egyptian Museum in Cairo before dinner", "type": "poi", "time": "16:23-17:51", "cost": 0, "estimated_coord": true}, {"lat": 30.06158481097421, "lng": 31.24376173630409, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.12 Transfer Local area walk near The Egyptian Museum in Cairo before dinner -> Dahabiya Cairo", "type": "transfer", "time": "17:51-18:00", "cost": 63, "estimated_coord": true}, {"lat": 30.0446422, "lng": 31.2253938, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.13 Dahabiya Cairo", "type": "meal", "time": "18:00-19:00", "cost": 890, "estimated_coord": false}, {"lat": 30.059409735925076, "lng": 31.254732598076853, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.14 Transfer Dahabiya Cairo -> Khan el-Khalili", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 30.0477386, "lng": 31.2622538, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.15 Khan el-Khalili", "type": "poi", "time": "19:15-21:00", "cost": 160, "estimated_coord": false}, {"lat": 30.068424251957698, "lng": 31.248112231002132, "day": 4, "date": "2026-07-18", "city": "Cairo", "name": "Day 4.16 Return to The St. Regis Cairo", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 30.066988323546166, "lng": 31.222988070041133, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.1 Hotel breakfast cafe at The St. Regis Cairo", "type": "meal", "time": "08:00-08:40", "cost": 933, "estimated_coord": true}, {"lat": 30.056958378075354, "lng": 31.227936903576314, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.2 Local area walk near Hotel breakfast cafe at The St. Regis Cairo before lunch", "type": "poi", "time": "08:40-11:44", "cost": 0, "estimated_coord": true}, {"lat": 30.057305229708096, "lng": 31.246904711346264, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.3 Transfer Local area walk near Hotel breakfast cafe at The St. Regis Cairo before lunch -> Al Khal Egyptian Restaurant", "type": "transfer", "time": "11:44-12:00", "cost": 112, "estimated_coord": true}, {"lat": 30.0724092, "lng": 31.346494999999997, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.4 Al Khal Egyptian Restaurant", "type": "meal", "time": "12:00-13:00", "cost": 1001, "estimated_coord": false}, {"lat": 30.066746834917616, "lng": 31.26094171993358, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.5 Transfer Al Khal Egyptian Restaurant -> Museum District Walk in Cairo", "type": "transfer", "time": "13:00-13:35", "cost": 245, "estimated_coord": true}, {"lat": 30.067697049608444, "lng": 31.23106287433925, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.6 Museum District Walk in Cairo", "type": "poi", "time": "13:35-15:05", "cost": 0, "estimated_coord": true}, {"lat": 30.06720826579106, "lng": 31.238577683634766, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.7 Transfer Museum District Walk in Cairo -> Market And Cafe Lane in Cairo", "type": "transfer", "time": "15:05-15:10", "cost": 35, "estimated_coord": true}, {"lat": 30.061890210974212, "lng": 31.221504036304093, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.8 Market And Cafe Lane in Cairo", "type": "poi", "time": "15:10-16:40", "cost": 0, "estimated_coord": true}, {"lat": 30.059715135925078, "lng": 31.232474898076855, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.9 Local area walk near Market And Cafe Lane in Cairo before dinner", "type": "poi", "time": "16:40-17:55", "cost": 0, "estimated_coord": true}, {"lat": 30.05176139819156, "lng": 31.25475659952518, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.10 Transfer Local area walk near Market And Cafe Lane in Cairo before dinner -> Dahabiya Cairo", "type": "transfer", "time": "17:55-18:00", "cost": 35, "estimated_coord": true}, {"lat": 30.048695123546164, "lng": 31.21496957004113, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.11 Dahabiya Cairo", "type": "meal", "time": "18:00-19:00", "cost": 890, "estimated_coord": true}, {"lat": 30.07408013211957, "lng": 31.253260887695873, "day": 5, "date": "2026-07-19", "city": "Cairo", "name": "Day 5.12 Return to The St. Regis Cairo", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 30.0687296519577, "lng": 31.225854531002135, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.1 Hotel breakfast cafe at The St. Regis Cairo", "type": "meal", "time": "08:00-08:40", "cost": 933, "estimated_coord": true}, {"lat": 30.05661259595631, "lng": 31.239287762833808, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.2 Transfer Hotel breakfast cafe at The St. Regis Cairo -> Historic Street Stroll in Cairo", "type": "transfer", "time": "08:40-08:45", "cost": 35, "estimated_coord": true}, {"lat": 30.057610629708098, "lng": 31.224647011346267, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.3 Historic Street Stroll in Cairo", "type": "poi", "time": "08:45-10:15", "cost": 0, "estimated_coord": true}, {"lat": 30.060053994295327, "lng": 31.261390247207693, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.4 Transfer Historic Street Stroll in Cairo -> City Viewpoint Walk in Cairo", "type": "transfer", "time": "10:15-10:20", "cost": 35, "estimated_coord": true}, {"lat": 30.067052234917618, "lng": 31.238684019933583, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.5 City Viewpoint Walk in Cairo", "type": "poi", "time": "10:25-11:55", "cost": 0, "estimated_coord": true}, {"lat": 30.07244635124796, "lng": 31.242767880892316, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.6 Transfer City Viewpoint Walk in Cairo -> LUUMA", "type": "transfer", "time": "11:55-12:00", "cost": 35, "estimated_coord": true}, {"lat": 30.07530312354616, "lng": 31.21523577004113, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.7 LUUMA", "type": "meal", "time": "12:00-13:00", "cost": 1018, "estimated_coord": true}, {"lat": 30.050729407278673, "lng": 31.248128606837593, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.8 Transfer LUUMA -> Design And Gallery Lane in Cairo", "type": "transfer", "time": "13:00-13:09", "cost": 63, "estimated_coord": true}, {"lat": 30.06751366579106, "lng": 31.21631998363477, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.9 Design And Gallery Lane in Cairo", "type": "poi", "time": "13:09-14:39", "cost": 0, "estimated_coord": true}, {"lat": 30.05206679819156, "lng": 31.232498899525183, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.10 Local area walk near Design And Gallery Lane in Cairo before dinner", "type": "poi", "time": "14:39-17:55", "cost": 0, "estimated_coord": true}, {"lat": 30.07423095255104, "lng": 31.26343291756527, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.11 Transfer Local area walk near Design And Gallery Lane in Cairo before dinner -> Dahabiya Cairo", "type": "transfer", "time": "17:55-18:00", "cost": 35, "estimated_coord": true}, {"lat": 30.03866517807535, "lng": 31.21991840357631, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.12 Dahabiya Cairo", "type": "meal", "time": "18:00-19:00", "cost": 890, "estimated_coord": true}, {"lat": 30.063372461806086, "lng": 31.231685319005706, "day": 6, "date": "2026-07-20", "city": "Cairo", "name": "Day 6.13 Return to The St. Regis Cairo", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 30.00944, "lng": 31.20861, "day": 3, "date": "2026-07-21", "city": "Giza", "name": "Transfer Cairo -> Giza", "type": "direct_drive", "time": "", "cost": 500, "route_point": true}, {"lat": 30.07438553211957, "lng": 31.231003187695876, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.1 Check-out The St. Regis Cairo", "type": "checkout", "time": "08:00-08:15", "cost": 0, "estimated_coord": true}, {"lat": 30.00944, "lng": 31.21461, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.3 Transfer Drive Cairo -> Giza -> Sofitel Cairo Nile El Gezirah for check-in", "type": "transfer", "time": "08:22-08:37", "cost": 105, "estimated_coord": true}, {"lat": 30.0387062, "lng": 31.230601099999994, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.4 Check-in Sofitel Cairo Nile El Gezirah", "type": "checkin", "time": "08:37-08:52", "cost": 0, "estimated_coord": false}, {"lat": 30.013492923546167, "lng": 31.204185770041132, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.5 Transfer Sofitel Cairo Nile El Gezirah -> Zitouni", "type": "transfer", "time": "08:52-09:01", "cost": 63, "estimated_coord": true}, {"lat": 30.036103, "lng": 31.235458099999995, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.6 Zitouni", "type": "meal", "time": "09:01-09:41", "cost": 1421, "estimated_coord": false}, {"lat": 30.003462978075355, "lng": 31.209134603576313, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.7 Transfer Zitouni -> Pharaonic Village", "type": "transfer", "time": "09:41-09:55", "cost": 98, "estimated_coord": true}, {"lat": 29.9973428, "lng": 31.2207895, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.8 Pharaonic Village", "type": "poi", "time": "09:55-11:25", "cost": 160, "estimated_coord": false}, {"lat": 30.001395723546164, "lng": 31.21036527004113, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.9 Local area walk near Pharaonic Village before lunch", "type": "poi", "time": "11:25-12:24", "cost": 0, "estimated_coord": true}, {"lat": 30.014201649608445, "lng": 31.21226057433925, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.10 Transfer Local area walk near Pharaonic Village before lunch -> Sapporo Japanese Restaurant", "type": "transfer", "time": "12:24-12:39", "cost": 105, "estimated_coord": true}, {"lat": 30.039261200000002, "lng": 31.225949, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.11 Sapporo Japanese Restaurant", "type": "meal", "time": "12:39-13:39", "cost": 865, "estimated_coord": false}, {"lat": 30.043314123546168, "lng": 31.21552477004113, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.12 Local area walk near Sapporo Japanese Restaurant before Local Park Stroll in Giza", "type": "poi", "time": "13:39-14:20", "cost": 0, "estimated_coord": true}, {"lat": 30.008394810974213, "lng": 31.202701736304093, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.13 Transfer Local area walk near Sapporo Japanese Restaurant before Local Park Stroll in Giza -> Local Park Stroll in Giza", "type": "transfer", "time": "14:20-14:29", "cost": 63, "estimated_coord": true}, {"lat": 30.042759123546166, "lng": 31.220176870041126, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.14 Local Park Stroll in Giza", "type": "poi", "time": "14:29-15:59", "cost": 0, "estimated_coord": true}, {"lat": 30.032729178075353, "lng": 31.225125703576307, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.15 Local area walk near Local Park Stroll in Giza before dinner", "type": "poi", "time": "15:59-18:03", "cost": 0, "estimated_coord": true}, {"lat": 30.00621973592508, "lng": 31.213672598076855, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.16 Transfer Local area walk near Local Park Stroll in Giza before dinner -> SACHI Heliopolis", "type": "transfer", "time": "18:03-18:39", "cost": 252, "estimated_coord": true}, {"lat": 30.088066299999998, "lng": 31.3308948, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.17 SACHI Heliopolis", "type": "meal", "time": "18:39-19:39", "cost": 1328, "estimated_coord": false}, {"lat": 30.0152342519577, "lng": 31.207052231002134, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.18 Transfer SACHI Heliopolis -> Giza night view walk near Sofitel Cairo Nile El Gezirah", "type": "transfer", "time": "19:39-20:15", "cost": 252, "estimated_coord": true}, {"lat": 30.043467849608444, "lng": 31.228251674339244, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.19 Giza night view walk near Sofitel Cairo Nile El Gezirah", "type": "poi", "time": "20:15-21:00", "cost": 0, "estimated_coord": true}, {"lat": 30.0041152297081, "lng": 31.205844711346266, "day": 7, "date": "2026-07-21", "city": "Giza", "name": "Day 7.20 Return to Sofitel Cairo Nile El Gezirah", "type": "transfer", "time": "21:00-21:15", "cost": 105, "estimated_coord": true}, {"lat": 30.01355683491762, "lng": 31.219881719933582, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.1 Transfer from Sofitel Cairo Nile El Gezirah to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 30.040155923546166, "lng": 31.225033870041127, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.2 Zitouni", "type": "meal", "time": "08:00-08:40", "cost": 1421, "estimated_coord": true}, {"lat": 30.014018265791062, "lng": 31.197517683634768, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.3 Transfer Zitouni -> Riverside Photo Walk in Giza", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 30.03766101097421, "lng": 31.218692836304086, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.4 Riverside Photo Walk in Giza", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 30.035485935925077, "lng": 31.22966369807685, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.5 Local area walk near Riverside Photo Walk in Giza before lunch", "type": "poi", "time": "10:19-11:24", "cost": 0, "estimated_coord": true}, {"lat": 29.99857139819156, "lng": 31.213696599525182, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.6 Transfer Local area walk near Riverside Photo Walk in Giza before lunch -> SACHI Heliopolis", "type": "transfer", "time": "11:24-12:00", "cost": 252, "estimated_coord": true}, {"lat": 30.092119223546163, "lng": 31.32047057004113, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.7 SACHI Heliopolis", "type": "meal", "time": "12:00-13:00", "cost": 1328, "estimated_coord": true}, {"lat": 30.020890132119572, "lng": 31.212200887695875, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.8 Transfer SACHI Heliopolis -> Museum District Walk in Giza", "type": "transfer", "time": "13:00-13:36", "cost": 252, "estimated_coord": true}, {"lat": 30.0445004519577, "lng": 31.223043331002128, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.9 Museum District Walk in Giza", "type": "poi", "time": "14:05-15:35", "cost": 0, "estimated_coord": true}, {"lat": 30.003422595956312, "lng": 31.19822776283381, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.10 Transfer Museum District Walk in Giza -> Market And Cafe Lane in Giza", "type": "transfer", "time": "15:35-15:40", "cost": 35, "estimated_coord": true}, {"lat": 30.033381429708097, "lng": 31.22183581134626, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.11 Market And Cafe Lane in Giza", "type": "poi", "time": "15:40-17:10", "cost": 0, "estimated_coord": true}, {"lat": 30.042823034917618, "lng": 31.235872819933576, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.12 Local area walk near Market And Cafe Lane in Giza before dinner", "type": "poi", "time": "17:10-17:51", "cost": 0, "estimated_coord": true}, {"lat": 30.00686399429533, "lng": 31.220330247207695, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.13 Transfer Local area walk near Market And Cafe Lane in Giza before dinner -> Sapporo Japanese Restaurant", "type": "transfer", "time": "17:51-18:00", "cost": 63, "estimated_coord": true}, {"lat": 30.033284178075355, "lng": 31.220473603576313, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.14 Sapporo Japanese Restaurant", "type": "meal", "time": "18:00-19:00", "cost": 865, "estimated_coord": true}, {"lat": 30.019256351247964, "lng": 31.201707880892318, "day": 8, "date": "2026-07-22", "city": "Giza", "name": "Day 8.15 Return to Sofitel Cairo Nile El Gezirah", "type": "transfer", "time": "19:00-19:15", "cost": 105, "estimated_coord": true}, {"lat": 30.670722923546165, "lng": 104.06224577004113, "day": 4, "date": "2026-07-23", "city": "Chengdu", "name": "Fly Giza (CAI) -> Chengdu (CTU) [Economy]", "type": "flight", "time": "", "cost": 7669, "route_point": true, "estimated_coord": false}, {"lat": 29.997539407278676, "lng": 31.207068606837595, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.1 Transfer from Sofitel Cairo Nile El Gezirah to first stop", "type": "transfer", "time": "07:45-08:00", "cost": 105, "estimated_coord": true}, {"lat": 30.030125978075354, "lng": 31.229982703576308, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.2 Zitouni", "type": "meal", "time": "08:00-08:40", "cost": 1421, "estimated_coord": true}, {"lat": 30.021040952551044, "lng": 31.222372917565274, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.3 Transfer Zitouni -> Historic Street Stroll in Giza", "type": "transfer", "time": "08:40-08:49", "cost": 63, "estimated_coord": true}, {"lat": 30.04328446579106, "lng": 31.21350878363476, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.4 Historic Street Stroll in Giza", "type": "poi", "time": "08:49-10:19", "cost": 0, "estimated_coord": true}, {"lat": 30.02783759819156, "lng": 31.229687699525176, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.5 Local area walk near Historic Street Stroll in Giza before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 30.01018246180609, "lng": 31.190625319005708, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.6 Transfer Local area walk near Historic Street Stroll in Giza before lunch -> Sapporo Japanese Restaurant", "type": "transfer", "time": "11:51-12:00", "cost": 63, "estimated_coord": true}, {"lat": 30.044022849608446, "lng": 31.22359957433925, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.7 Sapporo Japanese Restaurant", "type": "meal", "time": "12:00-13:00", "cost": 865, "estimated_coord": true}, {"lat": 29.99674410686036, "lng": 31.2213698705866, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.8 Transfer Sapporo Japanese Restaurant -> Sofitel Cairo Nile El Gezirah", "type": "transfer", "time": "13:00-13:09", "cost": 63, "estimated_coord": true}, {"lat": 30.05015633211957, "lng": 31.22819198769587, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.9 Check-out Sofitel Cairo Nile El Gezirah", "type": "checkout", "time": "14:15-14:30", "cost": 0, "estimated_coord": true}, {"lat": 30.027420721788243, "lng": 31.207777147087462, "day": 9, "date": "2026-07-23", "city": "Giza", "name": "Day 9.10 Transfer Sofitel Cairo Nile El Gezirah -> CAI (nearby airport for Giza)", "type": "transfer", "time": "14:30-15:30", "cost": 420, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>

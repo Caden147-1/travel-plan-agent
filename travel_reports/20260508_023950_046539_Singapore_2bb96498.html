@@ -1,0 +1,414 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Travel Plan Report</title>
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" crossorigin="">
+  <style>
+    :root {
+      --ink: #18201f;
+      --muted: #64716e;
+      --line: #d9e0dd;
+      --paper: #f7f8f4;
+      --panel: #ffffff;
+      --accent: #007c89;
+      --accent-2: #d64f35;
+      --soft: #e6f2ef;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: Arial, Helvetica, sans-serif;
+      background: var(--paper);
+      color: var(--ink);
+      letter-spacing: 0;
+    }
+    header {
+      padding: 32px 24px 24px;
+      background: var(--panel);
+      border-bottom: 1px solid var(--line);
+    }
+    .wrap { max-width: 1180px; margin: 0 auto; }
+    .eyebrow { margin: 0 0 8px; color: var(--accent); font-weight: 700; }
+    h1 { margin: 0; font-size: 32px; line-height: 1.15; }
+    .request {
+      margin-top: 18px;
+      padding: 14px 16px;
+      border-left: 4px solid var(--accent);
+      background: var(--soft);
+      border-radius: 6px;
+      color: #263331;
+    }
+    .request > strong {
+      display: block;
+      margin-bottom: 10px;
+    }
+    .request-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 10px 18px;
+    }
+    .request-item span {
+      display: block;
+      color: var(--muted);
+      font-size: 13px;
+      margin-bottom: 4px;
+    }
+    .request-item b {
+      font-size: 16px;
+      font-weight: 700;
+      overflow-wrap: anywhere;
+    }
+    .summary {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 12px;
+      margin-top: 18px;
+    }
+    .summary div, .cost-chip {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .summary span, .cost-chip span { display: block; color: var(--muted); font-size: 13px; margin-bottom: 4px; }
+    .summary strong, .cost-chip strong { font-size: 18px; }
+    main { padding: 24px; }
+    #map {
+      width: 100%;
+      height: 520px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #dfe8e5;
+    }
+    .map-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+      align-items: center;
+      margin-top: 12px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 12px;
+    }
+    .map-controls button {
+      border: 1px solid var(--accent);
+      background: var(--accent);
+      color: #ffffff;
+      border-radius: 6px;
+      padding: 8px 12px;
+      font-weight: 700;
+      cursor: pointer;
+    }
+    .map-controls button.secondary {
+      background: #ffffff;
+      color: var(--accent);
+    }
+    .map-controls input[type="range"] {
+      flex: 1;
+      min-width: 180px;
+      accent-color: var(--accent);
+    }
+    .step-panel {
+      margin-top: 10px;
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-left: 4px solid var(--accent-2);
+      border-radius: 8px;
+      padding: 12px 14px;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .step-panel strong { display: block; margin-bottom: 4px; }
+    .step-panel span { color: var(--muted); }
+    .step-cost { white-space: nowrap; font-weight: 700; }
+    .moving-dot {
+      width: 18px;
+      height: 18px;
+      border-radius: 50%;
+      background: var(--accent-2);
+      border: 3px solid #ffffff;
+      box-shadow: 0 0 0 4px rgba(214, 79, 53, 0.22), 0 2px 8px rgba(0,0,0,0.25);
+    }
+    .section-title { margin: 30px 0 14px; font-size: 24px; }
+    .cost-grid {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(0, 1fr));
+      gap: 12px;
+      margin-bottom: 18px;
+    }
+    .cost-chip.total { border-color: var(--accent); }
+    .day-card {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 18px;
+      margin-bottom: 16px;
+    }
+    .day-head {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      border-bottom: 1px solid var(--line);
+      padding-bottom: 12px;
+      margin-bottom: 12px;
+    }
+    .day-head p { margin: 0 0 4px; color: var(--accent); font-weight: 700; }
+    .day-head h2 { margin: 0; font-size: 22px; }
+    .hotel-line {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      padding: 10px 0;
+      color: var(--muted);
+    }
+    .event-list { list-style: none; padding: 0; margin: 0; }
+    .event-list li {
+      display: grid;
+      grid-template-columns: 110px minmax(0, 1fr) 120px 120px;
+      gap: 12px;
+      padding: 10px 0;
+      border-top: 1px solid #eef2f0;
+      align-items: center;
+    }
+    .time, .event-type { color: var(--muted); font-size: 14px; }
+    .event-name { font-weight: 700; overflow-wrap: anywhere; }
+    .event-note { display: block; margin-top: 4px; color: var(--muted); font-weight: 400; line-height: 1.35; }
+    .cost { text-align: right; font-weight: 700; }
+    .empty-map {
+      padding: 14px;
+      margin-top: 10px;
+      color: var(--muted);
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    @media (max-width: 820px) {
+      h1 { font-size: 26px; }
+      .summary, .cost-grid { grid-template-columns: 1fr 1fr; }
+      .request-grid { grid-template-columns: 1fr; }
+      #map { height: 380px; }
+      .step-panel { flex-direction: column; }
+      .event-list li { grid-template-columns: 1fr; gap: 4px; }
+      .cost { text-align: left; }
+      .day-head, .hotel-line { flex-direction: column; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="wrap">
+      <p class="eyebrow">Travel Plan Report</p>
+      <h1>Beijing to Singapore</h1>
+      <div class="request">
+        <strong>Your request</strong>
+        <div class="request-grid">
+          <div class="request-item"><span>Route</span><b>Beijing -> Singapore</b></div>
+          <div class="request-item"><span>Dates</span><b>2026-09-18 - 2026-09-24</b></div>
+          <div class="request-item"><span>Travelers</span><b>2</b></div>
+          <div class="request-item"><span>Budget</span><b>70000 CNY</b></div>
+          <div class="request-item"><span>Preferences</span><b>luxury hotel; food: fine_dining; attractions: mixed</b></div>
+        </div>
+      </div>
+      <div class="summary">
+        <div><span>Dates</span><strong>2026-09-18 - 2026-09-24</strong></div>
+        <div><span>Travelers</span><strong>2</strong></div>
+        <div><span>Budget</span><strong>70000 CNY</strong></div>
+        <div><span>Estimated Spend</span><strong>69300 CNY</strong></div>
+      </div>
+    </div>
+  </header>
+  <main>
+    <div class="wrap">
+      <h2 class="section-title">Route Map</h2>
+      <div id="map"></div>
+      <div class="map-controls">
+        <button id="play-route" type="button">Play</button>
+        <button id="pause-route" class="secondary" type="button">Pause</button>
+        <button id="replay-route" class="secondary" type="button">Replay</button>
+        <button id="toggle-stops" class="secondary" type="button">Show all stops</button>
+        <input id="route-step" type="range" min="0" value="0">
+      </div>
+      <div id="step-panel" class="step-panel">
+        <div>
+          <strong id="step-title">Route ready</strong>
+          <span id="step-detail">Press Play to review the trip from start to finish.</span>
+        </div>
+        <div id="step-cost" class="step-cost"></div>
+      </div>
+      <div id="empty-map" class="empty-map" style="display:none;">No coordinates were available for the selected stops, so the map route could not be drawn.</div>
+
+      <h2 class="section-title">Cost Summary</h2>
+      <div class="cost-grid"><div class="cost-chip"><span>Transport</span><strong>18021 CNY</strong></div><div class="cost-chip"><span>Hotels</span><strong>31241 CNY</strong></div><div class="cost-chip"><span>Food</span><strong>17157 CNY</strong></div><div class="cost-chip"><span>Attractions</span><strong>2880 CNY</strong></div><div class="cost-chip"><span>Total</span><strong>69300 CNY</strong></div></div>
+
+      <h2 class="section-title">Daily Checklist</h2>
+      <section class="day-card"><div class="day-head"><div><p>Day 1</p><h2>2026-09-18 | Singapore</h2></div><strong>12816 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Marina Bay Sands Singapore</strong><span>5207 CNY</span></div><ul class="event-list"><li><span class="time">09:30 - 16:25</span><span class="event-name">Flight Beijing -&gt; Singapore</span><span class="event-type">Flight (Economy) x2</span><span class="cost">5331 CNY total</span></li><li><span class="time">16:55 - 17:55</span><span class="event-name">Transfer SIN -&gt; Marina Bay Sands Singapore for check-in</span><span class="event-type">Transfer</span><span class="cost">600 CNY</span></li><li><span class="time">17:55 - 18:10</span><span class="event-name">Check-in Marina Bay Sands Singapore</span><span class="event-type">Checkin</span><span class="cost">0 CNY</span></li><li><span class="time">18:10 - 18:19</span><span class="event-name">Transfer Marina Bay Sands Singapore -&gt; Artemis Grill &amp; Sky Bar</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:19 - 19:19</span><span class="event-name">Artemis Grill &amp; Sky Bar</span><span class="event-type">Meal</span><span class="cost">1188 CNY</span></li><li><span class="time">19:19 - 19:28</span><span class="event-name">Transfer Artemis Grill &amp; Sky Bar -&gt; Cloud Forest</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">19:28 - 20:58</span><span class="event-name">Cloud Forest</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">20:58 - 21:13</span><span class="event-name">Return to Marina Bay Sands Singapore</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 2</p><h2>2026-09-19 | Singapore</h2></div><strong>9250 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Marina Bay Sands Singapore</strong><span>5207 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Marina Bay Sands Singapore</span><span class="event-type">Meal</span><span class="cost">767 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -&gt; Supertree Grove</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Supertree Grove</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Supertree Grove before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Supertree Grove before lunch -&gt; BYD Boat Quay 1826</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">BYD Boat Quay 1826</span><span class="event-type">Meal</span><span class="cost">719 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer BYD Boat Quay 1826 -&gt; Gardens by the Bay</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">14:32 - 16:02</span><span class="event-name">Gardens by the Bay</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">16:02 - 16:11</span><span class="event-name">Transfer Gardens by the Bay -&gt; Flower Dome</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">16:11 - 17:41</span><span class="event-name">Flower Dome</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">17:41 - 17:50</span><span class="event-name">Transfer Flower Dome -&gt; Odette</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Odette</span><span class="event-type">Meal</span><span class="cost">1167 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Odette -&gt; SkyPark Observation Deck</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">SkyPark Observation Deck</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Marina Bay Sands Singapore</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 3</p><h2>2026-09-20 | Singapore</h2></div><strong>9430 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Marina Bay Sands Singapore</strong><span>5207 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Marina Bay Sands Singapore</span><span class="event-type">Meal</span><span class="cost">767 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -&gt; Merlion</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Merlion</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Merlion before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Merlion before lunch -&gt; Restaurant JAG</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Restaurant JAG</span><span class="event-type">Meal</span><span class="cost">1188 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Restaurant JAG -&gt; Fort Canning Park</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">14:32 - 16:02</span><span class="event-name">Fort Canning Park</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">16:02 - 16:11</span><span class="event-name">Transfer Fort Canning Park -&gt; Merlion Park</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">16:11 - 17:41</span><span class="event-name">Merlion Park</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">17:41 - 17:50</span><span class="event-name">Transfer Merlion Park -&gt; JAAN By Kirk Westaway</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">JAAN By Kirk Westaway</span><span class="event-type">Meal</span><span class="cost">1188 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Marina Bay Sands Singapore</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 4</p><h2>2026-09-21 | Singapore</h2></div><strong>9209 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Marina Bay Sands Singapore</strong><span>5207 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Marina Bay Sands Singapore</span><span class="event-type">Meal</span><span class="cost">767 CNY</span></li><li><span class="time">08:40 - 08:49</span><span class="event-name">Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -&gt; Singapore Flyer</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">08:49 - 10:19</span><span class="event-name">Singapore Flyer</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">10:19 - 11:51</span><span class="event-name">Local area walk near Singapore Flyer before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Singapore Flyer before lunch -&gt; Lime Restaurant</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Lime Restaurant</span><span class="event-type">Meal</span><span class="cost">1110 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Lime Restaurant -&gt; National Museum of Singapore</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">14:32 - 16:02</span><span class="event-name">National Museum of Singapore</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">16:02 - 16:11</span><span class="event-name">Transfer National Museum of Singapore -&gt; National Gallery Singapore</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">16:11 - 17:41</span><span class="event-name">National Gallery Singapore</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">17:41 - 17:50</span><span class="event-name">Transfer National Gallery Singapore -&gt; Flutes</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Flutes</span><span class="event-type">Meal</span><span class="cost">1045 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Return to Marina Bay Sands Singapore</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 5</p><h2>2026-09-22 | Singapore</h2></div><strong>10146 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Marina Bay Sands Singapore</strong><span>5207 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Marina Bay Sands Singapore</span><span class="event-type">Meal</span><span class="cost">767 CNY</span></li><li><span class="time">08:40 - 09:00</span><span class="event-name">Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -&gt; Fort Siloso</span><span class="event-type">Transfer</span><span class="cost">200 CNY</span></li><li><span class="time">09:00 - 10:30</span><span class="event-name">Fort Siloso</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">10:30 - 10:46</span><span class="event-name">Transfer Fort Siloso -&gt; Cloudstreet</span><span class="event-type">Transfer</span><span class="cost">160 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Cloudstreet</span><span class="event-type">Meal</span><span class="cost">1167 CNY</span></li><li><span class="time">13:00 - 13:25</span><span class="event-name">Transfer Cloudstreet -&gt; East Coast Park</span><span class="event-type">Transfer</span><span class="cost">250 CNY</span></li><li><span class="time">13:25 - 14:55</span><span class="event-name">East Coast Park</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">14:55 - 15:42</span><span class="event-name">Transfer East Coast Park -&gt; Hell&#x27;s Museum</span><span class="event-type">Transfer</span><span class="cost">470 CNY</span></li><li><span class="time">15:42 - 17:12</span><span class="event-name">Hell&#x27;s Museum</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">17:12 - 17:35</span><span class="event-name">Transfer Hell&#x27;s Museum -&gt; Gotti Italiano</span><span class="event-type">Transfer</span><span class="cost">230 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Gotti Italiano</span><span class="event-type">Meal</span><span class="cost">756 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Gotti Italiano -&gt; SkyPark Observation Deck</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">SkyPark Observation Deck</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Marina Bay Sands Singapore</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 6</p><h2>2026-09-23 | Singapore</h2></div><strong>10384 CNY</strong></div><div class="hotel-line">Hotel night: <strong>Marina Bay Sands Singapore</strong><span>5207 CNY</span></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Marina Bay Sands Singapore</span><span class="event-type">Meal</span><span class="cost">767 CNY</span></li><li><span class="time">08:40 - 09:47</span><span class="event-name">Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -&gt; Singapore Discovery Centre</span><span class="event-type">Transfer</span><span class="cost">670 CNY</span></li><li><span class="time">09:47 - 11:17</span><span class="event-name">Singapore Discovery Centre</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">11:17 - 12:16</span><span class="event-name">Transfer Singapore Discovery Centre -&gt; NOX - Dine in the Dark</span><span class="event-type">Transfer</span><span class="cost">590 CNY</span></li><li><span class="time">12:16 - 13:16</span><span class="event-name">NOX - Dine in the Dark</span><span class="event-type">Meal</span><span class="cost">1078 CNY</span></li><li><span class="time">13:16 - 13:43</span><span class="event-name">Transfer NOX - Dine in the Dark -&gt; Lee Kong Chian Natural History Museum, Singapore</span><span class="event-type">Transfer</span><span class="cost">270 CNY</span></li><li><span class="time">13:43 - 15:13</span><span class="event-name">Lee Kong Chian Natural History Museum, Singapore</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">15:13 - 17:34</span><span class="event-name">Local area walk near Lee Kong Chian Natural History Museum, Singapore before dinner</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">17:34 - 18:00</span><span class="event-name">Transfer Local area walk near Lee Kong Chian Natural History Museum, Singapore before dinner -&gt; Restaurant Fiz</span><span class="event-type">Transfer</span><span class="cost">260 CNY</span></li><li><span class="time">18:00 - 19:00</span><span class="event-name">Restaurant Fiz</span><span class="event-type">Meal</span><span class="cost">762 CNY</span></li><li><span class="time">19:00 - 19:15</span><span class="event-name">Transfer Restaurant Fiz -&gt; The Helix Bridge</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li><li><span class="time">19:15 - 21:00</span><span class="event-name">The Helix Bridge</span><span class="event-type">Poi</span><span class="cost">160 CNY</span></li><li><span class="time">21:00 - 21:15</span><span class="event-name">Return to Marina Bay Sands Singapore</span><span class="event-type">Transfer</span><span class="cost">150 CNY</span></li></ul></section><section class="day-card"><div class="day-head"><div><p>Day 7</p><h2>2026-09-24 | Singapore</h2></div><strong>8066 CNY</strong></div><ul class="event-list"><li><span class="time">08:00 - 08:40</span><span class="event-name">Hotel breakfast cafe at Marina Bay Sands Singapore</span><span class="event-type">Meal</span><span class="cost">767 CNY</span></li><li><span class="time">08:40 - 11:51</span><span class="event-name">Local area walk near Hotel breakfast cafe at Marina Bay Sands Singapore before lunch</span><span class="event-type">Poi</span><span class="cost">0 CNY</span></li><li><span class="time">11:51 - 12:00</span><span class="event-name">Transfer Local area walk near Hotel breakfast cafe at Marina Bay Sands Singapore before lunch -&gt; Artemis Grill &amp; Sky Bar</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">12:00 - 13:00</span><span class="event-name">Artemis Grill &amp; Sky Bar</span><span class="event-type">Meal</span><span class="cost">1188 CNY</span></li><li><span class="time">13:00 - 13:09</span><span class="event-name">Transfer Artemis Grill &amp; Sky Bar -&gt; Marina Bay Sands Singapore</span><span class="event-type">Transfer</span><span class="cost">90 CNY</span></li><li><span class="time">14:15 - 14:30</span><span class="event-name">Check-out Marina Bay Sands Singapore</span><span class="event-type">Checkout</span><span class="cost">0 CNY</span></li><li><span class="time">14:30 - 15:30</span><span class="event-name">Transfer Marina Bay Sands Singapore -&gt; SIN</span><span class="event-type">Transfer</span><span class="cost">600 CNY</span></li><li><span class="time">17:00 - 23:55</span><span class="event-name">Flight Singapore -&gt; Beijing</span><span class="event-type">Flight (Economy) x2</span><span class="cost">5331 CNY total</span></li></ul></section>
+    </div>
+  </main>
+  <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" crossorigin=""></script>
+  <script>
+    const routePoints = [{"lat": 39.9075, "lng": 116.40323, "day": 0, "date": "", "city": "Beijing", "name": "Start: Beijing", "type": "origin", "time": "", "cost": 0, "route_point": true}, {"lat": 1.28967, "lng": 103.85007, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Fly Beijing (PEK) -> Singapore (SIN) [Economy]", "type": "flight", "time": "", "cost": 5331, "route_point": true}, {"lat": 1.28967, "lng": 103.85607, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Day 1.2 Transfer SIN -> Marina Bay Sands Singapore for check-in", "type": "transfer", "time": "16:55-17:55", "cost": 600, "estimated_coord": true}, {"lat": 1.2837574999999999, "lng": 103.8651065, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Day 1.3 Check-in Marina Bay Sands Singapore", "type": "checkin", "time": "17:55-18:10", "cost": 0, "estimated_coord": false}, {"lat": 1.2937229235461658, "lng": 103.84564577004113, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Day 1.4 Transfer Marina Bay Sands Singapore -> Artemis Grill & Sky Bar", "type": "transfer", "time": "18:10-18:19", "cost": 90, "estimated_coord": true}, {"lat": 1.2820532, "lng": 103.8561211, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Day 1.5 Artemis Grill & Sky Bar", "type": "meal", "time": "18:19-19:19", "cost": 1188, "estimated_coord": false}, {"lat": 1.2836929780753523, "lng": 103.85059460357631, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Day 1.6 Transfer Artemis Grill & Sky Bar -> Cloud Forest", "type": "transfer", "time": "19:19-19:28", "cost": 90, "estimated_coord": true}, {"lat": 1.2838676999999998, "lng": 103.8660024, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Day 1.7 Cloud Forest", "type": "poi", "time": "19:28-20:58", "cost": 160, "estimated_coord": false}, {"lat": 1.294431649608445, "lng": 103.85372057433925, "day": 1, "date": "2026-09-18", "city": "Singapore", "name": "Day 1.8 Return to Marina Bay Sands Singapore", "type": "transfer", "time": "20:58-21:13", "cost": 150, "estimated_coord": true}, {"lat": 1.2878104235461656, "lng": 103.85468227004112, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.1 Hotel breakfast cafe at Marina Bay Sands Singapore", "type": "meal", "time": "08:00-08:40", "cost": 767, "estimated_coord": true}, {"lat": 1.2886248109742118, "lng": 103.8441617363041, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.2 Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -> Supertree Grove", "type": "transfer", "time": "08:40-08:49", "cost": 90, "estimated_coord": true}, {"lat": 1.2819616999999999, "lng": 103.86990569999999, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.3 Supertree Grove", "type": "poi", "time": "08:49-10:19", "cost": 160, "estimated_coord": false}, {"lat": 1.2860146235461656, "lng": 103.85948147004112, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.4 Local area walk near Supertree Grove before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 1.286449735925079, "lng": 103.85513259807686, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.5 Transfer Local area walk near Supertree Grove before lunch -> BYD Boat Quay 1826", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 1.2862228, "lng": 103.8498206, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.6 BYD Boat Quay 1826", "type": "meal", "time": "12:00-13:00", "cost": 719, "estimated_coord": false}, {"lat": 1.2954642519576978, "lng": 103.84851223100213, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.7 Transfer BYD Boat Quay 1826 -> Gardens by the Bay", "type": "transfer", "time": "13:00-13:09", "cost": 90, "estimated_coord": true}, {"lat": 1.2815683, "lng": 103.8636132, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.8 Gardens by the Bay", "type": "poi", "time": "14:32-16:02", "cost": 160, "estimated_coord": false}, {"lat": 1.284345229708098, "lng": 103.84730471134627, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.9 Transfer Gardens by the Bay -> Flower Dome", "type": "transfer", "time": "16:02-16:11", "cost": 90, "estimated_coord": true}, {"lat": 1.2846292, "lng": 103.86469749999999, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.10 Flower Dome", "type": "poi", "time": "16:11-17:41", "cost": 160, "estimated_coord": false}, {"lat": 1.2937868349176167, "lng": 103.86134171993358, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.11 Transfer Flower Dome -> Odette", "type": "transfer", "time": "17:41-17:50", "cost": 90, "estimated_coord": true}, {"lat": 1.2897067, "lng": 103.8514433, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.12 Odette", "type": "meal", "time": "18:00-19:00", "cost": 1167, "estimated_coord": false}, {"lat": 1.2942482657910614, "lng": 103.83897768363477, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.13 Transfer Odette -> SkyPark Observation Deck", "type": "transfer", "time": "19:00-19:15", "cost": 150, "estimated_coord": true}, {"lat": 1.2852044, "lng": 103.8670313, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.14 SkyPark Observation Deck", "type": "poi", "time": "19:15-21:00", "cost": 160, "estimated_coord": false}, {"lat": 1.2788013981915605, "lng": 103.85515659952519, "day": 2, "date": "2026-09-19", "city": "Singapore", "name": "Day 2.15 Return to Marina Bay Sands Singapore", "type": "transfer", "time": "21:00-21:15", "cost": 150, "estimated_coord": true}, {"lat": 1.277780478075352, "lng": 103.8596311035763, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.1 Hotel breakfast cafe at Marina Bay Sands Singapore", "type": "meal", "time": "08:00-08:40", "cost": 767, "estimated_coord": true}, {"lat": 1.30112013211957, "lng": 103.85366088769588, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.2 Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -> Merlion", "type": "transfer", "time": "08:40-08:49", "cost": 90, "estimated_coord": true}, {"lat": 1.2867891999999999, "lng": 103.86050139999999, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.3 Merlion", "type": "poi", "time": "08:49-10:19", "cost": 160, "estimated_coord": false}, {"lat": 1.2908421235461656, "lng": 103.85007717004112, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.4 Local area walk near Merlion before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 1.283652595956311, "lng": 103.83968776283382, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.5 Transfer Local area walk near Merlion before lunch -> Restaurant JAG", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 1.2911017999999999, "lng": 103.8402617, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.6 Restaurant JAG", "type": "meal", "time": "12:00-13:00", "cost": 1188, "estimated_coord": false}, {"lat": 1.2870939942953288, "lng": 103.8617902472077, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.7 Transfer Restaurant JAG -> Fort Canning Park", "type": "transfer", "time": "13:00-13:09", "cost": 90, "estimated_coord": true}, {"lat": 1.2943875999999999, "lng": 103.8458033, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.8 Fort Canning Park", "type": "poi", "time": "14:32-16:02", "cost": 160, "estimated_coord": false}, {"lat": 1.2994863512479622, "lng": 103.84316788089232, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.9 Transfer Fort Canning Park -> Merlion Park", "type": "transfer", "time": "16:02-16:11", "cost": 90, "estimated_coord": true}, {"lat": 1.2867449, "lng": 103.85438719999999, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.10 Merlion Park", "type": "poi", "time": "16:11-17:41", "cost": 160, "estimated_coord": false}, {"lat": 1.2777694072786734, "lng": 103.8485286068376, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.11 Transfer Merlion Park -> JAAN By Kirk Westaway", "type": "transfer", "time": "17:41-17:50", "cost": 90, "estimated_coord": true}, {"lat": 1.2933447999999999, "lng": 103.85309, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.12 JAAN By Kirk Westaway", "type": "meal", "time": "18:00-19:00", "cost": 1188, "estimated_coord": false}, {"lat": 1.3012709525510409, "lng": 103.86383291756528, "day": 3, "date": "2026-09-20", "city": "Singapore", "name": "Day 3.13 Return to Marina Bay Sands Singapore", "type": "transfer", "time": "19:00-19:15", "cost": 150, "estimated_coord": true}, {"lat": 1.2885191496084447, "lng": 103.86275707433924, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.1 Hotel breakfast cafe at Marina Bay Sands Singapore", "type": "meal", "time": "08:00-08:40", "cost": 767, "estimated_coord": true}, {"lat": 1.2904124618060877, "lng": 103.83208531900571, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.2 Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -> Singapore Flyer", "type": "transfer", "time": "08:40-08:49", "cost": 90, "estimated_coord": true}, {"lat": 1.2892987999999999, "lng": 103.86913679999999, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.3 Singapore Flyer", "type": "poi", "time": "08:49-10:19", "cost": 160, "estimated_coord": false}, {"lat": 1.2933517235461656, "lng": 103.85871257004112, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.4 Local area walk near Singapore Flyer before lunch", "type": "poi", "time": "10:19-11:51", "cost": 0, "estimated_coord": true}, {"lat": 1.2769741068603573, "lng": 103.86282987058661, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.5 Transfer Local area walk near Singapore Flyer before lunch -> Lime Restaurant", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 1.2854557, "lng": 103.8466198, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.6 Lime Restaurant", "type": "meal", "time": "12:00-13:00", "cost": 1110, "estimated_coord": false}, {"lat": 1.3076507217882396, "lng": 103.84923714708746, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.7 Transfer Lime Restaurant -> National Museum of Singapore", "type": "transfer", "time": "13:00-13:09", "cost": 90, "estimated_coord": true}, {"lat": 1.296613, "lng": 103.84850910000002, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.8 National Museum of Singapore", "type": "poi", "time": "14:32-16:02", "cost": 160, "estimated_coord": false}, {"lat": 1.2758489438004492, "lng": 103.8385383736824, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.9 Transfer National Museum of Singapore -> National Gallery Singapore", "type": "transfer", "time": "16:02-16:11", "cost": 90, "estimated_coord": true}, {"lat": 1.2902217, "lng": 103.85151669999999, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.10 National Gallery Singapore", "type": "poi", "time": "16:11-17:41", "cost": 160, "estimated_coord": false}, {"lat": 1.2920717885121724, "lng": 103.8679090417888, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.11 Transfer National Gallery Singapore -> Flutes", "type": "transfer", "time": "17:41-17:50", "cost": 90, "estimated_coord": true}, {"lat": 1.2973462999999998, "lng": 103.857383, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.12 Flutes", "type": "meal", "time": "18:00-19:00", "cost": 1045, "estimated_coord": false}, {"lat": 1.299949034636079, "lng": 103.8352936186111, "day": 4, "date": "2026-09-21", "city": "Singapore", "name": "Day 4.13 Return to Marina Bay Sands Singapore", "type": "transfer", "time": "19:00-19:15", "cost": 150, "estimated_coord": true}, {"lat": 1.2827123109742116, "lng": 103.8531982363041, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.1 Hotel breakfast cafe at Marina Bay Sands Singapore", "type": "meal", "time": "08:00-08:40", "cost": 767, "estimated_coord": true}, {"lat": 1.272109273826104, "lng": 103.85402232795268, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.2 Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -> Fort Siloso", "type": "transfer", "time": "08:40-09:00", "cost": 200, "estimated_coord": true}, {"lat": 1.259363, "lng": 103.8086242, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.3 Fort Siloso", "type": "poi", "time": "09:00-10:30", "cost": 160, "estimated_coord": false}, {"lat": 1.3104947053021214, "lng": 103.86200028285833, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.4 Transfer Fort Siloso -> Cloudstreet", "type": "transfer", "time": "10:30-10:46", "cost": 160, "estimated_coord": true}, {"lat": 1.2808405999999999, "lng": 103.8469588, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.5 Cloudstreet", "type": "meal", "time": "12:00-13:00", "cost": 1167, "estimated_coord": false}, {"lat": 1.2823732065377884, "lng": 103.82720612444992, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.6 Transfer Cloudstreet -> East Coast Park", "type": "transfer", "time": "13:00-13:25", "cost": 250, "estimated_coord": true}, {"lat": 1.3007841999999998, "lng": 103.9121866, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.7 East Coast Park", "type": "poi", "time": "13:25-14:55", "cost": 160, "estimated_coord": false}, {"lat": 1.2796061921109394, "lng": 103.87185806486984, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.8 Transfer East Coast Park -> Hell's Museum", "type": "transfer", "time": "14:55-15:42", "cost": 470, "estimated_coord": true}, {"lat": 1.2841013, "lng": 103.7816422, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.9 Hell's Museum", "type": "poi", "time": "15:42-17:12", "cost": 160, "estimated_coord": false}, {"lat": 1.3118083269165663, "lng": 103.8408020724358, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.10 Transfer Hell's Museum -> Gotti Italiano", "type": "transfer", "time": "17:12-17:35", "cost": 230, "estimated_coord": true}, {"lat": 1.280583, "lng": 103.8467982, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.11 Gotti Italiano", "type": "meal", "time": "18:00-19:00", "cost": 756, "estimated_coord": false}, {"lat": 1.2670854581612399, "lng": 103.84194974939221, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.12 Transfer Gotti Italiano -> SkyPark Observation Deck", "type": "transfer", "time": "19:00-19:15", "cost": 150, "estimated_coord": true}, {"lat": 1.2892573235461657, "lng": 103.85660707004112, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.13 SkyPark Observation Deck", "type": "poi", "time": "19:15-21:00", "cost": 160, "estimated_coord": true}, {"lat": 1.3008380752868758, "lng": 103.8713132129017, "day": 5, "date": "2026-09-22", "city": "Singapore", "name": "Day 5.14 Return to Marina Bay Sands Singapore", "type": "transfer", "time": "21:00-21:15", "cost": 150, "estimated_coord": true}, {"lat": 1.2805372359250788, "lng": 103.86416909807686, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.1 Hotel breakfast cafe at Marina Bay Sands Singapore", "type": "meal", "time": "08:00-08:40", "cost": 767, "estimated_coord": true}, {"lat": 1.2957844974164012, "lng": 103.8268619642937, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.2 Transfer Hotel breakfast cafe at Marina Bay Sands Singapore -> Singapore Discovery Centre", "type": "transfer", "time": "08:40-09:47", "cost": 670, "estimated_coord": true}, {"lat": 1.3326904, "lng": 103.67894319999999, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.3 Singapore Discovery Centre", "type": "poi", "time": "09:47-11:17", "cost": 160, "estimated_coord": false}, {"lat": 1.269484610495439, "lng": 103.86305268271772, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.4 Transfer Singapore Discovery Centre -> NOX - Dine in the Dark", "type": "transfer", "time": "11:17-12:16", "cost": 590, "estimated_coord": true}, {"lat": 1.281828, "lng": 103.8458368, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.5 NOX - Dine in the Dark", "type": "meal", "time": "12:16-13:16", "cost": 1078, "estimated_coord": false}, {"lat": 1.3192372136367811, "lng": 103.85514738887194, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.6 Transfer NOX - Dine in the Dark -> Lee Kong Chian Natural History Museum, Singapore", "type": "transfer", "time": "13:16-13:43", "cost": 270, "estimated_coord": true}, {"lat": 1.3014156, "lng": 103.7796549, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.7 Lee Kong Chian Natural History Museum, Singapore", "type": "poi", "time": "13:43-15:13", "cost": 160, "estimated_coord": false}, {"lat": 1.3054685235461656, "lng": 103.76923067004113, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.8 Local area walk near Lee Kong Chian Natural History Museum, Singapore before dinner", "type": "poi", "time": "15:13-17:34", "cost": 0, "estimated_coord": true}, {"lat": 1.2712976860900131, "lng": 103.82635380128282, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.9 Transfer Local area walk near Lee Kong Chian Natural History Museum, Singapore before dinner -> Restaurant Fiz", "type": "transfer", "time": "17:34-18:00", "cost": 260, "estimated_coord": true}, {"lat": 1.2796868, "lng": 103.8440099, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.10 Restaurant Fiz", "type": "meal", "time": "18:00-19:00", "cost": 762, "estimated_coord": false}, {"lat": 1.2871972335679758, "lng": 103.87996791675306, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.11 Transfer Restaurant Fiz -> The Helix Bridge", "type": "transfer", "time": "19:00-19:15", "cost": 150, "estimated_coord": true}, {"lat": 1.2874774, "lng": 103.86063259999999, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.12 The Helix Bridge", "type": "poi", "time": "19:15-21:00", "cost": 160, "estimated_coord": false}, {"lat": 1.3116890096866003, "lng": 103.82969444571499, "day": 6, "date": "2026-09-23", "city": "Singapore", "name": "Day 6.13 Return to Marina Bay Sands Singapore", "type": "transfer", "time": "21:00-21:15", "cost": 150, "estimated_coord": true}, {"lat": 39.91155292354617, "lng": 116.39280577004112, "day": 2, "date": "2026-09-24", "city": "Beijing", "name": "Fly Singapore (SIN) -> Beijing (PEK) [Economy]", "type": "flight", "time": "", "cost": 5331, "route_point": true, "estimated_coord": false}, {"lat": 1.2895517519576976, "lng": 103.85754873100213, "day": 7, "date": "2026-09-24", "city": "Singapore", "name": "Day 7.1 Hotel breakfast cafe at Marina Bay Sands Singapore", "type": "meal", "time": "08:00-08:40", "cost": 767, "estimated_coord": true}, {"lat": 1.2784327297080977, "lng": 103.85634121134626, "day": 7, "date": "2026-09-24", "city": "Singapore", "name": "Day 7.2 Local area walk near Hotel breakfast cafe at Marina Bay Sands Singapore before lunch", "type": "poi", "time": "08:40-11:51", "cost": 0, "estimated_coord": true}, {"lat": 1.2596703789920112, "lng": 103.85022079581236, "day": 7, "date": "2026-09-24", "city": "Singapore", "name": "Day 7.3 Transfer Local area walk near Hotel breakfast cafe at Marina Bay Sands Singapore before lunch -> Artemis Grill & Sky Bar", "type": "transfer", "time": "11:51-12:00", "cost": 90, "estimated_coord": true}, {"lat": 1.2861061235461657, "lng": 103.84569687004112, "day": 7, "date": "2026-09-24", "city": "Singapore", "name": "Day 7.4 Artemis Grill & Sky Bar", "type": "meal", "time": "12:00-13:00", "cost": 1188, "estimated_coord": true}, {"lat": 1.3118927309861326, "lng": 103.8702231691681, "day": 7, "date": "2026-09-24", "city": "Singapore", "name": "Day 7.5 Transfer Artemis Grill & Sky Bar -> Marina Bay Sands Singapore", "type": "transfer", "time": "13:00-13:09", "cost": 90, "estimated_coord": true}, {"lat": 1.2878743349176165, "lng": 103.87037821993357, "day": 7, "date": "2026-09-24", "city": "Singapore", "name": "Day 7.6 Check-out Marina Bay Sands Singapore", "type": "checkout", "time": "14:15-14:30", "cost": 0, "estimated_coord": true}, {"lat": 1.2868967969424272, "lng": 103.82019845258776, "day": 7, "date": "2026-09-24", "city": "Singapore", "name": "Day 7.7 Transfer Marina Bay Sands Singapore -> SIN", "type": "transfer", "time": "14:30-15:30", "cost": 600, "estimated_coord": true}];
+    const map = L.map('map');
+    L.tileLayer('https://{s}.basemaps.cartocdn.com/rastertiles/voyager/{z}/{x}/{y}{r}.png', {
+      maxZoom: 19,
+      attribution: '&copy; OpenStreetMap contributors &copy; CARTO'
+    }).addTo(map);
+
+    const playBtn = document.getElementById('play-route');
+    const pauseBtn = document.getElementById('pause-route');
+    const replayBtn = document.getElementById('replay-route');
+    const toggleStopsBtn = document.getElementById('toggle-stops');
+    const routeStep = document.getElementById('route-step');
+    const stepTitle = document.getElementById('step-title');
+    const stepDetail = document.getElementById('step-detail');
+    const stepCost = document.getElementById('step-cost');
+    let timer = null;
+    let currentIndex = 0;
+    let allStopsVisible = false;
+    let allStopLayer = L.layerGroup();
+    let completedLayer = L.layerGroup().addTo(map);
+    let progressLine = null;
+    let currentMarker = null;
+
+    function moneyAmount(value) {
+      return Math.round(Number(value) || 0);
+    }
+
+    function pointLabel(p, idx) {
+      return `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`;
+    }
+
+    function updateStep(idx, pan = true) {
+      if (!routePoints.length) return;
+      currentIndex = Math.max(0, Math.min(idx, routePoints.length - 1));
+      routeStep.value = currentIndex;
+      const p = routePoints[currentIndex];
+      const activeLatLng = [p.lat, p.lng];
+      const previous = currentIndex > 0 ? routePoints[currentIndex - 1] : null;
+      const isLocalStop = !['origin', 'flight', 'rental_car', 'drive', 'transfer', 'intercity', 'outbound', 'inbound'].includes(String(p.type || '').toLowerCase());
+      const sameCityAsPrevious = previous && String(previous.city || '').toLowerCase() === String(p.city || '').toLowerCase();
+      const segmentLatLngs = (previous && (!p.estimated_coord || !sameCityAsPrevious))
+        ? [[previous.lat, previous.lng], activeLatLng]
+        : [activeLatLng];
+
+      if (progressLine) progressLine.remove();
+      progressLine = L.polyline(segmentLatLngs, { color: '#d64f35', weight: 5, opacity: 0.95 }).addTo(map);
+
+      completedLayer.clearLayers();
+      if (previous) {
+        L.circleMarker([previous.lat, previous.lng], {
+          radius: 5,
+          color: '#007c89',
+          fillColor: '#ffffff',
+          fillOpacity: 1,
+          weight: 2
+        }).addTo(completedLayer).bindPopup(pointLabel(previous, currentIndex - 1));
+      }
+      L.circleMarker(activeLatLng, {
+        radius: 8,
+        color: '#d64f35',
+        fillColor: '#d64f35',
+        fillOpacity: 1,
+        weight: 2
+      }).addTo(completedLayer).bindPopup(pointLabel(p, currentIndex));
+
+      if (!currentMarker) {
+        currentMarker = L.marker(activeLatLng, {
+          icon: L.divIcon({
+            className: 'moving-dot',
+            html: '',
+            iconSize: [18, 18],
+            iconAnchor: [9, 9]
+          })
+        }).addTo(map);
+      } else {
+        currentMarker.setLatLng(activeLatLng);
+      }
+      currentMarker.bindPopup(pointLabel(p, currentIndex));
+      stepTitle.textContent = `${currentIndex + 1} / ${routePoints.length} | ${p.name}`;
+      stepDetail.textContent = `${p.date || ''} ${p.time || ''} | ${p.city} | ${p.type}${p.estimated_coord ? ' | approximate location' : ''}`;
+      stepCost.textContent = `${moneyAmount(p.cost)} CNY`;
+      if (pan) {
+        const targetZoom = isLocalStop ? (p.estimated_coord ? 13 : 16) : 10;
+        map.flyTo(activeLatLng, targetZoom, { animate: true, duration: 1.35 });
+      }
+    }
+
+    function startAnimation() {
+      if (!routePoints.length) return;
+      if (timer) clearInterval(timer);
+      timer = setInterval(() => {
+        if (currentIndex >= routePoints.length - 1) {
+          clearInterval(timer);
+          timer = null;
+          return;
+        }
+        updateStep(currentIndex + 1);
+      }, 2600);
+    }
+
+    function pauseAnimation() {
+      if (timer) clearInterval(timer);
+      timer = null;
+    }
+
+    function replayAnimation() {
+      pauseAnimation();
+      updateStep(0);
+      startAnimation();
+    }
+
+    function toggleAllStops() {
+      if (!routePoints.length) return;
+      allStopsVisible = !allStopsVisible;
+      toggleStopsBtn.textContent = allStopsVisible ? 'Hide all stops' : 'Show all stops';
+      allStopLayer.clearLayers();
+      if (!allStopsVisible) {
+        map.removeLayer(allStopLayer);
+        return;
+      }
+      routePoints.forEach((p, idx) => {
+        L.circleMarker([p.lat, p.lng], {
+          radius: 5,
+          color: '#18201f',
+          fillColor: p.estimated_coord ? '#f6c945' : '#ffffff',
+          fillOpacity: 0.9,
+          weight: 1.5
+        }).addTo(allStopLayer).bindPopup(pointLabel(p, idx));
+      });
+      allStopLayer.addTo(map);
+    }
+
+    if (!routePoints.length) {
+      map.setView([20, 0], 2);
+      document.getElementById('empty-map').style.display = 'block';
+    } else {
+      const latLngs = routePoints.map(p => [p.lat, p.lng]);
+      routeStep.max = String(routePoints.length - 1);
+      false && routePoints.forEach((p, idx) => {
+        L.marker([p.lat, p.lng]).addTo(map).bindPopup(
+          `<strong>${idx + 1}. ${p.name}</strong><br>${p.date} | ${p.city}<br>${p.time} | ${p.type}<br>${moneyAmount(p.cost)} CNY${p.estimated_coord ? '<br><em>Approximate location</em>' : ''}`
+        );
+      });
+      if (latLngs.length > 1) {
+        L.polyline(latLngs, { color: '#007c89', weight: 3, opacity: 0.28, dashArray: '8 8' }).addTo(map);
+      }
+      map.fitBounds(latLngs, { padding: [30, 30] });
+      updateStep(0, false);
+      map.setView(latLngs[0], 10);
+    }
+    playBtn.addEventListener('click', startAnimation);
+    pauseBtn.addEventListener('click', pauseAnimation);
+    replayBtn.addEventListener('click', replayAnimation);
+    toggleStopsBtn.addEventListener('click', toggleAllStops);
+    routeStep.addEventListener('input', (event) => {
+      pauseAnimation();
+      updateStep(Number(event.target.value));
+    });
+  </script>
+</body>
+</html>
