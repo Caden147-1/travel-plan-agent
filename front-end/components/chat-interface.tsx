@@ -760,7 +760,6 @@ export function ChatInterface() {
         </div>
 
         <div className="p-4 border-t border-sidebar-border text-xs text-muted-foreground">
-          Backend: {apiBase}
         </div>
       </aside>
 
@@ -915,7 +914,7 @@ export function ChatInterface() {
               </Button>
             </div>
             <p className="text-xs text-center text-muted-foreground mt-2">
-              The report is generated locally from your Python router pipeline.
+              The report is generated securely by the travel planning service.
             </p>
           </form>
         </div>
